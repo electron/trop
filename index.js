@@ -14,10 +14,10 @@ module.exports = (robot) => {
 
       // if it doesn't exist, create a new label
       if (label.status === 404) {
-        const newLabel = context.issues.createLabel({context.issue(
+        const newLabel = context.issues.createLabel(context.issue({
           name: column.name,
           color: randomColor()
-        )})
+        }))
       }
     })
 
