@@ -10,7 +10,8 @@
     "test": "jest && standard"
   },
   "dependencies": {
-    "probot": "^6.0.0"
+    "probot": "^6.0.0",
+    "randomcolor": "^0.5.3"
   },
   "devDependencies": {
     "jest": "^21.2.1",
