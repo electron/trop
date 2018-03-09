@@ -2,16 +2,15 @@ const randomColor = require('randomcolor')
 
 module.exports = (robot) => {
   // get watched board and create labels based on column names
-  robot.on('config-file-changed', async context => {
+  robot.on('push', async context => {
     const config = await context.config('config.yml')
+    const id = config.watchedProject.id
+    const columns = await context.projects.getProjectColumns({id})
 
     const data = {
       owner: context.payload.repository.owner.login,
       repo: context.payload.repository.name
     }
-
-    const id = config['watchedProject']['id']
-    const columns = await context.projects.getProjectColumns({id})
 
     // generate labels based on project column names
     columns.forEach(async column => {
@@ -22,8 +21,8 @@ module.exports = (robot) => {
         name: column.name
       })
 
-      // if it doesn't, create a new label
-      if (!label) {
+      // if it doesn't exist, create a new label
+      if (label.status === 404) {
         const newLabel = context.issues.createLabel({
           owner: data.owner,
           repo: data.repo,
@@ -37,7 +36,26 @@ module.exports = (robot) => {
   })
 
   robot.on('issues.labeled', async context => {
-    // see if any label relates to a column in the watch board
-    // add issue to column
+    const config = await context.config('config.yml')
+
+    const columns = await context.projects.getProjectColumns({id: config.watchedProjectproject.id})
+    const columnTitles = columns.filter(c => c.name)
+
+    const issue = context.payload.issue
+
+    let column
+    if (columnTitles.includes(issue.title)) {
+      // get the column to add the card to
+      column = columns.filter(c => issue.title === c.title)
+
+      // create project card for issue in the column
+      const card = await context.projects.createProjectCard({
+        column_id: column.id,
+        content_id: issue.id,
+        content_type: 'Issue'
+      })
+    }
+
+    robot.logger(`issue added to ${column.name} in ${config.watchedProject.name}`)
   })
 }
