@@ -5,12 +5,12 @@ module.exports = (robot) => {
   robot.on('push', async context => {
     const config = await context.config('config.yml')
     const id = config.watchedProject.id
-    const columns = await context.projects.getProjectColumns({context.repo(id)})
+    const columns = await context.projects.getProjectColumns(context.repo({id}))
 
     // generate labels based on project column names
     columns.forEach(async column => {
       // check if label already exists
-      const label = await context.issues.getLabel({context.issue(name: column.name)})
+      const label = await context.issues.getLabel(context.issue({name: column.name}))
 
       // if it doesn't exist, create a new label
       if (label.status === 404) {
