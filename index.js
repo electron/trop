@@ -16,11 +16,11 @@ module.exports = (robot) => {
         columns.data.forEach(async column => {
           try {
             // check if label already exists
-            const label = await context.github.issues.getLabel(context.issue({name: column.name}))
+            await context.github.issues.getLabel(context.issue({name: column.name}))
           } catch (err) {
             // make a new label with the column name
             const color = randomColor()
-            const newLabel = context.github.issues.createLabel(context.issue({
+            context.github.issues.createLabel(context.issue({
               name: column.name,
               color: color.substring(1) // trim off #
             }))
@@ -31,7 +31,10 @@ module.exports = (robot) => {
     }
   })
 
-  robot.on('issues.labeled', async context => {
+  robot.on('pull_request.labeled', async context => { checkBoardCards(context) })
+  robot.on('issues.labeled', async context => { checkBoardCards(context) })
+
+  async function checkBoardCards (context) {
     const config = await context.config('config.yml')
 
     if (config.watchedProject) {
@@ -40,21 +43,33 @@ module.exports = (robot) => {
 
       if (project) {
         const columns = await context.github.projects.getProjectColumns(context.repo({project_id: project.id}))
-        const issue = context.payload.issue
-        const label = context.payload.label
+        const item = context.payload.issue || context.payload.pull_request
+        const column = columns.data.find(column => column.name === context.payload.label.name)
 
-        columns.data.forEach(async column => {
-          if (column.name === label.name) {
-            // create project card for issue in the column
-            const card = await context.github.projects.createProjectCard({
+        if (column) {
+          try {
+            await context.github.projects.createProjectCard({
               column_id: column.id,
-              content_id: issue.id,
-              content_type: 'Issue'
+              content_id: item.id,
+              content_type: context.payload.issue ? 'Issue' : 'PullRequest'
             })
-            robot.logger(`issue added to ${column.name} in ${config.watchedProject.name}!`)
+          } catch (err) {
+            let existing
+
+            for (const column of columns.data) {
+              const cards = await context.github.projects.getProjectCards({column_id: column.id})
+              existing = cards.data.find(card => card.content_url === item.url)
+              if (existing) break
+            }
+
+            await context.github.projects.moveProjectCard({
+              column_id: column.id,
+              id: existing.id,
+              position: 'top'
+            })
           }
-        })
+        }
       }
     }
-  })
+  }
 }
