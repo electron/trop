@@ -34,26 +34,27 @@ module.exports = (robot) => {
   robot.on('issues.labeled', async context => {
     const config = await context.config('config.yml')
 
-    const columns = await context.github.projects.getProjectColumns({
-      id: config.watchedProjectproject.id
-    })
-    const columnTitles = columns.filter(c => c.name)
+    if (config.watchedProject) {
+      const projects = await context.github.projects.getRepoProjects(context.repo())
+      const project = projects.data.find(project => project.name === config.watchedProject.name)
 
-    const issue = context.payload.issue
+      if (project) {
+        const columns = await context.github.projects.getProjectColumns(context.repo({project_id: project.id}))
+        const issue = context.payload.issue
 
-    let column
-    if (columnTitles.includes(issue.title)) {
-      // get the column to add the card to
-      column = columns.filter(c => issue.title === c.title)
-
-      // create project card for issue in the column
-      const card = await context.github.projects.createProjectCard({
-        column_id: column.id,
-        content_id: issue.id,
-        content_type: 'Issue'
-      })
+        columns.data.forEach(async column => {
+          // add
+          if (column.title === issue.title) {
+            // create project card for issue in the column
+            const card = await context.github.projects.createProjectCard({
+              column_id: column.id,
+              content_id: issue.id,
+              content_type: 'Issue'
+            })
+            robot.logger(`issue added to ${column.name} in ${config.watchedProject.name}!`)
+          }
+        })
+      }
     }
-
-    robot.logger(`issue added to ${column.name} in ${config.watchedProject.name}`)
   })
 }
