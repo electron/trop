@@ -3,24 +3,15 @@ const randomColor = require('randomcolor')
 module.exports = (robot) => {
   // get watched board and create labels based on column names
   robot.on('push', async context => {
-    robot.log('HELLO')
     const config = await context.config('config.yml')
 
     if (config.watchedProject) {
       const projects = await context.github.projects.getRepoProjects(context.repo())
-
-      const project = projects.data.find(project => {
-        robot.log(`${project.name} ${config.watchedProject} ${project.name === config.watchedProject}`)
-        return project.name === config.watchedProject
-      })
-      robot.log(`NAME IS ${project.name}`)
+      const project = projects.data.find(project => project.name === config.watchedProject.name)
 
       if (project) {
         const id = config.watchedProject.id
-        robot.log(`ID IS ${id}`)
-
-        robot.log(context.github.projects)
-        const columns = await context.github.projects.getProjectColumns(context.repo({id}))
+        const columns = await context.github.projects.getProjectColumns(context.repo({project_id: id}))
 
         // generate labels based on project column names
         columns.forEach(async column => {
