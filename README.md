@@ -1,6 +1,6 @@
 # issue-board-tracking
 
-> a GitHub App built with [probot](https://github.com/probot/probot) that 
+> a GitHub App built with [probot](https://github.com/probot/probot) that adds issues with certain labels to project boards.
 
 ## Setup
 
