@@ -8,7 +8,11 @@ module.exports = (robot) => {
 
     if (config.watchedProject) {
       const projects = await context.github.projects.getRepoProjects(context.repo())
-      const project = projects.data.find(project => project.name === config.watchedProject)
+
+      const project = projects.data.find(project => {
+        robot.log(`${project.name} ${config.watchedProject} ${project.name === config.watchedProject}`)
+        return project.name === config.watchedProject
+      })
       robot.log(`NAME IS ${project.name}`)
 
       if (project) {
