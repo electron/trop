@@ -4,23 +4,34 @@ module.exports = (robot) => {
   // get watched board and create labels based on column names
   robot.on('push', async context => {
     const config = await context.config('config.yml')
-    const id = config.watchedProject.id
-    const columns = await context.github.projects.getProjectColumns(context.repo({id}))
 
-    // generate labels based on project column names
-    columns.forEach(async column => {
-      // check if label already exists
-      const label = await context.github.issues.getLabel(context.issue({name: column.name}))
+    if (config.watchedProject) {
+      const projects = await context.github.projects.getRepoProjects(context.repo())
+      const project = projects.data.find(project => project.name === config.watchedProject)
+      console.log(`NAME IS ${project.name}`)
 
-      // if it doesn't exist, create a new label
-      if (label.status === 404) {
-        const newLabel = context.github.issues.createLabel(context.issue({
-          name: column.name,
-          color: randomColor()
-        }))
+      if (project) {
+        const id = config.watchedProject.id
+        console.log(`ID IS ${id}`)
+
+        console.log(context.github.projects)
+        const columns = await context.github.projects.getProjectColumns(context.repo({id}))
+
+        // generate labels based on project column names
+        columns.forEach(async column => {
+          // check if label already exists
+          const label = await context.github.issues.getLabel(context.issue({name: column.name}))
+
+          // if it doesn't exist, create a new label
+          if (label.status === 404) {
+            const newLabel = context.github.issues.createLabel(context.issue({
+              name: column.name,
+              color: randomColor()
+            }))
+          }
+        })
       }
-    })
-
+    }
     robot.log('all labels created!')
   })
 
