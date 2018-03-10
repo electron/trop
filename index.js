@@ -41,10 +41,10 @@ module.exports = (robot) => {
       if (project) {
         const columns = await context.github.projects.getProjectColumns(context.repo({project_id: project.id}))
         const issue = context.payload.issue
+        const label = context.payload.label
 
         columns.data.forEach(async column => {
-          // add
-          if (column.title === issue.title) {
+          if (column.name === label.name) {
             // create project card for issue in the column
             const card = await context.github.projects.createProjectCard({
               column_id: column.id,
