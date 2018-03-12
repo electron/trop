@@ -1,78 +1,142 @@
+import * as GitHub from '@octokit/rest';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import * as pify from 'pify';
-import * as simpleGit from 'simple-git';
+import * as simpleGit from 'simple-git/promise';
 
-import { Probot, ProbotContext, Label, PullRequestEvent } from './Probot';
+import { Probot, ProbotContext, Label, PullRequestEvent, Repository } from './Probot';
 import queue from './Queue';
 
-const dir = path.resolve(__dirname, '..', '..', 'working');
-const getGit = () => simpleGit(dir);
+const baseDir = path.resolve(__dirname, '..', '..', 'working');
+const getGit = (slug: string) => simpleGit(path.resolve(baseDir, slug));
 
-export const ensureElectronUpToDate = async () => {
+const TROB_NAME = 'Electron Bot';
+const TROB_EMAIL = 'electron@github.com';
+
+export const initRepo = async (owner: string, repo: string) => {
+  const slug = `${owner}/${repo}`;
+  const dir = path.resolve(baseDir, slug);
   await fs.mkdirp(dir);
-  const git = getGit();
+  await fs.remove(dir);
+  await fs.mkdirp(dir);
+  const git = getGit(slug);
+  await git.clone(
+    `https://github.com/${slug}.git`,
+    '.'
+  );
 
-  if (!await fs.pathExists(path.resolve(dir, '.git'))) {
-    await fs.remove(dir);
-    await fs.mkdirp(dir);
-    await pify(git.clone.bind(git))(
-      'git@github.com:marshallofsound/electron.git',
-      '.'
-    );
-  }
-
-  try { await pify(git.raw.bind(git))(['cherry-pick', '--abort']); } catch (e) {}
-  await pify(git.reset.bind(git))('hard');
-  const status = await pify(git.status.bind(git))();
-
+  // Clean up scraps
+  try { await (git as any).raw(['cherry-pick', '--abort']); } catch (e) {}
+  await (git as any).reset('hard');
+  const status = await git.status();
   for (const file of status.not_added) {
     await fs.remove(path.resolve(dir, file));
   }
-
-  await pify(git.checkout.bind(git))('master');
-  await pify(git.pull.bind(git))();
+  await git.checkout('master');
+  await git.pull();
+  await git.addConfig('user.email', TROB_EMAIL);
+  await git.addConfig('user.name', TROB_NAME);
 }
 
 const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
 
-const labelToTargetBranch = (label: Label) => {
-  return label.name.replace(TARGET_LABEL_PREFIX, '');
+const labelToTargetBranch = (label: Label, targetLabelPrefix: string) => {
+  return label.name.replace(targetLabelPrefix, '');
 }
 
 const tokenFromContext = (robot: any, context: any) => {
-  return robot.cache.get(`app:${context.payload.installation.id}:token`);
+  return robot.cache.get(`app:${context.payload.installation.id}:token`) as string;
 }
 
-export const backportPR = (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
-  const targetBranch = labelToTargetBranch(label);
-  const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
+const getGitHub = () => {
+  const g = new GitHub();
+  g.authenticate({
+    type: 'token',
+    token: process.env.GITHUB_FORK_USER_TOKEN,
+  });
+  return g;
+}
 
-  robot.log(`Queuing ${bp}`)
+export const backportPR = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
+  const config = await context.config('config.yml');
+  const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
+  const mergedLabelPrefix = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
+
+  if (!label.name.startsWith(targetLabelPrefix)) return;
+  const base = context.payload.pull_request.base;
+  const head = context.payload.pull_request.base;
+  const slug = `${base.repo.owner.login}/${base.repo.name}`;
+  const targetBranch = labelToTargetBranch(label, targetLabelPrefix);  
+  const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
+  robot.log(`Queuing ${bp} for "${slug}"`);
+
+  const log = (...args: string[]) => robot.log(slug, ...args);
 
   queue.enterQueue(async () => {
-    robot.log(`Executing ${bp}`);
-
+    log(`Executing ${bp} for "${slug}"`);
     const pr = context.payload.pull_request;
-    await ensureElectronUpToDate();
+    // Set up empty repo on master
+    log('Setting up local repository');
+    await initRepo(base.repo.owner.login, base.repo.name);
+    log('Working directory cleaned');
+    const git = getGit(slug);
 
-    robot.log('Working directory cleaned')
+    // Fork repository to trob
+    log('forking base repo');
+    const gh = getGitHub();
+    const fork: Repository = (await gh.repos.fork({
+      owner: base.repo.owner.login,
+      repo: base.repo.name,
+    })).data;
+    let forkReady = false;
+    let attempt = 0;
+    while (!forkReady && attempt < 20) {
+      log(`testing fork - Attempt ${attempt + 1}/20`);
+      try {
+        const { data } = await gh.repos.getCommits({
+          owner: fork.owner.login,
+          repo: fork.name,
+        });
+        forkReady = data.length > 0;
+      } catch (err) {
+        // Ignore
+      }
+      attempt += 1;
+      if (!forkReady) await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+    if (attempt >= 20) {
+      log('fork wasn\'t ready fast enough, giving up');
+      throw new Error('Not ready in time');
+    }
+    log('fork ready');
 
-    const git = getGit();
+    // Set up remotes
+    log('setting up remotes');
+    await git.addRemote('target_repo', `https://github.com/${slug}.git`);
+    await git.addRemote('source_repo', `https://github.com/${head.repo.owner.login}/${head.repo.name}.git`);
+    await git.addRemote('fork', `https://${fork.owner.login}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${fork.owner.login}/${fork.name}.git`);
 
-    robot.log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
+    // Fetch remotes
+    log('fetching target remote');
+    await (git as any).raw(['fetch', 'target_repo']);
+    log('fetching source remote');
+    await (git as any).raw(['fetch', 'source_repo']);
+    log('fetching fork remote');
+    await (git as any).raw(['fetch', 'fork']);
 
+    // Get list of commits
+    log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
     const commits = (await context.github.pullRequests.getCommits(context.repo({
       number: pr.number,
     }))).data.map(commit => commit.sha);
 
+    // No commits == WTF
     if (commits.length === 0) {
-      robot.log('Found no commits to backport, aborting');
+      log('Found no commits to backport, aborting');
       return;
     } else if (commits.length >= 240) {
-      robot.log(`Way too many commits (${commits.length})... Giving up`);
-
+      // Over 240 commits is probably the limit from github so let's not bother
+      log(`Way to many commits (${commits.length})... Giving up`);
       await context.github.issues.createComment(context.repo({
         number: pr.number,
         body: `This PR has wayyyy too many commits to automatically backport, please do this manually`,
@@ -80,47 +144,34 @@ export const backportPR = (robot: Probot, context: ProbotContext<PullRequestEven
 
       return;
     }
-    robot.log(`Found ${commits.length} commits to backport`);
+    log(`Found ${commits.length} commits to backport`);
 
+    // Temp branch on the fork
     const tempBranch = `${targetBranch}-bp-${pr.title.replace(/ /g, '-').toLowerCase()}-${Date.now()}`;
+    await git.checkout(`fork/${targetBranch}`);
+    await git.pull('fork', targetBranch);
+    await git.checkoutBranch(tempBranch, `fork/${targetBranch}`);
+    log(`Checked out target: "fork/${targetBranch}" to temp: "${tempBranch}"`);
 
-    await pify(git.checkout.bind(git))(targetBranch);
-    await pify(git.pull.bind(git))();
-    await pify(git.checkoutBranch.bind(git))(tempBranch, targetBranch);
+    log('Starting the cherry picking');
+    await (git as any).raw(['cherry-pick', ...commits]);
+    log('Cherry picking complete, pushing to fork');
 
-    robot.log(`Checked out target: "${targetBranch}" to temp: "${tempBranch}"`);
-
-    const raw = pify(git.raw.bind(git));
-
-    robot.log('Starting the cherry picking');
-
-    let i = 1;
-    for (const commit of commits) {
-      console.log(await raw(['cherry-pick', commit]));
-      await raw(['commit', '--amend', '--no-edit', '--author', 'Electron Bot <electron@github.com>']);
-      robot.log(`Cherry picked: ${commit} (${i}/${commits.length})`);
-      i++;
-    }
-
-    robot.log('Cherry picking complete, pushing to remote');
-
-    await pify(git.push.bind(git))('origin', tempBranch, {
+    await git.push('fork', tempBranch, {
       '--set-upstream': true,
     });
+    log('Pushed up to fork');
 
-    robot.log('Pushed up to remote');
-
-    robot.log('Creating Pull Request');
-
+    log('Creating Pull Request');
     const newPr = await context.github.pullRequests.create(context.repo({
-      head: (await pify(git.status.bind(git))()).current,
+      head: `${fork.owner.login}:${tempBranch}`,
       base: targetBranch,
       title: `Backport - ${pr.title}`,
-      body: `Backport of #${pr.number}\n\nSee that PR for details.`
+      body: `Backport of #${pr.number}\n\nSee that PR for details.`,
+      maintainer_can_modify: false,
     }));
 
-    robot.log('Backport complete');
-
+    log('Adding handy comment and updating labels')
     await context.github.issues.createComment(context.repo({
       number: pr.number,
       body: `We have automatically backported this PR to "${targetBranch}", please check out #${newPr.data.number}`,
@@ -133,9 +184,9 @@ export const backportPR = (robot: Probot, context: ProbotContext<PullRequestEven
 
     await context.github.issues.addLabels(context.repo({
       number: pr.number,
-      labels: [label.name.replace(TARGET_LABEL_PREFIX, MERGED_LABEL_PREFIX)],
+      labels: [label.name.replace(targetLabelPrefix, mergedLabelPrefix)],
     }));
-
+    log('Backport complete');
   }, async () => {
     const pr = context.payload.pull_request;
 

@@ -15,17 +15,23 @@ interface GitHubUser {
   type: string;
 }
 
+export interface Repository {
+  owner: GitHubUser;
+  name: string;
+}
+
+interface Ref {
+  sha: string;
+  repo: Repository;
+}
+
 export interface PullRequest {
   id: number;
   labels: Label[];
   locked: boolean;
   active_lock_reason: string;
-  head: {
-    sha: string;
-  };
-  base: {
-    sha: string;
-  };
+  head: Ref;
+  base: Ref;
   merged: boolean;
   author: GitHubUser;
   number: number;
@@ -40,9 +46,15 @@ export interface PullRequestEvent {
   pull_request: PullRequest;
 }
 
+interface Config {
+  targetLabelPrefix: string;
+  mergedLabelPrefix: string;
+}
+
 export interface ProbotContext<T> {
   payload: T;
   github: GitHub;
+  config: (key: string) => Config;
   repo<U>(a: U): U & { repo: string, owner: string };
 }
 
