@@ -3,7 +3,7 @@ const {createRobot} = require('probot')
 const issueBoardTracker = require('../index.js')
 
 const pushEventPayload = require('./fixtures/push.json')
-// const issueLabeledEventPayload = require('./fixtures/issue.labeled.json')
+const issueLabeledEventPayload = require('./fixtures/issues.labeled.json')
 
 describe('issue-board-tracker', () => {
   let robot, github
@@ -29,7 +29,11 @@ describe('issue-board-tracker', () => {
             {'id': 13, 'name': 'done'}
           ]
         })),
-        createProjectCard: jest.fn().mockReturnValue(Promise.resolve({})),
+        getProjectCards: jest.fn().mockReturnValue(Promise.resolve({
+          data: [
+            {'id': 11, 'name': 'todo', 'content_url': 'my_cool_url'}
+          ]
+        })),
         moveProjectCard: jest.fn().mockReturnValue(Promise.resolve({}))
       },
       issues: {
@@ -40,7 +44,7 @@ describe('issue-board-tracker', () => {
     robot.auth = () => Promise.resolve(github)
   })
 
-  describe.only('push event', async () => {
+  describe('push event', async () => {
     it('does not create labels that already exist', async () => {
       github.issues.getLabel = jest.fn().mockImplementation(() => Promise.reject(new Error()))
 
@@ -50,14 +54,24 @@ describe('issue-board-tracker', () => {
       expect(github.issues.createLabel).toHaveBeenCalledTimes(3)
     })
     it('creates labels based on project column names', async () => {
-      github.issues.getLabel = jest.fn().mockReturnValue(Promise.resolve(
-        {'id': 14, 'name': 'todo'}
-      ))
+      github.issues.getLabel = jest.fn().mockReturnValue(Promise.resolve({'id': 14, 'name': 'todo'}))
 
       await robot.receive(pushEventPayload)
       expect(github.projects.getRepoProjects).toHaveBeenCalled()
       expect(github.issues.getLabel).toHaveBeenCalled()
       expect(github.issues.createLabel).toHaveBeenCalledTimes(0)
+    })
+  })
+
+  describe('issues.labeled event', async () => {
+    it('adds a new project card for a labeled issue', async () => {
+      github.projects.createProjectCard = jest.fn().mockReturnValue(Promise.resolve({}))
+      await robot.receive(issueLabeledEventPayload)
+
+      expect(github.projects.getRepoProjects).toHaveBeenCalled()
+      expect(github.projects.getProjectColumns).toHaveBeenCalled()
+      expect(github.projects.createProjectCard).toHaveBeenCalled()
+      expect(github.projects.moveProjectCard).toHaveBeenCalledTimes(0)
     })
   })
 })

@@ -1,11 +1,13 @@
 {
-  "body": {
+  "event": "issues",
+  "payload": {
     "action": "labeled",
     "issue": {
       "title": "testing",
       "user": {
         "login": "codebytere"
       },
+      "url": "my_cool_url",
       "labels": [{
         "name": "todo",
         "color": "8cb728"
