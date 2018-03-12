@@ -16,6 +16,7 @@ describe('issue-board-tracker', () => {
   let robot, github
 
   beforeEach(async () => {
+    process.env.GITHUB_FORK_USER_TOKEN = 'fake'
     robot = createRobot()
     await issueBoardTracker(robot)
 

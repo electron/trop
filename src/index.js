@@ -1,11 +1,11 @@
 import * as randomColor from 'randomcolor'
-import { backportPR, ensureElectronUpToDate } from './backport/utils'
+import { backportPR } from './backport/utils'
 
 module.exports = async (robot) => {
-  robot.log('initializing working directory')
-  await ensureElectronUpToDate()
-  robot.log('working directory ready')
-
+  if (!process.env.GITHUB_FORK_USER_TOKEN) {
+    robot.log.error('You must set GITHUB_FORK_USER_TOKEN')
+    process.exit(1)
+  }
   // get watched board and create labels based on column names
   robot.on('push', async context => {
     const config = await context.config('config.yml')
@@ -119,8 +119,9 @@ module.exports = async (robot) => {
   robot.on('pull_request.closed', context => {
     const payload = context.payload
     if (payload.pull_request.merged) {
-      // Just merged, let's queue up backports
       // Check if the author is us, if so stop processing
+      if (payload.pull_request.user.login.endsWith('[bot]')) return
+      // Just merged, let's queue up backports
       for (const label of payload.pull_request.labels) {
         backportPR(robot, context, label)
       }
