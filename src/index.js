@@ -5,7 +5,6 @@ module.exports = async (robot) => {
   if (!process.env.GITHUB_FORK_USER_TOKEN) {
     robot.log.error('You must set GITHUB_FORK_USER_TOKEN')
     process.exit(1)
-    return
   }
   // get watched board and create labels based on column names
   robot.on('push', async context => {
@@ -116,7 +115,7 @@ module.exports = async (robot) => {
     const payload = context.payload
     if (payload.pull_request.merged) {
       // Check if the author is us, if so stop processing
-      if (payload.pull_request.user.login.endsWith('[bot]')) return;
+      if (payload.pull_request.user.login.endsWith('[bot]')) return
       // Just merged, let's queue up backports
       for (const label of payload.pull_request.labels) {
         backportPR(robot, context, label)
