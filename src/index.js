@@ -61,8 +61,10 @@ module.exports = async (robot) => {
             // search through cards to see if the card already exists
             for (const column of columns.data) {
               const cards = await context.github.projects.getProjectCards({column_id: column.id})
+
+              const itemUrl = item.url.replace('/pulls/', '/issues/')
               existing = cards.data.find(card => {
-                const urlMatch = card => card.content_url === item.url
+                const urlMatch = card => card.content_url === itemUrl
                 const columnMatch = card.column_url === column.url
                 return columnMatch && urlMatch
               })
