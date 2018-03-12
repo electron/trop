@@ -9,8 +9,8 @@ import queue from './Queue';
 const baseDir = path.resolve(__dirname, '..', '..', 'working');
 const getGit = (slug: string) => simpleGit(path.resolve(baseDir, slug));
 
-const TROB_NAME = 'Electron Bot';
-const TROB_EMAIL = 'electron@github.com';
+const TROP_NAME = 'Electron Bot';
+const TROP_EMAIL = 'electron@github.com';
 
 export const initRepo = async (owner: string, repo: string) => {
   const slug = `${owner}/${repo}`;
@@ -33,8 +33,8 @@ export const initRepo = async (owner: string, repo: string) => {
   }
   await git.checkout('master');
   await git.pull();
-  await git.addConfig('user.email', TROB_EMAIL);
-  await git.addConfig('user.name', TROB_NAME);
+  await git.addConfig('user.email', TROP_EMAIL);
+  await git.addConfig('user.name', TROP_NAME);
 }
 
 const TARGET_LABEL_PREFIX = 'target/';
@@ -81,7 +81,7 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
     log('Working directory cleaned');
     const git = getGit(slug);
 
-    // Fork repository to trob
+    // Fork repository to trop
     log('forking base repo');
     const gh = getGitHub();
     const fork: Repository = (await gh.repos.fork({
