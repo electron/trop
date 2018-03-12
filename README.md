@@ -20,3 +20,8 @@ npm start
 # run the test suite
 npm test
 ```
+
+## How it Works
+
+This bot watches issues and pull requests for specific labels. When a certain label
+(e.g `todo`) is added to an issue or PR, the bot adds it to a specified (via `config.yml`) project board, and within that project board, a column that corresponds with that label.
