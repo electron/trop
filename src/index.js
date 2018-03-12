@@ -104,7 +104,7 @@ module.exports = async (robot) => {
 
             if (toDelete) await context.github.projects.deleteProjectCard({id: toDelete.id})
           } catch (err) {
-            
+            robot.log('Error: tried to delete card that doesn\'t exist')
           }
         }
       }
