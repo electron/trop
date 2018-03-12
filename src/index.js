@@ -53,8 +53,7 @@ module.exports = async (robot) => {
             // create project card for matching column
             await context.github.projects.createProjectCard({
               column_id: column.id,
-              content_id: item.id,
-              content_type: context.payload.issue ? 'Issue' : 'PullRequest'
+              note: `backport ${item.html_url} \n ${item.title}`
             })
           } catch (err) {
             let existing
@@ -62,7 +61,13 @@ module.exports = async (robot) => {
             // search through cards to see if the card already exists
             for (const column of columns.data) {
               const cards = await context.github.projects.getProjectCards({column_id: column.id})
-              existing = cards.data.find(card => card.content_url === item.url)
+
+              const itemUrl = item.url.replace('/pulls/', '/issues/')
+              existing = cards.data.find(card => {
+                const urlMatch = card => card.content_url === itemUrl
+                const columnMatch = card.column_url === column.url
+                return columnMatch && urlMatch
+              })
               if (existing) break
             }
 
