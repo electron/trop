@@ -19,6 +19,7 @@ describe('issue-board-tracker', () => {
         }))
       },
       projects: {
+        moveProjectCard: jest.fn().mockReturnValue(Promise.resolve({})),
         getRepoProjects: jest.fn().mockReturnValue(Promise.resolve({
           data: [{'id': 1, 'name': 'Radar'}]
         })),
@@ -33,8 +34,7 @@ describe('issue-board-tracker', () => {
           data: [
             {'id': 11, 'name': 'todo', 'content_url': 'my_cool_url'}
           ]
-        })),
-        moveProjectCard: jest.fn().mockReturnValue(Promise.resolve({}))
+        }))
       },
       issues: {
         createLabel: jest.fn().mockReturnValue(Promise.resolve({}))
@@ -72,6 +72,15 @@ describe('issue-board-tracker', () => {
       expect(github.projects.getProjectColumns).toHaveBeenCalled()
       expect(github.projects.createProjectCard).toHaveBeenCalled()
       expect(github.projects.moveProjectCard).toHaveBeenCalledTimes(0)
+    })
+    it('moves a project card when a new label is applied', async () => {
+      github.projects.createProjectCard = jest.fn().mockImplementation(() => Promise.reject(new Error()))
+      await robot.receive(issueLabeledEventPayload)
+
+      expect(github.projects.getRepoProjects).toHaveBeenCalled()
+      expect(github.projects.getProjectColumns).toHaveBeenCalled()
+      expect(github.projects.getProjectCards).toHaveBeenCalled()
+      expect(github.projects.moveProjectCard).toHaveBeenCalled()
     })
   })
 })

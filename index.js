@@ -31,8 +31,7 @@ module.exports = (robot) => {
     }
   })
 
-  robot.on('pull_request.labeled', async context => { checkBoardCards(context) })
-  robot.on('issues.labeled', async context => { checkBoardCards(context) })
+  robot.on(['pull_request.labeled', 'issues.labeled'], checkBoardCards)
 
   async function checkBoardCards (context) {
     const config = await context.config('config.yml')
