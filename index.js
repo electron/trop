@@ -30,9 +30,7 @@ module.exports = (robot) => {
     }
   })
 
-  robot.on(['pull_request.labeled', 'issues.labeled'], checkBoardCards)
-
-  async function checkBoardCards (context) {
+  robot.on(['pull_request.labeled', 'issues.labeled'], async context => {
     const config = await context.config('config.yml')
 
     if (config.watchedProject) {
@@ -69,5 +67,5 @@ module.exports = (robot) => {
         }
       }
     }
-  }
+  })
 }
