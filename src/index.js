@@ -1,4 +1,5 @@
-const randomColor = require('randomcolor')
+import randomColor from 'randomcolor'
+import { backportPR, ensureElectronUpToDate } from './backport/utils'
 
 module.exports = (robot) => {
   // get watched board and create labels based on column names
@@ -65,6 +66,21 @@ module.exports = (robot) => {
             })
           }
         }
+      }
+    }
+  })
+
+  robot.log('initializing working directory')
+  await ensureElectronUpToDate()
+  robot.log('working directory ready')
+
+  robot.on('pull_request.closed', context => {
+    const payload = context.payload
+    if (payload.pull_request.merged) {
+      // Just merged, let's queue up backports
+      // Check if the author is us, if so stop processing
+      for (const label of payload.pull_request.labels) {
+        backportPR(robot, context, label)
       }
     }
   })

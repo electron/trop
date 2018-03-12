@@ -6,17 +6,25 @@
   "license": "ISC",
   "repository": "https://github.com/codebytere/issue-board-tracking.git",
   "scripts": {
-    "start": "probot run ./index.js",
+    "prestart": "tsc",
+    "start": "probot run ./lib/index.js",
     "test": "jest && standard"
   },
   "dependencies": {
+    "fs-extra": "^5.0.0",
+    "pify": "^3.0.0",
     "probot": "^6.0.0",
-    "randomcolor": "^0.5.3"
+    "randomcolor": "^0.5.3",
+    "simple-git": "^1.92.0"
   },
   "devDependencies": {
+    "@types/fs-extra": "^5.0.1",
+    "@types/node": "^9.4.7",
+    "@types/pify": "^3.0.1",
     "jest": "^21.2.1",
     "smee-client": "^1.0.1",
-    "standard": "^10.0.3"
+    "standard": "^10.0.3",
+    "typescript": "^2.7.2"
   },
   "engines": {
     "node": ">= 7.7.0",
