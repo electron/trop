@@ -1,8 +1,8 @@
-[![Build Status](https://img.shields.io/travis/codebytere/issue-board-tracking.svg)](https://travis-ci.org/codebytere/issue-board-tracking)
+[![Build Status](https://img.shields.io/travis/codebytere/trop.svg)](https://travis-ci.org/codebytere/trop)
 
-# issue-board-tracking
+# trop
 
-> a GitHub App built with [probot](https://github.com/probot/probot) that adds issues with certain labels to project boards.
+> a GitHub App built with [probot](https://github.com/probot/probot) that automates the process of backporting features and bugfixes.
 
 ## Setup
 
@@ -20,8 +20,3 @@ npm start
 # run the test suite
 npm test
 ```
-
-## How it Works
-
-This bot watches issues and pull requests for specific labels. When a certain label
-(e.g `todo`) is added to an issue or PR, the bot adds it to a specified (via `config.yml`) project board, and within that project board, a column that corresponds with that label.
