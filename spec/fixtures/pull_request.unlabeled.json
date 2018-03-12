@@ -1,0 +1,31 @@
+{
+  "event": "pull_request",
+  "payload": {
+    "action": "unlabeled",
+    "number": 7,
+    "pull_request": {
+      "url": "my_cool_url",
+      "title": "CHANGE README",
+      "user": {
+        "login": "codebytere"
+      },
+      "labels": [{
+        "name": "todo",
+        "color": "8cb728"
+      }]
+    },
+    "label": {
+      "name": "todo",
+      "color": "8cb728"
+    },
+    "repository": {
+      "name": "probot-test",
+      "owner": {
+        "login": "codebytere"
+      }
+    },
+    "installation": {
+      "id": 103619
+    }
+  }
+}

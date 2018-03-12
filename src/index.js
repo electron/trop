@@ -104,7 +104,7 @@ module.exports = async (robot) => {
 
             if (toDelete) await context.github.projects.deleteProjectCard({id: toDelete.id})
           } catch (err) {
-
+            
           }
         }
       }
