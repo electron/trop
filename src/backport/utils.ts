@@ -54,10 +54,19 @@ export const backportPR = (robot: Probot, context: ProbotContext<PullRequestEven
     const git = getGit();
 
     robot.log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
-    const commits = (await pify(git.raw.bind(git))(['rev-list', '--ancestry-path', `${pr.base.sha}..${pr.head.sha}`]))
-      .trim().split('\n');
+    const commits = (await context.github.pullRequests.getCommits(context.repo({
+      number: pr.number,
+    }))).data.map(commit => commit.sha);
+
     if (commits.length === 0) {
       robot.log('Found no commits to backport, aborting');
+      return;
+    } else if (commits.length >= 240) {
+      robot.log(`Way to many commits (${commits.length})... Giving up`);
+      await context.github.issues.createComment(context.repo({
+        number: pr.number,
+        body: `This PR has wayyyy to many commits to automatically backport, please do this manually`,
+      }) as any);
       return;
     }
     robot.log(`Found ${commits.length} commits to backport`);

@@ -57,9 +57,10 @@ module.exports = async (robot) => {
           } catch (err) {
             let existing
 
+            const itemUrl = item.url.replace('/pulls/', '/issues/')
             for (const column of columns.data) {
               const cards = await context.github.projects.getProjectCards({column_id: column.id})
-              existing = cards.data.find(card => card.content_url === item.url)
+              existing = cards.data.find(card => card.content_url === itemUrl)
               if (existing) break
             }
 
