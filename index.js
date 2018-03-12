@@ -27,7 +27,6 @@ module.exports = (robot) => {
           }
         })
       }
-      robot.log('all labels created!')
     }
   })
 
