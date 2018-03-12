@@ -3,7 +3,7 @@ import { backportPR, ensureElectronUpToDate } from './backport/utils'
 
 module.exports = async (robot) => {
   robot.log('initializing working directory')
-  // await ensureElectronUpToDate()
+  await ensureElectronUpToDate()
   robot.log('working directory ready')
 
   // get watched board and create labels based on column names
