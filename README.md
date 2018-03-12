@@ -1,6 +1,6 @@
-# issue-board-tracking
+[![Build Status](https://img.shields.io/travis/codebytere/issue-board-tracking.svg)](https://travis-ci.org/codebytere/issue-board-tracking)
 
-	https://img.shields.io/travis/codebytere/issue-board-tracking.svg
+# issue-board-tracking
 
 > a GitHub App built with [probot](https://github.com/probot/probot) that adds issues with certain labels to project boards.
 
