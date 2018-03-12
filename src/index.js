@@ -1,7 +1,11 @@
-import randomColor from 'randomcolor'
+import * as randomColor from 'randomcolor'
 import { backportPR, ensureElectronUpToDate } from './backport/utils'
 
-module.exports = (robot) => {
+module.exports = async (robot) => {
+  robot.log('initializing working directory')
+  await ensureElectronUpToDate()
+  robot.log('working directory ready')
+
   // get watched board and create labels based on column names
   robot.on('push', async context => {
     const config = await context.config('config.yml')
@@ -69,10 +73,6 @@ module.exports = (robot) => {
       }
     }
   })
-
-  robot.log('initializing working directory')
-  await ensureElectronUpToDate()
-  robot.log('working directory ready')
 
   robot.on('pull_request.closed', context => {
     const payload = context.payload

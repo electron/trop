@@ -8,6 +8,7 @@
   "scripts": {
     "prestart": "tsc",
     "start": "probot run ./lib/index.js",
+    "pretest": "tsc",
     "test": "jest && standard"
   },
   "dependencies": {

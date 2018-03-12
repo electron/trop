@@ -6,7 +6,7 @@ import * as simpleGit from 'simple-git';
 import { Probot, ProbotContext, Label, PullRequestEvent } from './Probot';
 import queue from './Queue';
 
-const dir = path.resolve(__dirname, '..', 'working');
+const dir = path.resolve(__dirname, '..', '..', 'working');
 const getGit = () => simpleGit(dir);
 
 export const ensureElectronUpToDate = async () => {

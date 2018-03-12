@@ -1,6 +1,10 @@
 jest.mock('request')
+jest.mock('../lib/backport/utils.js', () => ({
+  ensureElectronUpToDate: async () => {},
+  backportPR: async () => {}
+}))
 const {createRobot} = require('probot')
-const issueBoardTracker = require('../index.js')
+const issueBoardTracker = require('../lib/index.js')
 
 const pushEventPayload = require('./fixtures/push.json')
 const issueLabeledEventPayload = require('./fixtures/issues.labeled.json')
@@ -9,9 +13,9 @@ const prLabeledEventPayload = require('./fixtures/pull_request.labeled.json')
 describe('issue-board-tracker', () => {
   let robot, github
 
-  beforeEach(() => {
+  beforeEach(async () => {
     robot = createRobot()
-    issueBoardTracker(robot)
+    await issueBoardTracker(robot)
 
     github = {
       repos: {
