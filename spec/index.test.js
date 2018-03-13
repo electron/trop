@@ -1,10 +1,13 @@
+const utils = require('../lib/backport/utils')
+
 jest.mock('request')
 jest.mock('../lib/backport/utils.js', () => ({
   ensureElectronUpToDate: async () => {},
   backportPR: async () => {}
 }))
 const {createRobot} = require('probot')
-const issueBoardTracker = require('../lib/index.js')
+
+const trop = require('../lib/index.js')
 
 const pushEvent = require('./fixtures/push.json')
 const issueLabeledEvent = require('./fixtures/issues.labeled.json')
@@ -19,12 +22,12 @@ describe('issue-board-tracker', () => {
   beforeEach(async () => {
     process.env.GITHUB_FORK_USER_TOKEN = 'fake'
     robot = createRobot()
-    await issueBoardTracker(robot)
+    await trop(robot)
 
     github = {
       repos: {
         getContent: jest.fn().mockReturnValue(Promise.resolve({
-          data: { 'content': Buffer.from('watchedProject:\n  name: Radar').toString('base64') }
+          data: { 'content': Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - ckerr').toString('base64') }
         }))
       },
       projects: {
@@ -52,6 +55,14 @@ describe('issue-board-tracker', () => {
     }
 
     robot.auth = () => Promise.resolve(github)
+  })
+
+  describe('config', async () => {
+    it('fetches config', async () => {
+      await robot.receive(issueLabeledEvent)
+      console.log(await github.repos.getContent())
+      expect(github.repos.getContent).toHaveBeenCalled()
+    })
   })
 
   describe('push event', async () => {
@@ -104,10 +115,10 @@ describe('issue-board-tracker', () => {
 
   describe('pull_request.closed event', () => {
     it('begins the backporting process if the PR was merged', async () => {
-      const backportAllLabels = jest.fn().mockReturnValue()
+      utils.backportPR = jest.fn()
       await robot.receive(prClosedEvent)
 
-      expect(backportAllLabels).toHaveBeenCalled()
+      expect(utils.backportPR).toHaveBeenCalled()
     })
   })
 
