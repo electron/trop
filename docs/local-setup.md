@@ -25,6 +25,13 @@ To run your app in development, you will need to configure a GitHub App to deliv
 5. Update your GitHub App’s Webhook URL to your [smee.io](https://smee.io/) URL.
 6. Run `$ npm start` to start the server.
 
+### Testing
+
+```sh
+# run the test suite
+$ npm test
+```
+
 ### Debugging
 
 1. Always run $ npm install and restart the server if package.json has changed.
