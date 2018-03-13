@@ -13,6 +13,7 @@ $ npm install
 To run your app in development, you will need to configure a GitHub App to deliver webhooks to your local machine.
 
 1. Go to [smee.io](https://smee.io/) and click **Start a new channel**.
+2. Create a `.env` file (example found [here](.example.env))
 2. Set `WEBHOOK_PROXY_URL` in `.env` to the URL that you are redirected to.
 3. [Create a new GitHub App](https://github.com/settings/apps/new)
   - **Webhook URL:** `Use your WEBHOOK_PROXY_URL` from the previous step.
@@ -24,6 +25,10 @@ To run your app in development, you will need to configure a GitHub App to deliv
 5. Start the app with APP_ID=1234 npm start where 1234 is your GitHub App’s ID
 5. Update your GitHub App’s Webhook URL to your [smee.io](https://smee.io/) URL.
 6. Run `$ npm start` to start the server.
+
+### Configuring a Bot User
+
+TODO
 
 ### Testing
 
