@@ -182,7 +182,7 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
     const newPr = (await context.github.pullRequests.create(context.repo({
       head: `${fork.owner.login}:${tempBranch}`,
       base: targetBranch,
-      title: `Backport - ${pr.title}`,
+      title: `Backport (${targetBranch}) - ${pr.title}`,
       body: `Backport of #${pr.number}\n\nSee that PR for details.`,
       maintainer_can_modify: false,
     }))).data;
