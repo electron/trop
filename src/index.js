@@ -1,5 +1,5 @@
 import * as randomColor from 'randomcolor'
-import { backportPR } from './backport/utils'
+import {backportPR} from './backport/utils'
 
 module.exports = async (robot) => {
   if (!process.env.GITHUB_FORK_USER_TOKEN) {
