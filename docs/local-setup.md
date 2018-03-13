@@ -18,11 +18,10 @@ To run your app in development, you will need to configure a GitHub App to deliv
 3. [Create a new GitHub App](https://github.com/settings/apps/new)
   - **Webhook URL:** `Use your WEBHOOK_PROXY_URL` from the previous step.
   - **Webhook Secret:** `development`
-  - Set the permissions you'd like your app to have and the events you'd like for it to listen to.  
-    - This will depend on what data you want your app to have access to.
-    - **Nota Bene:** For development we recommend enabling everything and then removing uncessary permissions later.
+  - **Permissions:** Dependent on your use case
+    - If you enable excess permissions during development, remember to remove them in production.
 4. Download the private key as `private-key.pem` into the repository’s directory
-5. Start the app with APP_ID=1234 npm start where 1234 is your GitHub App’s ID
+5. Set your `APP_ID` in your `.env` file
 5. Update your GitHub App’s Webhook URL to your [smee.io](https://smee.io/) URL.
 6. Run `$ npm start` to start the server.
 
@@ -39,7 +38,7 @@ $ npm test
 
 ### Debugging
 
-1. Always run $ npm install and restart the server if package.json has changed.
+1. Always run `$ npm install` and restart the server if package.json has changed.
   - To turn on verbose logging, start server by running: $ LOG_LEVEL=trace npm start
 
 2. `robot.log('some text')` is your friend.
