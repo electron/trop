@@ -1,0 +1,8 @@
+working
+node_modules
+lib
+spec
+docker
+Dockerfile
+runner.Dockerfile
+*.md
