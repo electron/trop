@@ -141,7 +141,7 @@ module.exports = async (robot) => {
     'MarshallOfSound',
     'ckerr',
     'codebytere'
-  ];
+  ]
 
   robot.on('issue_comment.created', async context => {
     const payload = context.payload
@@ -149,20 +149,20 @@ module.exports = async (robot) => {
 
     if (payload.comment.body === '#trop run backport' && WHITELIST.includes(payload.comment.user.login)) {
       const pr = (await context.github.pullRequests.get(context.repo({
-        number: payload.issue.number,
+        number: payload.issue.number
       }))).data
       if (pr.merged) {
         await context.github.issues.createComment(context.repo({
           number: payload.issue.number,
-          body: `The backport process for this PR has been manually initiated, here we go! :D`,
-        }));
+          body: `The backport process for this PR has been manually initiated, here we go! :D`
+        }))
 
         backportAllLabels(context, pr)
       } else {
         await context.github.issues.createComment(context.repo({
           number: payload.issue.number,
-          body: 'This PR has not been merged yet, what are you thinking...',
-        }));
+          body: 'This PR has not been merged yet, what are you thinking...'
+        }))
       }
     }
   })

@@ -9,7 +9,7 @@
     "prestart": "tsc",
     "start": "probot run ./lib/index.js",
     "pretest": "tsc",
-    "test": "jest && standard"
+    "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/ && standard"
   },
   "dependencies": {
     "fs-extra": "^5.0.0",
