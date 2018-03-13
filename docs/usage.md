@@ -23,6 +23,3 @@ Welcome! We're glad you want to try out `trop`.
 7. `trop` will move the cards it created for this backport into corresponding columns (ex. `merged/2-0-0`) in the specified `watchedProject` board.
 
 That's all there is to it! Congratulations, you did it! :tada:
-
-
-
