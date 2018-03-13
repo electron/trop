@@ -6,6 +6,7 @@
   "license": "ISC",
   "repository": "https://github.com/codebytere/trop.git",
   "scripts": {
+    "build": "tsc",
     "prestart": "tsc",
     "start": "probot run ./lib/index.js",
     "pretest": "tsc",
