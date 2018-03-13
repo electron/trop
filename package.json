@@ -1,26 +1,36 @@
 {
-  "name": "issue-board-tracking",
+  "name": "trop",
   "version": "1.0.0",
   "description": "",
   "author": "Shelley Vohr <shelley.vohr@gmail.com>",
   "license": "ISC",
   "repository": "https://github.com/codebytere/trop.git",
+  "private": true,
   "scripts": {
+    "build": "tsc",
     "prestart": "tsc",
+    "runner:start": "./docker/run",
+    "runner:stop": "./docker/stop",
     "start": "probot run ./lib/index.js",
     "pretest": "tsc",
     "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/ && standard"
   },
   "dependencies": {
+    "body-parser": "^1.18.2",
+    "express": "^4.16.3",
     "fs-extra": "^5.0.0",
+    "node-fetch": "^2.1.1",
     "pify": "^3.0.0",
     "probot": "^6.0.0",
     "randomcolor": "^0.5.3",
     "simple-git": "^1.92.0"
   },
   "devDependencies": {
+    "@types/body-parser": "^1.16.8",
+    "@types/express": "^4.11.1",
     "@types/fs-extra": "^5.0.1",
     "@types/node": "^9.4.7",
+    "@types/node-fetch": "^1.6.7",
     "@types/pify": "^3.0.1",
     "jest": "^21.2.1",
     "smee-client": "^1.0.1",
