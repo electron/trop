@@ -5,6 +5,6 @@ COPY . /app
 
 RUN yarn && yarn build
 
-CMD ["node", "/app/node_modules/probot/bin/probot-run.js", "/app/lib/index.js"]
+CMD ["node", "/app/node_modules/probot/bin/probot-run.js", "/app/lib/index.js", "--private-key=private.pem"]
 
 EXPOSE 3000
