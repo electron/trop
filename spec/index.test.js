@@ -24,7 +24,7 @@ describe('issue-board-tracker', () => {
     github = {
       repos: {
         getContent: jest.fn().mockReturnValue(Promise.resolve({
-          data: { 'content': Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - ckerr').toString('base64') }
+          data: { 'content': Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - codebytere').toString('base64') }
         }))
       },
       pullRequests: {
