@@ -7,6 +7,13 @@ module.exports = async (robot) => {
     process.exit(1)
   }
 
+  const backportAllLabels = (context, pr) => {
+    for (const label of pr.labels) {
+      context.payload.pull_request = context.payload.pull_request || pr
+      backportPR(robot, context, label)
+    }
+  }
+
   // get watched board and create labels based on column names
   robot.on('push', async context => {
     const config = await context.config('config.yml')
@@ -123,13 +130,7 @@ module.exports = async (robot) => {
     }
   })
 
-  const backportAllLabels = (context, pr) => {
-    for (const label of pr.labels) {
-      context.payload.pull_request = context.payload.pull_request || pr
-      backportPR(robot, context, label)
-    }
-  }
-
+  // backport pull requests to labeled targets when PR is merged
   robot.on('pull_request.closed', context => {
     const payload = context.payload
     if (payload.pull_request.merged) {
@@ -139,6 +140,7 @@ module.exports = async (robot) => {
     }
   })
 
+  // manually trigger backporting process on trigger comment phrase
   robot.on('issue_comment.created', async context => {
     const payload = context.payload
     const config = await context.config('config.yml')

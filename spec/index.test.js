@@ -13,7 +13,7 @@ const prUnlabeledEvent = require('./fixtures/pull_request.unlabeled.json')
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
 const issueCommentCreatedEvent = require('./fixtures/issue_comment.created.json')
 
-describe('issue-board-tracker', () => {
+describe('trop', () => {
   let robot, github
 
   beforeEach(async () => {
