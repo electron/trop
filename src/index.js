@@ -142,7 +142,7 @@ module.exports = async (robot) => {
   robot.on('issue_comment.created', async context => {
     const payload = context.payload
     const config = await context.config('config.yml')
-    const WHITELIST = config.backportWhitelist
+    const WHITELIST = config.authorizedUsers
 
     const isPullRequest = (issue) => issue.html_url.endsWith(`/pull/${issue.number}`)
 
