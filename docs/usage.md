@@ -2,18 +2,20 @@
 
 Welcome! We're glad you want to try out `trop`.
 
-#### What Does `trop` Do?
+### What Does `trop` Do?
 
-This bot is designed to automate the process of backporting to versioned release branches.
+`trop` automates backporting PRs to versioned release branches.
 
-To install this app and have it work properly you will need:
+#### You Will Need:
+
 1. A project board with column names corresponding to your backport labels
   - Ex. a column name of `target/2-0-0` will correspond to a label of `target/2-0-0`
-2. A `.github/config.yml` file with fields as specified in [this example config](.example.config)
+2. A `.github/config.yml` file. See [this example](.example.config).
 
-The flow of this app is as follows:
+#### Using `trop`:
+
 1. Open a bugfix or feature pull request to `master`
-2. Tag the pull request with one of the backport labels (ex. `target/2-0-0`)
+2. Add a backport label to the pull request (ex. `target/2-0-0`)
 3.`trop` will add this pull request into the corresponding column of the `watchedProject` in your config file.
 4. You or a co-contributor reviews and merges the pull request into `master`
 5. `trop` will automatically open pull requests containing `cherry-pick`s of the code into the backporting branches you specified in your labels (in this case, `2.0.0`).
