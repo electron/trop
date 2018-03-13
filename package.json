@@ -1,11 +1,13 @@
 {
-  "name": "issue-board-tracking",
+  "name": "trop",
   "version": "1.0.0",
   "description": "",
   "author": "Shelley Vohr <shelley.vohr@gmail.com>",
   "license": "ISC",
   "repository": "https://github.com/codebytere/trop.git",
+  "private": true,
   "scripts": {
+    "build": "tsc",
     "prestart": "tsc",
     "start": "probot run ./lib/index.js",
     "pretest": "tsc",
