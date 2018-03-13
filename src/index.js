@@ -139,14 +139,11 @@ module.exports = async (robot) => {
     }
   })
 
-  const WHITELIST = [
-    'MarshallOfSound',
-    'ckerr',
-    'codebytere'
-  ]
-
   robot.on('issue_comment.created', async context => {
     const payload = context.payload
+    const config = await context.config('config.yml')
+    const WHITELIST = config.backportWhitelist
+
     const isPullRequest = (issue) => issue.html_url.endsWith(`/pull/${issue.number}`)
 
     if (!isPullRequest(payload.issue)) return
