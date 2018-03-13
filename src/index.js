@@ -6,6 +6,7 @@ module.exports = async (robot) => {
     robot.log.error('You must set GITHUB_FORK_USER_TOKEN')
     process.exit(1)
   }
+
   // get watched board and create labels based on column names
   robot.on('push', async context => {
     const config = await context.config('config.yml')
@@ -32,6 +33,8 @@ module.exports = async (robot) => {
           }
         })
       }
+    } else {
+      robot.log.error('You haven\'t specified a watchedProject in your config!')
     }
   })
 
@@ -80,6 +83,8 @@ module.exports = async (robot) => {
           }
         }
       }
+    } else {
+      robot.log.error('You haven\'t specified a watchedProject in your config!')
     }
   })
 
@@ -109,10 +114,12 @@ module.exports = async (robot) => {
 
             if (toDelete) await context.github.projects.deleteProjectCard({id: toDelete.id})
           } catch (err) {
-            robot.log('Error: tried to delete card that doesn\'t exist')
+            robot.log.error('Tried to delete card that doesn\'t exist')
           }
         }
       }
+    } else {
+      robot.log.error('You haven\'t specified a watchedProject in your config!')
     }
   })
 
@@ -128,14 +135,9 @@ module.exports = async (robot) => {
     if (payload.pull_request.merged) {
       // Check if the author is us, if so stop processing
       if (payload.pull_request.user.login.endsWith('[bot]')) return
-      // Just merged, let's queue up backports
       backportAllLabels(context, payload.pull_request)
     }
   })
-
-  const isPullRequest = (issue) => {
-    return issue.html_url.endsWith(`/pull/${issue.number}`)
-  }
 
   const WHITELIST = [
     'MarshallOfSound',
@@ -145,24 +147,29 @@ module.exports = async (robot) => {
 
   robot.on('issue_comment.created', async context => {
     const payload = context.payload
+    const isPullRequest = (issue) => issue.html_url.endsWith(`/pull/${issue.number}`)
+
     if (!isPullRequest(payload.issue)) return
 
-    if (payload.comment.body === '#trop run backport' && WHITELIST.includes(payload.comment.user.login)) {
-      const pr = (await context.github.pullRequests.get(context.repo({
-        number: payload.issue.number
-      }))).data
-      if (pr.merged) {
-        await context.github.issues.createComment(context.repo({
-          number: payload.issue.number,
-          body: `The backport process for this PR has been manually initiated, here we go! :D`
-        }))
+    if (payload.comment.body === '/trop run backport') {
+      if (WHITELIST.includes(payload.comment.user.login)) {
+        const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
 
-        backportAllLabels(context, pr)
+        if (pr.merged) {
+          await context.github.issues.createComment(context.repo({
+            number: payload.issue.number,
+            body: `The backport process for this PR has been manually initiated, here we go! :D`
+          }))
+
+          backportAllLabels(context, pr)
+        } else {
+          await context.github.issues.createComment(context.repo({
+            number: payload.issue.number,
+            body: 'This PR has not been merged yet, and cannot be backported.'
+          }))
+        }
       } else {
-        await context.github.issues.createComment(context.repo({
-          number: payload.issue.number,
-          body: 'This PR has not been merged yet, what are you thinking...'
-        }))
+        robot.log.error('This user is not authorized to initiate backports')
       }
     }
   })
