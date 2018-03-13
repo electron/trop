@@ -169,6 +169,7 @@ module.exports = async (robot) => {
           }))
         }
       } else {
+        robot.log(`${WHITELIST} ${payload.comment.user.login}`)
         robot.log.error('This user is not authorized to initiate backports')
       }
     }
