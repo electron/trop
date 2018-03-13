@@ -116,14 +116,53 @@ module.exports = async (robot) => {
     }
   })
 
+  const backportAllLabels = (context, pr) => {
+    for (const label of pr.labels) {
+      context.payload.pull_request = context.payload.pull_request || pr
+      backportPR(robot, context, label)
+    }
+  }
+
   robot.on('pull_request.closed', context => {
     const payload = context.payload
     if (payload.pull_request.merged) {
       // Check if the author is us, if so stop processing
       if (payload.pull_request.user.login.endsWith('[bot]')) return
       // Just merged, let's queue up backports
-      for (const label of payload.pull_request.labels) {
-        backportPR(robot, context, label)
+      backportAllLabels(context, payload.pull_request)
+    }
+  })
+
+  const isPullRequest = (issue) => {
+    return issue.html_url.endsWith(`/pull/${issue.number}`)
+  }
+
+  const WHITELIST = [
+    'MarshallOfSound',
+    'ckerr',
+    'codebytere'
+  ]
+
+  robot.on('issue_comment.created', async context => {
+    const payload = context.payload
+    if (!isPullRequest(payload.issue)) return
+
+    if (payload.comment.body === '#trop run backport' && WHITELIST.includes(payload.comment.user.login)) {
+      const pr = (await context.github.pullRequests.get(context.repo({
+        number: payload.issue.number
+      }))).data
+      if (pr.merged) {
+        await context.github.issues.createComment(context.repo({
+          number: payload.issue.number,
+          body: `The backport process for this PR has been manually initiated, here we go! :D`
+        }))
+
+        backportAllLabels(context, pr)
+      } else {
+        await context.github.issues.createComment(context.repo({
+          number: payload.issue.number,
+          body: 'This PR has not been merged yet, what are you thinking...'
+        }))
       }
     }
   })

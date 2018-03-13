@@ -147,11 +147,12 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
     log(`Found ${commits.length} commits to backport`);
 
     // Temp branch on the fork
-    const tempBranch = `${targetBranch}-bp-${pr.title.replace(/ /g, '-').toLowerCase()}-${Date.now()}`;
-    await git.checkout(`fork/${targetBranch}`);
-    await git.pull('fork', targetBranch);
-    await git.checkoutBranch(tempBranch, `fork/${targetBranch}`);
-    log(`Checked out target: "fork/${targetBranch}" to temp: "${tempBranch}"`);
+    const sanitizedTitle = pr.title.replace(/ /g, '-').replace(/\:/g, '-').toLowerCase();
+    const tempBranch = `${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
+    await git.checkout(`target_repo/${targetBranch}`);
+    await git.pull('target_repo', targetBranch);
+    await git.checkoutBranch(tempBranch, `target_repo/${targetBranch}`);
+    log(`Checked out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
 
     log('Starting the cherry picking');
     await (git as any).raw(['cherry-pick', ...commits]);
@@ -163,18 +164,18 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
     log('Pushed up to fork');
 
     log('Creating Pull Request');
-    const newPr = await context.github.pullRequests.create(context.repo({
+    const newPr = (await context.github.pullRequests.create(context.repo({
       head: `${fork.owner.login}:${tempBranch}`,
       base: targetBranch,
       title: `Backport - ${pr.title}`,
       body: `Backport of #${pr.number}\n\nSee that PR for details.`,
       maintainer_can_modify: false,
-    }));
+    }))).data;
 
     log('Adding handy comment and updating labels')
     await context.github.issues.createComment(context.repo({
       number: pr.number,
-      body: `We have automatically backported this PR to "${targetBranch}", please check out #${newPr.data.number}`,
+      body: `We have automatically backported this PR to "${targetBranch}", please check out #${newPr.number}`,
     }) as any);
 
     await context.github.issues.removeLabel(context.repo({
@@ -185,6 +186,11 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
     await context.github.issues.addLabels(context.repo({
       number: pr.number,
       labels: [label.name.replace(targetLabelPrefix, mergedLabelPrefix)],
+    }));
+
+    await context.github.issues.addLabels(context.repo({
+      number: newPr.number,
+      labels: ['backport'],
     }));
     log('Backport complete');
   }, async () => {
