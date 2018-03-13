@@ -14,9 +14,7 @@ npm install
 npm start
 ```
 
-## Test
 
-```sh
-# run the test suite
-npm test
-```
+## Documentation
+
+Please see [How To](docs/how-to.md) for more details.
