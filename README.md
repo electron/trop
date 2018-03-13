@@ -17,4 +17,6 @@ npm start
 
 ## Documentation
 
-Please see [How To](docs/how-to.md) for more details.
+To learn how to use `trop`, see [usage](docs/usage.md).
+
+For information on setting up a local version of this GitHub App, see [local-setup](docs/loca-setup.md).
