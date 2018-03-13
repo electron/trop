@@ -5,6 +5,6 @@ echo Stopping existing
 $DIR/stop
 echo Building
 $DIR/build
-docker run -d --restart=always -p 127.0.0.1:4141:4141 trop-runner
+docker run -d --restart=always -p 4141:4141 --name trop-runner trop-runner
 
 echo Runner is now, well, running...
