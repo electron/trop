@@ -1,41 +1,12 @@
 import * as GitHub from '@octokit/rest';
+import fetch from 'node-fetch';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 
+import * as commands from './commands';
 import { Probot, ProbotContext, Label, PullRequestEvent, Repository } from './Probot';
 import queue from './Queue';
-
-const baseDir = path.resolve(__dirname, '..', '..', 'working');
-const getGit = (slug: string) => simpleGit(path.resolve(baseDir, slug));
-
-const TROP_NAME = 'Electron Bot';
-const TROP_EMAIL = 'electron@github.com';
-
-export const initRepo = async (owner: string, repo: string) => {
-  const slug = `${owner}/${repo}`;
-  const dir = path.resolve(baseDir, slug);
-  await fs.mkdirp(dir);
-  await fs.remove(dir);
-  await fs.mkdirp(dir);
-  const git = getGit(slug);
-  await git.clone(
-    `https://github.com/${slug}.git`,
-    '.'
-  );
-
-  // Clean up scraps
-  try { await (git as any).raw(['cherry-pick', '--abort']); } catch (e) {}
-  await (git as any).reset('hard');
-  const status = await git.status();
-  for (const file of status.not_added) {
-    await fs.remove(path.resolve(dir, file));
-  }
-  await git.checkout('master');
-  await git.pull();
-  await git.addConfig('user.email', TROP_EMAIL);
-  await git.addConfig('user.name', TROP_NAME);
-}
 
 const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
@@ -57,6 +28,21 @@ const getGitHub = () => {
   return g;
 }
 
+const tellRunnerTo = async (what: string, payload: any) => {
+  const resp = await fetch(`http://localhost:4141/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      what,
+      payload,
+    }),
+  });
+  if (resp.status !== 200) throw new Error('Runner errored out');
+  return await resp.json();
+}
+
 export const backportPR = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
   const config = await context.config('config.yml');
   const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
@@ -72,14 +58,42 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
 
   const log = (...args: string[]) => robot.log(slug, ...args);
 
+  const waitForRunner = async () => {
+    log('Waiting for runner...');
+    let runnerReady = false;
+    let runnerTries = 0;
+    while (!runnerReady && runnerTries < 20) {
+      try {
+        const resp = await fetch('http://localhost:4141/up');
+        runnerReady = resp.status === 200;
+      } catch (err) {
+        // Ignore
+      }
+      runnerTries += 1;
+      if (!runnerReady) await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+    if (!runnerReady || runnerTries >= 20) {
+      log('Runner is dead...')
+      return false;
+    }
+    log('Runner is alive');
+    return true;
+  }
+
   queue.enterQueue(async () => {
     log(`Executing ${bp} for "${slug}"`);
+    if (!await waitForRunner()) return;
+    await tellRunnerTo(commands.FRESH, {});
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    if (!await waitForRunner()) return;
     const pr = context.payload.pull_request;
     // Set up empty repo on master
     log('Setting up local repository');
-    await initRepo(base.repo.owner.login, base.repo.name);
+    await tellRunnerTo(commands.INIT_REPO, {
+      owner: base.repo.owner.login,
+      repo: base.repo.name,
+    });
     log('Working directory cleaned');
-    const git = getGit(slug);
 
     // Fork repository to trop
     log('forking base repo');
@@ -112,17 +126,19 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
 
     // Set up remotes
     log('setting up remotes');
-    await git.addRemote('target_repo', `https://github.com/${slug}.git`);
-    await git.addRemote('source_repo', `https://github.com/${head.repo.owner.login}/${head.repo.name}.git`);
-    await git.addRemote('fork', `https://${fork.owner.login}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${fork.owner.login}/${fork.name}.git`);
-
-    // Fetch remotes
-    log('fetching target remote');
-    await (git as any).raw(['fetch', 'target_repo']);
-    log('fetching source remote');
-    await (git as any).raw(['fetch', 'source_repo']);
-    log('fetching fork remote');
-    await (git as any).raw(['fetch', 'fork']);
+    await tellRunnerTo(commands.SET_UP_REMOTES, {
+      slug,
+      remotes: [{
+        name: 'target_repo',
+        value: `https://github.com/${slug}.git`,
+      }, {
+        name: 'source_repo',
+        value: `https://github.com/${head.repo.owner.login}/${head.repo.name}.git`,
+      }, {
+        name: 'fork',
+        value: `https://${fork.owner.login}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${fork.owner.login}/${fork.name}.git`,
+      }],
+    });
 
     // Get list of commits
     log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
@@ -149,19 +165,17 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
     // Temp branch on the fork
     const sanitizedTitle = pr.title.replace(/ /g, '-').replace(/\:/g, '-').toLowerCase();
     const tempBranch = `${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
-    await git.checkout(`target_repo/${targetBranch}`);
-    await git.pull('target_repo', targetBranch);
-    await git.checkoutBranch(tempBranch, `target_repo/${targetBranch}`);
-    log(`Checked out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
-
-    log('Starting the cherry picking');
-    await (git as any).raw(['cherry-pick', ...commits]);
-    log('Cherry picking complete, pushing to fork');
-
-    await git.push('fork', tempBranch, {
-      '--set-upstream': true,
+    log(`Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
+    log('Will start backporting now')
+    await tellRunnerTo(commands.BACKPORT, {
+      slug,
+      targetBranch,
+      tempBranch,
+      commits,
+      targetRemote: 'target_repo',
+      tempRemote: 'fork',
     });
-    log('Pushed up to fork');
+    log('Cherry pick success, pushed up to fork');
 
     log('Creating Pull Request');
     const newPr = (await context.github.pullRequests.create(context.repo({
