@@ -10,6 +10,7 @@ import queue from './Queue';
 
 const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
+const RUNNER_HOST = process.env.RUNNER_HOST || 'localhost';
 
 const labelToTargetBranch = (label: Label, targetLabelPrefix: string) => {
   return label.name.replace(targetLabelPrefix, '');
@@ -29,7 +30,7 @@ const getGitHub = () => {
 }
 
 const tellRunnerTo = async (what: string, payload: any) => {
-  const resp = await fetch(`http://localhost:4141/`, {
+  const resp = await fetch(`http://${RUNNER_HOST}:4141/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -64,7 +65,7 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
     let runnerTries = 0;
     while (!runnerReady && runnerTries < 20) {
       try {
-        const resp = await fetch('http://localhost:4141/up');
+        const resp = await fetch(`http://${RUNNER_HOST}:4141/up`);
         runnerReady = resp.status === 200;
       } catch (err) {
         // Ignore
