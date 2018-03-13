@@ -126,13 +126,23 @@ describe('issue-board-tracker', () => {
   })
 
   describe('issue_comment.created event', () => {
-    it('manually triggers the PR on comment', async () => {
+    it('manually triggers the backport on comment', async () => {
       utils.backportPR = jest.fn()
       await robot.receive(issueCommentCreatedEvent)
 
       expect(github.pullRequests.get).toHaveBeenCalled()
       expect(github.issues.createComment).toHaveBeenCalled()
       expect(utils.backportPR).toHaveBeenCalled()
+    })
+    it('does not triggers the backport on comment if the PR is not merged', async () => {
+      utils.backportPR = jest.fn()
+      github.pullRequests.get = jest.fn().mockReturnValue(Promise.resolve({data: {'merged': false}}))
+
+      await robot.receive(issueCommentCreatedEvent)
+
+      expect(github.pullRequests.get).toHaveBeenCalled()
+      expect(github.issues.createComment).toHaveBeenCalled()
+      expect(utils.backportPR).not.toHaveBeenCalled()
     })
   })
 
