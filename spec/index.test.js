@@ -1,20 +1,17 @@
-const utils = require('../lib/backport/utils')
-
 jest.mock('request')
-jest.mock('../lib/backport/utils.js', () => ({
-  ensureElectronUpToDate: async () => {},
-  backportPR: async () => {}
-}))
 const {createRobot} = require('probot')
 
+const utils = require('../lib/backport/utils')
 const trop = require('../lib/index.js')
 
+// event fixtures
 const pushEvent = require('./fixtures/push.json')
 const issueLabeledEvent = require('./fixtures/issues.labeled.json')
 const issueUnlabeledEvent = require('./fixtures/issues.unlabeled.json')
 const prLabeledEvent = require('./fixtures/pull_request.labeled.json')
 const prUnlabeledEvent = require('./fixtures/pull_request.unlabeled.json')
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
+const issueCommentCreatedEvent = require('./fixtures/issue_comment.created.json')
 
 describe('issue-board-tracker', () => {
   let robot, github
@@ -28,6 +25,20 @@ describe('issue-board-tracker', () => {
       repos: {
         getContent: jest.fn().mockReturnValue(Promise.resolve({
           data: { 'content': Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - ckerr').toString('base64') }
+        }))
+      },
+      pullRequests: {
+        get: jest.fn().mockReturnValue(Promise.resolve({
+          data: {
+            'merged': true,
+            'labels': [
+              {
+                'url': 'my_cool_url',
+                'name': 'target/X-X-X',
+                'color': 'fc2929'
+              }
+            ]
+          }
         }))
       },
       projects: {
@@ -50,7 +61,8 @@ describe('issue-board-tracker', () => {
         deleteProjectCard: jest.fn().mockReturnValue(Promise.resolve({}))
       },
       issues: {
-        createLabel: jest.fn().mockReturnValue(Promise.resolve({}))
+        createLabel: jest.fn().mockReturnValue(Promise.resolve({})),
+        createComment: jest.fn().mockReturnValue(Promise.resolve({}))
       }
     }
 
@@ -60,7 +72,7 @@ describe('issue-board-tracker', () => {
   describe('config', async () => {
     it('fetches config', async () => {
       await robot.receive(issueLabeledEvent)
-      console.log(await github.repos.getContent())
+
       expect(github.repos.getContent).toHaveBeenCalled()
     })
   })
@@ -80,7 +92,7 @@ describe('issue-board-tracker', () => {
       await robot.receive(pushEvent)
       expect(github.projects.getRepoProjects).toHaveBeenCalled()
       expect(github.issues.getLabel).toHaveBeenCalled()
-      expect(github.issues.createLabel).toHaveBeenCalledTimes(0)
+      expect(github.issues.createLabel).not.toHaveBeenCalled()
     })
   })
 
@@ -92,7 +104,7 @@ describe('issue-board-tracker', () => {
       expect(github.projects.getRepoProjects).toHaveBeenCalled()
       expect(github.projects.getProjectColumns).toHaveBeenCalled()
       expect(github.projects.createProjectCard).toHaveBeenCalled()
-      expect(github.projects.moveProjectCard).toHaveBeenCalledTimes(0)
+      expect(github.projects.moveProjectCard).not.toHaveBeenCalled()
     })
     it('moves an issue project card when a new label is applied', async () => {
       github.projects.createProjectCard = jest.fn().mockImplementation(() => Promise.reject(new Error()))
@@ -113,6 +125,17 @@ describe('issue-board-tracker', () => {
     })
   })
 
+  describe('issue_comment.created event', () => {
+    it('manually triggers the PR on comment', async () => {
+      utils.backportPR = jest.fn()
+      await robot.receive(issueCommentCreatedEvent)
+
+      expect(github.pullRequests.get).toHaveBeenCalled()
+      expect(github.issues.createComment).toHaveBeenCalled()
+      expect(utils.backportPR).toHaveBeenCalled()
+    })
+  })
+
   describe('pull_request.closed event', () => {
     it('begins the backporting process if the PR was merged', async () => {
       utils.backportPR = jest.fn()
@@ -130,7 +153,7 @@ describe('issue-board-tracker', () => {
       expect(github.projects.getRepoProjects).toHaveBeenCalled()
       expect(github.projects.getProjectColumns).toHaveBeenCalled()
       expect(github.projects.createProjectCard).toHaveBeenCalled()
-      expect(github.projects.moveProjectCard).toHaveBeenCalledTimes(0)
+      expect(github.projects.moveProjectCard).not.toHaveBeenCalled()
     })
     it('moves a pull request project card when a new label is applied', async () => {
       github.projects.createProjectCard = jest.fn().mockImplementation(() => Promise.reject(new Error()))
