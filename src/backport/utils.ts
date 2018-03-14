@@ -44,16 +44,20 @@ const tellRunnerTo = async (what: string, payload: any) => {
   return await resp.json();
 }
 
-export const backportPR = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
+const backportImpl = async (robot: Probot,
+                            context: ProbotContext<PullRequestEvent>,
+			    targetBranch: string,
+                            label?: Label) => {
   const config = await context.config('config.yml');
   const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
   const mergedLabelPrefix = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
 
-  if (!label.name.startsWith(targetLabelPrefix)) return;
+  if (!targetBranch)
+    throw new Error('Nothing to do');
+
   const base = context.payload.pull_request.base;
   const head = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
-  const targetBranch = labelToTargetBranch(label, targetLabelPrefix);  
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
   robot.log(`Queuing ${bp} for "${slug}"`);
 
@@ -216,4 +220,13 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
       body: `An error occurred while attempting to backport this PR to "${targetBranch}", you will need to perform this backport manually`,
     }) as any);
   });
+}
+
+export const backportPR = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
+  const config = await context.config('config.yml');
+  const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
+  if (!label.name.startsWith(targetLabelPrefix))
+    throw new Error(`Label '${label.name}' does not begin with '${targetLabelPrefix}'`);
+  const targetBranch = labelToTargetBranch(label, targetLabelPrefix);  
+  await backportImpl(robot, context, targetBranch, label);
 }
