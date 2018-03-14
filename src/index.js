@@ -72,7 +72,7 @@ module.exports = async (robot) => {
             for (const column of columns.data) {
               const cards = await context.github.projects.getProjectCards({column_id: column.id})
 
-              const itemUrl = item.url.replace('/pulls/', '/issues/')
+              const itemUrl = item.url.replace('/pull/', '/issues/')
               existing = cards.data.find(card => {
                 const urlMatch = card => card.content_url === itemUrl
                 const columnMatch = card.column_url === column.url
@@ -108,7 +108,7 @@ module.exports = async (robot) => {
         const item = context.payload.issue || context.payload.pull_request
         const column = columns.data.find(column => column.name === context.payload.label.name)
 
-        const itemUrl = item.url.replace('/pulls/', '/issues/')
+        const itemUrl = item.url.replace('/pull/', '/issues/')
 
         if (column) {
           try {
