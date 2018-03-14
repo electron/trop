@@ -161,7 +161,11 @@ module.exports = async (robot) => {
       return
     }
 
-    if (payload.comment.body === '/trop run backport') {
+    const cmd = payload.comment.body
+    const backportCmd = '/trop run backport'
+    const backportToCmd = '/trop run backport-to '
+
+    if (cmd === backportCmd) {
       const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
 
       if (pr.merged) {
@@ -177,6 +181,13 @@ module.exports = async (robot) => {
           body: 'This PR has not been merged yet, and cannot be backported.'
         }))
       }
+
+    } else if (cmd.startsWith(backportToCmd)) {
+      const targetBranch = cmd.slice(backportToCmd.length)
+      robot.log('backport-to ' + targetBranch)
+      // TODO: sanitize this input - does the branch exist?
+      // TODO: refactor backport/util.ts s.t. label branch detection code is separate from the rest
+      // TODO: tests
     }
   })
 }
