@@ -149,14 +149,14 @@ module.exports = async (robot) => {
 
     if (!isPullRequest(payload.issue)) return
 
-    if (!payload.commend.body.startsWith('/trop')) return
+    const cmd = payload.comment.body
+    if (!cmd.startsWith('/trop')) return
 
     if (!config.authorizedUsers.includes(payload.comment.user.login)) {
       robot.log.error('This user is not authorized to use trop')
       return
     }
 
-    const cmd = payload.comment.body
     const backportCmd = '/trop run backport'
     const backportToCmd = '/trop run backport-to '
 
