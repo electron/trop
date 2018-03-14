@@ -176,7 +176,6 @@ module.exports = async (robot) => {
           body: 'This PR has not been merged yet, and cannot be backported.'
         }))
       }
-
     } else if (cmd.startsWith(backportToCmd)) {
       const targetBranch = cmd.slice(backportToCmd.length)
       robot.log('backport-to ' + targetBranch)
