@@ -46,12 +46,9 @@ const tellRunnerTo = async (what: string, payload: any) => {
 
 const backportImpl = async (robot: Probot,
                             context: ProbotContext<PullRequestEvent>,
-			    targetBranch: string,
-                            label?: Label) => {
-  const config = await context.config('config.yml');
-  const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
-  const mergedLabelPrefix = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
-
+                            targetBranch: string,
+                            labelToRemove?: string,
+                            labelToAdd?: string) => {
   if (!targetBranch)
     throw new Error('Nothing to do');
 
@@ -191,21 +188,27 @@ const backportImpl = async (robot: Probot,
       maintainer_can_modify: false,
     }))).data;
 
-    log('Adding handy comment and updating labels')
+    log('Adding breadcrumb comment')
     await context.github.issues.createComment(context.repo({
       number: pr.number,
       body: `We have automatically backported this PR to "${targetBranch}", please check out #${newPr.number}`,
     }) as any);
 
-    await context.github.issues.removeLabel(context.repo({
-      number: pr.number,
-      name: label.name,
-    }));
+    if (labelToRemove) {
+      log(`Removing label '${labelToRemove}'`)
+      await context.github.issues.removeLabel(context.repo({
+        number: pr.number,
+        name: labelToRemove,
+      }));
+    }
 
-    await context.github.issues.addLabels(context.repo({
-      number: pr.number,
-      labels: [label.name.replace(targetLabelPrefix, mergedLabelPrefix)],
-    }));
+    if (labelToAdd) {
+      log(`Adding label '${labelToAdd}'`)
+      await context.github.issues.addLabels(context.repo({
+        number: pr.number,
+	labels: [labelToAdd],
+      }));
+    }
 
     await context.github.issues.addLabels(context.repo({
       number: newPr.number,
@@ -225,8 +228,13 @@ const backportImpl = async (robot: Probot,
 export const backportPR = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
   const config = await context.config('config.yml');
   const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
+  const mergedLabelPrefix = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
+
   if (!label.name.startsWith(targetLabelPrefix))
     throw new Error(`Label '${label.name}' does not begin with '${targetLabelPrefix}'`);
+
   const targetBranch = labelToTargetBranch(label, targetLabelPrefix);  
-  await backportImpl(robot, context, targetBranch, label);
+  const labelToRemove = label.name;
+  const labelToAdd = label.name.replace(targetLabelPrefix, mergedLabelPrefix);
+  await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
 }
