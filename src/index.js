@@ -154,25 +154,28 @@ module.exports = async (robot) => {
 
     if (!isPullRequest(payload.issue)) return
 
+    if (!payload.commend.body.startsWith('/trop')) return
+
+    if (!usernameIsWhitelisted(payload.comment.user.login)) {
+      robot.log.error('This user is not authorized to use trop')
+      return
+    }
+
     if (payload.comment.body === '/trop run backport') {
-      if (usernameIsWhitelisted(payload.comment.user.login)) {
-        const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
+      const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
 
-        if (pr.merged) {
-          await context.github.issues.createComment(context.repo({
-            number: payload.issue.number,
-            body: `The backport process for this PR has been manually initiated, here we go! :D`
-          }))
+      if (pr.merged) {
+        await context.github.issues.createComment(context.repo({
+          number: payload.issue.number,
+          body: `The backport process for this PR has been manually initiated, here we go! :D`
+        }))
 
-          backportAllLabels(context, pr)
-        } else {
-          await context.github.issues.createComment(context.repo({
-            number: payload.issue.number,
-            body: 'This PR has not been merged yet, and cannot be backported.'
-          }))
-        }
+        backportAllLabels(context, pr)
       } else {
-        robot.log.error('This user is not authorized to initiate backports')
+        await context.github.issues.createComment(context.repo({
+          number: payload.issue.number,
+          body: 'This PR has not been merged yet, and cannot be backported.'
+        }))
       }
     }
   })
