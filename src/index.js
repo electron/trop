@@ -151,7 +151,6 @@ module.exports = async (robot) => {
 
     if (!payload.commend.body.startsWith('/trop')) return
 
-    const config = await context.config('config.yml')
     if (!config.authorizedUsers.includes(payload.comment.user.login)) {
       robot.log.error('This user is not authorized to use trop')
       return
