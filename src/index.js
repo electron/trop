@@ -7,6 +7,11 @@ module.exports = async (robot) => {
     process.exit(1)
   }
 
+  const usernameIsWhitelisted = (user) => {
+    const config = await context.config('config.yml')
+    return config.authorizedUsers.includes(username)
+  }
+
   const backportAllLabels = (context, pr) => {
     for (const label of pr.labels) {
       context.payload.pull_request = context.payload.pull_request || pr
@@ -144,14 +149,13 @@ module.exports = async (robot) => {
   robot.on('issue_comment.created', async context => {
     const payload = context.payload
     const config = await context.config('config.yml')
-    const WHITELIST = config.authorizedUsers
 
     const isPullRequest = (issue) => issue.html_url.endsWith(`/pull/${issue.number}`)
 
     if (!isPullRequest(payload.issue)) return
 
     if (payload.comment.body === '/trop run backport') {
-      if (WHITELIST.includes(payload.comment.user.login)) {
+      if (usernameIsWhitelisted(payload.comment.user.login)) {
         const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
 
         if (pr.merged) {
