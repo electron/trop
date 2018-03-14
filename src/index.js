@@ -7,11 +7,6 @@ module.exports = async (robot) => {
     process.exit(1)
   }
 
-  const usernameIsWhitelisted = (user) => {
-    const config = await context.config('config.yml')
-    return config.authorizedUsers.includes(username)
-  }
-
   const backportAllLabels = (context, pr) => {
     for (const label of pr.labels) {
       context.payload.pull_request = context.payload.pull_request || pr
@@ -156,7 +151,8 @@ module.exports = async (robot) => {
 
     if (!payload.commend.body.startsWith('/trop')) return
 
-    if (!usernameIsWhitelisted(payload.comment.user.login)) {
+    const config = await context.config('config.yml')
+    if (!config.authorizedUsers.includes(payload.comment.user.login)) {
       robot.log.error('This user is not authorized to use trop')
       return
     }
