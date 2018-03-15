@@ -11,7 +11,8 @@ const issueUnlabeledEvent = require('./fixtures/issues.unlabeled.json')
 const prLabeledEvent = require('./fixtures/pull_request.labeled.json')
 const prUnlabeledEvent = require('./fixtures/pull_request.unlabeled.json')
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
-const issueCommentCreatedEvent = require('./fixtures/issue_comment.created.json')
+const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json')
+// const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json')
 
 describe('trop', () => {
   let robot, github
@@ -128,7 +129,7 @@ describe('trop', () => {
   describe('issue_comment.created event', () => {
     it('manually triggers the backport on comment', async () => {
       utils.backportPR = jest.fn()
-      await robot.receive(issueCommentCreatedEvent)
+      await robot.receive(issueCommentBackportCreatedEvent)
 
       expect(github.pullRequests.get).toHaveBeenCalled()
       expect(github.issues.createComment).toHaveBeenCalled()
@@ -138,7 +139,7 @@ describe('trop', () => {
       utils.backportPR = jest.fn()
       github.pullRequests.get = jest.fn().mockReturnValue(Promise.resolve({data: {'merged': false}}))
 
-      await robot.receive(issueCommentCreatedEvent)
+      await robot.receive(issueCommentBackportCreatedEvent)
 
       expect(github.pullRequests.get).toHaveBeenCalled()
       expect(github.issues.createComment).toHaveBeenCalled()
