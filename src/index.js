@@ -160,28 +160,30 @@ module.exports = async (robot) => {
     const backportCmd = '/trop run backport'
     const backportToCmd = '/trop run backport-to '
 
-    if (cmd === backportCmd) {
+    // handle backport commands
+    if ((cmd === backportCmd) || cmd.startsWith(backportToCmd)) {
       const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
-
-      if (pr.merged) {
-        await context.github.issues.createComment(context.repo({
-          number: payload.issue.number,
-          body: `The backport process for this PR has been manually initiated, here we go! :D`
-        }))
-
-        backportAllLabels(context, pr)
-      } else {
+      if (!pr.merged) {
         await context.github.issues.createComment(context.repo({
           number: payload.issue.number,
           body: 'This PR has not been merged yet, and cannot be backported.'
         }))
+        return
       }
-    } else if (cmd.startsWith(backportToCmd)) {
-      const targetBranch = cmd.slice(backportToCmd.length)
-      robot.log('backport-to ' + targetBranch)
-      // TODO: sanitize this input - does the branch exist?
-      // TODO: refactor backport/util.ts s.t. label branch detection code is separate from the rest
-      // TODO: tests
+
+      if (cmd === backportCmd) {
+        await context.github.issues.createComment(context.repo({
+          number: payload.issue.number,
+          body: `The backport process for this PR has been manually initiated, here we go! :D`
+        }))
+        backportAllLabels(context, pr)
+      } else if (cmd.startsWith(backportToCmd)) {
+        const targetBranch = cmd.slice(backportToCmd.length)
+        robot.log('backport-to ' + targetBranch)
+        // TODO: sanitize this input - does the branch exist?
+        // TODO: refactor backport/util.ts s.t. label branch detection code is separate from the rest
+        // TODO: tests
+      }
     }
   })
 }
