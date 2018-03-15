@@ -12,8 +12,8 @@ const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
 const RUNNER_HOST = process.env.RUNNER_HOST || 'localhost';
 
-const labelToTargetBranch = (label: Label, targetLabelPrefix: string) => {
-  return label.name.replace(targetLabelPrefix, '');
+const labelToTargetBranch = (label: Label, prefix: string) => {
+  return label.name.replace(prefix, '');
 }
 
 const tokenFromContext = (robot: any, context: any) => {
@@ -225,16 +225,28 @@ const backportImpl = async (robot: Probot,
   });
 }
 
-export const backportToLabel = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
+const getLabelPrefixes = async (context: ProbotContext<PullRequestEvent>) => {
   const config = await context.config('config.yml');
-  const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
-  const mergedLabelPrefix = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
+  const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
+  const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
+  return { target, merged }
+}
 
-  if (!label.name.startsWith(targetLabelPrefix))
-    throw new Error(`Label '${label.name}' does not begin with '${targetLabelPrefix}'`);
+export const backportToLabel = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
+  const labelPrefixes = await getLabelPrefixes(context);
+  if (!label.name.startsWith(labelPrefixes.target))
+    throw new Error(`Label '${label.name}' does not begin with '${labelPrefixes.target}'`);
 
-  const targetBranch = labelToTargetBranch(label, targetLabelPrefix);  
+  const targetBranch = labelToTargetBranch(label, labelPrefixes.target);  
   const labelToRemove = label.name;
-  const labelToAdd = label.name.replace(targetLabelPrefix, mergedLabelPrefix);
+  const labelToAdd = label.name.replace(labelPrefixes.target, labelPrefixes.merged);
+  await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
+}
+
+export const backportToBranch = async (robot: Probot, context: ProbotContext<PullRequestEvent>, targetBranch: string) => {
+  const labelPrefixes = await getLabelPrefixes(context);
+
+  const labelToRemove = null;
+  const labelToAdd = labelPrefixes.merged + targetBranch;
   await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
 }
