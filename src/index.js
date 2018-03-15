@@ -179,7 +179,7 @@ module.exports = async (robot) => {
         backportAllLabels(context, pr)
       } else if (cmd.startsWith(backportToCmd)) {
         const targetBranch = cmd.slice(backportToCmd.length)
-        robot.log('backport-to ' + targetBranch)
+        robot.log(`backport-to ${targetBranch}`)
         // TODO: sanitize this input - does the branch exist?
         // TODO: refactor backport/util.ts s.t. label branch detection code is separate from the rest
         // TODO: tests
