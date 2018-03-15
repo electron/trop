@@ -49,9 +49,6 @@ const backportImpl = async (robot: Probot,
                             targetBranch: string,
                             labelToRemove?: string,
                             labelToAdd?: string) => {
-  if (!targetBranch)
-    throw new Error('Nothing to do');
-
   const base = context.payload.pull_request.base;
   const head = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
@@ -234,10 +231,17 @@ const getLabelPrefixes = async (context: ProbotContext<PullRequestEvent>) => {
 
 export const backportCommitsToBranch = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
   const labelPrefixes = await getLabelPrefixes(context);
-  if (!label.name.startsWith(labelPrefixes.target))
-    throw new Error(`Label '${label.name}' does not begin with '${labelPrefixes.target}'`);
+  if (!label.name.startsWith(labelPrefixes.target)) {
+    robot.log(`Label '${label.name}' does not begin with '${labelPrefixes.target}'`);
+    return;
+  }
 
   const targetBranch = labelToTargetBranch(label, labelPrefixes.target);  
+  if (!targetBranch) {
+    robot.log('Nothing to do');
+    return;
+  }
+
   const labelToRemove = label.name;
   const labelToAdd = label.name.replace(labelPrefixes.target, labelPrefixes.merged);
   await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
