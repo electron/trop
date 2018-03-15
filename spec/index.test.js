@@ -12,7 +12,6 @@ const prLabeledEvent = require('./fixtures/pull_request.labeled.json')
 const prUnlabeledEvent = require('./fixtures/pull_request.unlabeled.json')
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
 const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json')
-// const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json')
 
 describe('trop', () => {
   let robot, github
