@@ -56,7 +56,7 @@ const setUpRemotes = async (details: { slug: string, remotes: { name: string, va
   return { success: true };
 }
 
-const backportPR = async (details: { slug: string, targetRemote: string, targetBranch: string, tempRemote: string, tempBranch: string, commits: string[] }) => {
+const backportToLabel = async (details: { slug: string, targetRemote: string, targetBranch: string, tempRemote: string, tempBranch: string, commits: string[] }) => {
   const git = getGit(details.slug);
   // Create branch
   await git.checkout(`target_repo/${details.targetBranch}`);
@@ -84,7 +84,7 @@ app.post('/', async (req, res) => {
       case commands.SET_UP_REMOTES:
         return res.json(await setUpRemotes(req.body.payload));
       case commands.BACKPORT:
-        return res.json(await backportPR(req.body.payload));
+        return res.json(await backportToLabel(req.body.payload));
       case commands.FRESH:
         res.json({});
         console.info('Self killing');

@@ -1,5 +1,5 @@
 import * as randomColor from 'randomcolor'
-import {backportPR} from './backport/utils'
+import {backportToLabel} from './backport/utils'
 
 module.exports = async (robot) => {
   if (!process.env.GITHUB_FORK_USER_TOKEN) {
@@ -10,7 +10,7 @@ module.exports = async (robot) => {
   const backportAllLabels = (context, pr) => {
     for (const label of pr.labels) {
       context.payload.pull_request = context.payload.pull_request || pr
-      backportPR(robot, context, label)
+      backportToLabel(robot, context, label)
     }
   }
 

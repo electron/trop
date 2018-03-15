@@ -225,7 +225,7 @@ const backportImpl = async (robot: Probot,
   });
 }
 
-export const backportPR = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
+export const backportToLabel = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
   const config = await context.config('config.yml');
   const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
   const mergedLabelPrefix = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
