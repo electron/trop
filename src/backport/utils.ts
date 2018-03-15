@@ -232,7 +232,7 @@ const getLabelPrefixes = async (context: ProbotContext<PullRequestEvent>) => {
   return { target, merged }
 }
 
-export const backportToLabel = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
+export const backportCommitsToBranch = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
   const labelPrefixes = await getLabelPrefixes(context);
   if (!label.name.startsWith(labelPrefixes.target))
     throw new Error(`Label '${label.name}' does not begin with '${labelPrefixes.target}'`);
