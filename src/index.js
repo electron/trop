@@ -192,6 +192,7 @@ module.exports = async (robot) => {
       command: /^run backport-to ([^ :]+)$/,
       execute: async (targetBranch) => {
         robot.log(`backport-to ${targetBranch}`)
+        const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
         try {
           (await context.github.repos.getBranch(context.repo({
             branch: targetBranch
@@ -207,6 +208,7 @@ module.exports = async (robot) => {
           number: payload.issue.number,
           body: `The backport process for this PR has been manually initiated, sending your 1's and 0's to "${targetBranch}" here we go! :D`
         }))
+        context.payload.pull_request = context.payload.pull_request || pr
         backportToBranch(robot, context, targetBranch)
         return true
       }
