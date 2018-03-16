@@ -12,8 +12,8 @@ const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
 const RUNNER_HOST = process.env.RUNNER_HOST || 'localhost';
 
-const labelToTargetBranch = (label: Label, targetLabelPrefix: string) => {
-  return label.name.replace(targetLabelPrefix, '');
+const labelToTargetBranch = (label: Label, prefix: string) => {
+  return label.name.replace(prefix, '');
 }
 
 const tokenFromContext = (robot: any, context: any) => {
@@ -44,16 +44,14 @@ const tellRunnerTo = async (what: string, payload: any) => {
   return await resp.json();
 }
 
-export const backportPR = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
-  const config = await context.config('config.yml');
-  const targetLabelPrefix = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
-  const mergedLabelPrefix = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
-
-  if (!label.name.startsWith(targetLabelPrefix)) return;
+const backportImpl = async (robot: Probot,
+                            context: ProbotContext<PullRequestEvent>,
+                            targetBranch: string,
+                            labelToRemove?: string,
+                            labelToAdd?: string) => {
   const base = context.payload.pull_request.base;
   const head = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
-  const targetBranch = labelToTargetBranch(label, targetLabelPrefix);  
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
   robot.log(`Queuing ${bp} for "${slug}"`);
 
@@ -187,21 +185,27 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
       maintainer_can_modify: false,
     }))).data;
 
-    log('Adding handy comment and updating labels')
+    log('Adding breadcrumb comment')
     await context.github.issues.createComment(context.repo({
       number: pr.number,
       body: `We have automatically backported this PR to "${targetBranch}", please check out #${newPr.number}`,
     }) as any);
 
-    await context.github.issues.removeLabel(context.repo({
-      number: pr.number,
-      name: label.name,
-    }));
+    if (labelToRemove) {
+      log(`Removing label '${labelToRemove}'`)
+      await context.github.issues.removeLabel(context.repo({
+        number: pr.number,
+        name: labelToRemove,
+      }));
+    }
 
-    await context.github.issues.addLabels(context.repo({
-      number: pr.number,
-      labels: [label.name.replace(targetLabelPrefix, mergedLabelPrefix)],
-    }));
+    if (labelToAdd) {
+      log(`Adding label '${labelToAdd}'`)
+      await context.github.issues.addLabels(context.repo({
+        number: pr.number,
+	labels: [labelToAdd],
+      }));
+    }
 
     await context.github.issues.addLabels(context.repo({
       number: newPr.number,
@@ -216,4 +220,37 @@ export const backportPR = async (robot: Probot, context: ProbotContext<PullReque
       body: `An error occurred while attempting to backport this PR to "${targetBranch}", you will need to perform this backport manually`,
     }) as any);
   });
+}
+
+const getLabelPrefixes = async (context: ProbotContext<any>) => {
+  const config = await context.config('config.yml');
+  const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
+  const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
+  return { target, merged }
+}
+
+export const backportToLabel = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
+  const labelPrefixes = await getLabelPrefixes(context);
+  if (!label.name.startsWith(labelPrefixes.target)) {
+    robot.log(`Label '${label.name}' does not begin with '${labelPrefixes.target}'`);
+    return;
+  }
+
+  const targetBranch = labelToTargetBranch(label, labelPrefixes.target);  
+  if (!targetBranch) {
+    robot.log('Nothing to do');
+    return;
+  }
+
+  const labelToRemove = label.name;
+  const labelToAdd = label.name.replace(labelPrefixes.target, labelPrefixes.merged);
+  await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
+}
+
+export const backportToBranch = async (robot: Probot, context: ProbotContext<PullRequestEvent>, targetBranch: string) => {
+  const labelPrefixes = await getLabelPrefixes(context);
+
+  const labelToRemove = null;
+  const labelToAdd = labelPrefixes.merged + targetBranch;
+  await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
 }
