@@ -11,7 +11,8 @@ const issueUnlabeledEvent = require('./fixtures/issues.unlabeled.json')
 const prLabeledEvent = require('./fixtures/pull_request.labeled.json')
 const prUnlabeledEvent = require('./fixtures/pull_request.unlabeled.json')
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
-const issueCommentCreatedEvent = require('./fixtures/issue_comment.created.json')
+const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json')
+const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json')
 
 describe('trop', () => {
   let robot, github
@@ -25,7 +26,8 @@ describe('trop', () => {
       repos: {
         getContent: jest.fn().mockReturnValue(Promise.resolve({
           data: { 'content': Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - codebytere').toString('base64') }
-        }))
+        })),
+        getBranch: jest.fn().mockReturnValue(Promise.resolve())
       },
       pullRequests: {
         get: jest.fn().mockReturnValue(Promise.resolve({
@@ -127,31 +129,48 @@ describe('trop', () => {
 
   describe('issue_comment.created event', () => {
     it('manually triggers the backport on comment', async () => {
-      utils.backportPR = jest.fn()
-      await robot.receive(issueCommentCreatedEvent)
+      utils.backportToLabel = jest.fn()
+      await robot.receive(issueCommentBackportCreatedEvent)
 
       expect(github.pullRequests.get).toHaveBeenCalled()
       expect(github.issues.createComment).toHaveBeenCalled()
-      expect(utils.backportPR).toHaveBeenCalled()
+      expect(utils.backportToLabel).toHaveBeenCalled()
     })
     it('does not triggers the backport on comment if the PR is not merged', async () => {
-      utils.backportPR = jest.fn()
+      utils.backportToLabel = jest.fn()
       github.pullRequests.get = jest.fn().mockReturnValue(Promise.resolve({data: {'merged': false}}))
 
-      await robot.receive(issueCommentCreatedEvent)
+      await robot.receive(issueCommentBackportCreatedEvent)
 
       expect(github.pullRequests.get).toHaveBeenCalled()
       expect(github.issues.createComment).toHaveBeenCalled()
-      expect(utils.backportPR).not.toHaveBeenCalled()
+      expect(utils.backportToLabel).not.toHaveBeenCalled()
+    })
+    it('manually triggers the backport on comment to a targetted branch', async () => {
+      utils.backportToBranch = jest.fn()
+      await robot.receive(issueCommentBackportToCreatedEvent)
+
+      expect(github.pullRequests.get).toHaveBeenCalled()
+      expect(github.issues.createComment).toHaveBeenCalled()
+      expect(utils.backportToBranch).toHaveBeenCalled()
+    })
+    it('does not manually trigger the backport on comment to a targetted branch if the branch does not exist', async () => {
+      utils.backportToBranch = jest.fn()
+      github.repos.getBranch = jest.fn().mockReturnValue(Promise.reject(new Error('404')))
+      await robot.receive(issueCommentBackportToCreatedEvent)
+
+      expect(github.pullRequests.get).toHaveBeenCalled()
+      expect(github.issues.createComment).toHaveBeenCalled()
+      expect(utils.backportToBranch).toHaveBeenCalledTimes(0)
     })
   })
 
   describe('pull_request.closed event', () => {
     it('begins the backporting process if the PR was merged', async () => {
-      utils.backportPR = jest.fn()
+      utils.backportToLabel = jest.fn()
       await robot.receive(prClosedEvent)
 
-      expect(utils.backportPR).toHaveBeenCalled()
+      expect(utils.backportToLabel).toHaveBeenCalled()
     })
   })
 

@@ -1,5 +1,5 @@
 import * as randomColor from 'randomcolor'
-import {backportPR} from './backport/utils'
+import {backportToLabel, backportToBranch} from './backport/utils'
 
 module.exports = async (robot) => {
   if (!process.env.GITHUB_FORK_USER_TOKEN) {
@@ -10,7 +10,7 @@ module.exports = async (robot) => {
   const backportAllLabels = (context, pr) => {
     for (const label of pr.labels) {
       context.payload.pull_request = context.payload.pull_request || pr
-      backportPR(robot, context, label)
+      backportToLabel(robot, context, label)
     }
   }
 
@@ -140,35 +140,86 @@ module.exports = async (robot) => {
     }
   })
 
+  const TROP_COMMAND_PREFIX = '/trop '
+
   // manually trigger backporting process on trigger comment phrase
   robot.on('issue_comment.created', async context => {
     const payload = context.payload
     const config = await context.config('config.yml')
-    const WHITELIST = config.authorizedUsers
 
     const isPullRequest = (issue) => issue.html_url.endsWith(`/pull/${issue.number}`)
 
     if (!isPullRequest(payload.issue)) return
 
-    if (payload.comment.body === '/trop run backport') {
-      if (WHITELIST.includes(payload.comment.user.login)) {
+    const cmd = payload.comment.body
+    if (!cmd.startsWith(TROP_COMMAND_PREFIX)) return
+
+    if (!config.authorizedUsers.includes(payload.comment.user.login)) {
+      robot.log.error('This user is not authorized to use trop')
+      return
+    }
+
+    const actualCmd = cmd.substr(TROP_COMMAND_PREFIX.length)
+
+    const actions = [{
+      name: 'backport sanity checker',
+      command: /^run backport/,
+      execute: async () => {
         const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
-
-        if (pr.merged) {
-          await context.github.issues.createComment(context.repo({
-            number: payload.issue.number,
-            body: `The backport process for this PR has been manually initiated, here we go! :D`
-          }))
-
-          backportAllLabels(context, pr)
-        } else {
+        if (!pr.merged) {
           await context.github.issues.createComment(context.repo({
             number: payload.issue.number,
             body: 'This PR has not been merged yet, and cannot be backported.'
           }))
+          return false
         }
-      } else {
-        robot.log.error('This user is not authorized to initiate backports')
+        return true
+      }
+    }, {
+      name: 'backport automatically',
+      command: /^run backport$/,
+      execute: async () => {
+        const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
+        await context.github.issues.createComment(context.repo({
+          number: payload.issue.number,
+          body: `The backport process for this PR has been manually initiated, here we go! :D`
+        }))
+        backportAllLabels(context, pr)
+        return true
+      }
+    }, {
+      name: 'backport to branch',
+      command: /^run backport-to ([^ :]+)$/,
+      execute: async (targetBranch) => {
+        robot.log(`backport-to ${targetBranch}`)
+        try {
+          (await context.github.repos.getBranch(context.repo({
+            branch: targetBranch
+          })))
+        } catch (err) {
+          await context.github.issues.createComment(context.repo({
+            number: payload.issue.number,
+            body: `The branch you provided "${targetBranch}" does not appear to exist :cry:`
+          }))
+          return true
+        }
+        await context.github.issues.createComment(context.repo({
+          number: payload.issue.number,
+          body: `The backport process for this PR has been manually initiated, sending your 1's and 0's to "${targetBranch}" here we go! :D`
+        }))
+        backportToBranch(robot, context, targetBranch)
+        return true
+      }
+    }]
+
+    for (const action of actions) {
+      const match = actualCmd.match(action.command)
+      if (!match) continue
+      robot.log(`running action: ${action.name} for comment`)
+
+      if (!await action.execute(...match.slice(1))) {
+        robot.log(`${action.name} failed, stopping responder chain`)
+        break
       }
     }
   })
