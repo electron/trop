@@ -6,6 +6,8 @@ import * as simpleGit from 'simple-git/promise';
 
 import * as commands from './commands';
 
+const PATCH_NAME = 'current.patch';
+
 const app = express();
 app.use(bodyParser.json());
 
@@ -29,6 +31,7 @@ const initRepo = async (details: { owner: string, repo: string }) => {
 
   // Clean up scraps
   try { await (git as any).raw(['cherry-pick', '--abort']); } catch (e) {}
+  try { await (git as any).raw(['am', '--abort']); } catch (e) {}
   await (git as any).reset('hard');
   const status = await git.status();
   for (const file of status.not_added) {
@@ -38,6 +41,7 @@ const initRepo = async (details: { owner: string, repo: string }) => {
   await git.pull();
   await git.addConfig('user.email', TROP_EMAIL);
   await git.addConfig('user.name', TROP_NAME);
+  await git.addConfig('commit.gpgsign', 'false');
   return { success: true };
 }
 
@@ -56,7 +60,7 @@ const setUpRemotes = async (details: { slug: string, remotes: { name: string, va
   return { success: true };
 }
 
-const backportCommitsToBranch = async (details: { slug: string, targetRemote: string, targetBranch: string, tempRemote: string, tempBranch: string, commits: string[] }) => {
+const backportCommitsToBranch = async (details: { slug: string, targetRemote: string, targetBranch: string, tempRemote: string, tempBranch: string, patches: string[] }) => {
   const git = getGit(details.slug);
   // Create branch
   await git.checkout(`target_repo/${details.targetBranch}`);
@@ -64,7 +68,12 @@ const backportCommitsToBranch = async (details: { slug: string, targetRemote: st
   await git.checkoutBranch(details.tempBranch, `target_repo/${details.targetBranch}`);
 
   // Cherry pick
-  await (git as any).raw(['cherry-pick', ...details.commits]);
+  const patchPath = path.resolve(baseDir, details.slug, PATCH_NAME);
+  for (const patch of details.patches) {
+    await fs.writeFile(patchPath, patch, 'utf8');
+    await (git as any).raw(['am', PATCH_NAME]);
+    await fs.remove(patchPath);
+  }
 
   // Push
   await git.push(details.tempRemote, details.tempBranch, {
@@ -94,6 +103,7 @@ app.post('/', async (req, res) => {
         res.status(404).json({ error: 'wut u doin\' kiddo' });
     }
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message, stack: err.stack });
   }
 });

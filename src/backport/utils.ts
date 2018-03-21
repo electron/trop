@@ -131,9 +131,6 @@ const backportImpl = async (robot: Probot,
         name: 'target_repo',
         value: `https://github.com/${slug}.git`,
       }, {
-        name: 'source_repo',
-        value: `https://github.com/${head.repo.owner.login}/${head.repo.name}.git`,
-      }, {
         name: 'fork',
         value: `https://${fork.owner.login}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${fork.owner.login}/${fork.name}.git`,
       }],
@@ -141,7 +138,7 @@ const backportImpl = async (robot: Probot,
 
     // Get list of commits
     log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
-    const commits = (await context.github.pullRequests.getCommits(context.repo({
+    const commits: string[] = (await context.github.pullRequests.getCommits(context.repo({
       number: pr.number,
     }))).data.map(commit => commit.sha);
 
@@ -159,7 +156,16 @@ const backportImpl = async (robot: Probot,
 
       return;
     }
-    log(`Found ${commits.length} commits to backport`);
+    log(`Found ${commits.length} commits to backport, requesting details now`);
+    const patches: string[] = [];
+    let i = 1;
+    for (const commit of commits) {
+      const patchBody = await fetch(`https://github.com/${slug}/pull/${pr.number}/commits/${commit}.patch`);
+      patches.push(await patchBody.text());
+      log(`Got patch (${i}/${commits.length})`);
+      i += 1;
+    }
+    log('Got all commit info')
 
     // Temp branch on the fork
     const sanitizedTitle = pr.title.replace(/ /g, '-').replace(/\:/g, '-').toLowerCase();
@@ -170,7 +176,7 @@ const backportImpl = async (robot: Probot,
       slug,
       targetBranch,
       tempBranch,
-      commits,
+      patches,
       targetRemote: 'target_repo',
       tempRemote: 'fork',
     });
