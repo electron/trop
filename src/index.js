@@ -189,7 +189,7 @@ module.exports = async (robot) => {
       }
     }, {
       name: 'backport to branch',
-      command: /^run backport-to ([^ :]+)$/,
+      command: /^run backport-to ([^\s:]+)/,
       execute: async (targetBranch) => {
         robot.log(`backport-to ${targetBranch}`)
         const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
