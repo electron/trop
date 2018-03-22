@@ -4,6 +4,11 @@
 
 > a GitHub App built with [probot](https://github.com/probot/probot) that automates the process of backporting features and bugfixes.
 
+```js
+[...'backport'.slice(4)].reverse().join``
+// => trop
+```
+
 ## Setup
 
 ```sh
