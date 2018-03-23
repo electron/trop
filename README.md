@@ -1,4 +1,4 @@
-[![Build Status](https://img.shields.io/travis/codebytere/trop.svg)](https://travis-ci.org/codebytere/trop)
+[![Build Status](https://img.shields.io/travis/electron/trop.svg)](https://travis-ci.org/electron/trop)
 
 # trop
 
