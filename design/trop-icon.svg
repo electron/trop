@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512px" height="512px" viewBox="0 0 512 512" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" style="background: #8FE5F6;">
+    <!-- Generator: Sketch 48.2 (47327) - http://www.bohemiancoding.com/sketch -->
+    <title>trop-icon</title>
+    <desc>Created with Sketch.</desc>
+    <defs></defs>
+    <g id="Page-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="trop-icon">
+            <g id="Group" transform="translate(0.000000, 139.000000)">
+                <rect id="Rectangle-3-Copy-3" fill="#415D69" x="0" y="59" width="512" height="26"></rect>
+                <g id="Group-2" transform="translate(56.000000, 0.000000)" fill="#FFFFFF" stroke="#415D69" stroke-width="26">
+                    <circle id="Oval-Copy-9" cx="65" cy="65" r="65"></circle>
+                    <circle id="Oval-Copy-10" cx="335" cy="65" r="65"></circle>
+                </g>
+                <g id="noun_997678-copy-6" transform="translate(147.854029, 204.679376) rotate(-193.000000) translate(-147.854029, -204.679376) translate(104.354029, 176.179376)" fill="#415D69" fill-rule="nonzero">
+                    <path d="M55.8632745,13.977329 L67.4770873,2.3847848 C69.8951343,-0.0288339936 73.8177741,-0.00200709698 76.2537611,2.42951891 L84.9114917,11.0713944 C87.3848729,13.5402461 87.3527131,17.4399788 84.9231777,19.8650648 L52.2432119,52.4851894 C47.4164557,57.3031002 39.5907414,57.3031002 34.7639852,52.4851894 L2.08401937,19.8650648 C-0.321513465,17.4639435 -0.340281633,13.5029204 2.09570544,11.0713944 L10.753436,2.42951891 C13.2268172,-0.0393328159 17.118873,-0.0220362838 19.5301098,2.3847848 L31.1439226,13.977329 L55.8632745,13.977329 Z" id="Shape"></path>
+                </g>
+                <path d="M147.567383,210 C166.250772,263.322917 203.616776,289.984375 259.665394,289.984375 C315.714012,289.984375 351.014675,263.322917 365.567383,210" id="Path-3-Copy-2" stroke="#415D69" stroke-width="26" stroke-linecap="round"></path>
+            </g>
+        </g>
+    </g>
+</svg>
