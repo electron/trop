@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 
 import * as commands from './commands';
-import { Probot, ProbotContext, Label, PullRequestEvent, Repository } from './Probot';
+import { Probot, ProbotContext, Label, PullRequest, PullRequestEvent, Repository } from './Probot';
 import queue from './Queue';
 
 const TARGET_LABEL_PREFIX = 'target/';
@@ -42,6 +42,18 @@ const tellRunnerTo = async (what: string, payload: any) => {
   });
   if (resp.status !== 200) throw new Error('Runner errored out');
   return await resp.json();
+}
+
+const createBackportComment = (pr: PullRequest) => {
+  const re = new RegExp(`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) (${pr.base.repo.html_url}/issues/\\d+)`, 'i');
+  const match = pr.body.match(re);
+  const fixedIssueComment = Array.isArray(match) && match.length>1 ? match[0] : null;
+
+  let body = `Backport of #${pr.number}\n\nSee that PR for details.`;
+  if (fixedIssueComment)
+    body += `\n\n${fixedIssueComment}`;
+
+  return body;
 }
 
 const backportImpl = async (robot: Probot,
@@ -187,7 +199,7 @@ const backportImpl = async (robot: Probot,
       head: `${fork.owner.login}:${tempBranch}`,
       base: targetBranch,
       title: `Backport (${targetBranch}) - ${pr.title}`,
-      body: `Backport of #${pr.number}\n\nSee that PR for details.`,
+      body: createBackportComment(pr),
       maintainer_can_modify: false,
     }))).data;
 
