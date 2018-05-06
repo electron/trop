@@ -6,10 +6,6 @@ const trop = require('../lib/index.js')
 
 // event fixtures
 const pushEvent = require('./fixtures/push.json')
-const issueLabeledEvent = require('./fixtures/issues.labeled.json')
-const issueUnlabeledEvent = require('./fixtures/issues.unlabeled.json')
-const prLabeledEvent = require('./fixtures/pull_request.labeled.json')
-const prUnlabeledEvent = require('./fixtures/pull_request.unlabeled.json')
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
 const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json')
 const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json')
@@ -43,25 +39,6 @@ describe('trop', () => {
           }
         }))
       },
-      projects: {
-        moveProjectCard: jest.fn().mockReturnValue(Promise.resolve({})),
-        getRepoProjects: jest.fn().mockReturnValue(Promise.resolve({
-          data: [{'id': 1, 'name': 'Radar'}]
-        })),
-        getProjectColumns: jest.fn().mockReturnValue(Promise.resolve({
-          data: [
-            {'id': 11, 'name': 'todo'},
-            {'id': 12, 'name': 'doing'},
-            {'id': 13, 'name': 'done'}
-          ]
-        })),
-        getProjectCards: jest.fn().mockReturnValue(Promise.resolve({
-          data: [
-            {'id': 11, 'name': 'todo', 'content_url': 'my_cool_url'}
-          ]
-        })),
-        deleteProjectCard: jest.fn().mockReturnValue(Promise.resolve({}))
-      },
       issues: {
         createLabel: jest.fn().mockReturnValue(Promise.resolve({})),
         createComment: jest.fn().mockReturnValue(Promise.resolve({}))
@@ -73,57 +50,9 @@ describe('trop', () => {
 
   describe('config', async () => {
     it('fetches config', async () => {
-      await robot.receive(issueLabeledEvent)
+      await robot.receive(pushEvent)
 
       expect(github.repos.getContent).toHaveBeenCalled()
-    })
-  })
-
-  describe('push event', async () => {
-    it('does not create labels that already exist', async () => {
-      github.issues.getLabel = jest.fn().mockImplementation(() => Promise.reject(new Error()))
-
-      await robot.receive(pushEvent)
-      expect(github.projects.getRepoProjects).toHaveBeenCalled()
-      expect(github.issues.getLabel).toHaveBeenCalled()
-      expect(github.issues.createLabel).toHaveBeenCalledTimes(3)
-    })
-    it('creates labels based on project column names', async () => {
-      github.issues.getLabel = jest.fn().mockReturnValue(Promise.resolve({'id': 14, 'name': 'todo'}))
-
-      await robot.receive(pushEvent)
-      expect(github.projects.getRepoProjects).toHaveBeenCalled()
-      expect(github.issues.getLabel).toHaveBeenCalled()
-      expect(github.issues.createLabel).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('issues.[labeled, unlabeled] events', async () => {
-    it('adds a new project card for a labeled issue', async () => {
-      github.projects.createProjectCard = jest.fn().mockReturnValue(Promise.resolve({}))
-      await robot.receive(issueLabeledEvent)
-
-      expect(github.projects.getRepoProjects).toHaveBeenCalled()
-      expect(github.projects.getProjectColumns).toHaveBeenCalled()
-      expect(github.projects.createProjectCard).toHaveBeenCalled()
-      expect(github.projects.moveProjectCard).not.toHaveBeenCalled()
-    })
-    it('moves an issue project card when a new label is applied', async () => {
-      github.projects.createProjectCard = jest.fn().mockImplementation(() => Promise.reject(new Error()))
-      await robot.receive(issueLabeledEvent)
-
-      expect(github.projects.getRepoProjects).toHaveBeenCalled()
-      expect(github.projects.getProjectColumns).toHaveBeenCalled()
-      expect(github.projects.getProjectCards).toHaveBeenCalled()
-      expect(github.projects.moveProjectCard).toHaveBeenCalled()
-    })
-    it('removes a card from the project board when the label is removed', async () => {
-      await robot.receive(issueUnlabeledEvent)
-
-      expect(github.projects.getRepoProjects).toHaveBeenCalled()
-      expect(github.projects.getProjectColumns).toHaveBeenCalled()
-      expect(github.projects.getProjectCards).toHaveBeenCalled()
-      expect(github.projects.deleteProjectCard).toHaveBeenCalled()
     })
   })
 
@@ -171,35 +100,6 @@ describe('trop', () => {
       await robot.receive(prClosedEvent)
 
       expect(utils.backportToLabel).toHaveBeenCalled()
-    })
-  })
-
-  describe('pull_request.[labeled, unlabeled] events', async () => {
-    it('adds a new project card for a labeled pull request', async () => {
-      github.projects.createProjectCard = jest.fn().mockReturnValue(Promise.resolve({}))
-      await robot.receive(prLabeledEvent)
-
-      expect(github.projects.getRepoProjects).toHaveBeenCalled()
-      expect(github.projects.getProjectColumns).toHaveBeenCalled()
-      expect(github.projects.createProjectCard).toHaveBeenCalled()
-      expect(github.projects.moveProjectCard).not.toHaveBeenCalled()
-    })
-    it('moves a pull request project card when a new label is applied', async () => {
-      github.projects.createProjectCard = jest.fn().mockImplementation(() => Promise.reject(new Error()))
-      await robot.receive(prLabeledEvent)
-
-      expect(github.projects.getRepoProjects).toHaveBeenCalled()
-      expect(github.projects.getProjectColumns).toHaveBeenCalled()
-      expect(github.projects.getProjectCards).toHaveBeenCalled()
-      expect(github.projects.moveProjectCard).toHaveBeenCalled()
-    })
-    it('removes a card from the project board when the label is removed', async () => {
-      await robot.receive(prUnlabeledEvent)
-
-      expect(github.projects.getRepoProjects).toHaveBeenCalled()
-      expect(github.projects.getProjectColumns).toHaveBeenCalled()
-      expect(github.projects.getProjectCards).toHaveBeenCalled()
-      expect(github.projects.deleteProjectCard).toHaveBeenCalled()
     })
   })
 })
