@@ -1,4 +1,3 @@
-import * as randomColor from 'randomcolor'
 import {backportToLabel, backportToBranch} from './backport/utils'
 
 module.exports = async (robot) => {
