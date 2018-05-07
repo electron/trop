@@ -5,7 +5,6 @@ const utils = require('../lib/backport/utils')
 const trop = require('../lib/index.js')
 
 // event fixtures
-const pushEvent = require('./fixtures/push.json')
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
 const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json')
 const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json')
@@ -50,7 +49,7 @@ describe('trop', () => {
 
   describe('config', async () => {
     it('fetches config', async () => {
-      await robot.receive(pushEvent)
+      await robot.receive(issueCommentBackportCreatedEvent)
 
       expect(github.repos.getContent).toHaveBeenCalled()
     })
