@@ -18,6 +18,7 @@ interface GitHubUser {
 export interface Repository {
   owner: GitHubUser;
   name: string;
+  html_url: string;
 }
 
 interface Ref {
@@ -36,6 +37,7 @@ export interface PullRequest {
   author: GitHubUser;
   number: number;
   title: string;
+  body: string;
 }
 
 export interface PullRequestEvent {
