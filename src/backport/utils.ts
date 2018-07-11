@@ -197,7 +197,7 @@ const backportImpl = async (robot: Probot,
     const newPr = (await context.github.pullRequests.create(context.repo({
       head: `${fork.owner.login}:${tempBranch}`,
       base: targetBranch,
-      title: `Backport (${targetBranch}) - ${pr.title}`,
+      title: `${pr.title} (backport: ${targetBranch})`,
       body: createBackportComment(pr),
       maintainer_can_modify: false,
     }))).data;
@@ -253,7 +253,7 @@ export const backportToLabel = async (robot: Probot, context: ProbotContext<Pull
     return;
   }
 
-  const targetBranch = labelToTargetBranch(label, labelPrefixes.target);  
+  const targetBranch = labelToTargetBranch(label, labelPrefixes.target);
   if (!targetBranch) {
     robot.log('Nothing to do');
     return;
