@@ -1,0 +1,21 @@
+{
+  "name": "trop",
+  "description": "a bot that does backports for Electron",
+  "scripts": {
+  },
+  "env": {
+    "TROP_PRIVATE_KEY": {
+      "required": true
+    }
+  },
+  "formation": {
+  },
+  "addons": [
+
+  ],
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    }
+  ]
+}
