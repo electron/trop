@@ -7,6 +7,7 @@ import * as simpleGit from 'simple-git/promise';
 import * as commands from './commands';
 import { Probot, ProbotContext, Label, PullRequest, PullRequestEvent, Repository } from './Probot';
 import queue from './Queue';
+import runner from './runner';
 
 const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
@@ -30,18 +31,10 @@ const getGitHub = () => {
 }
 
 const tellRunnerTo = async (what: string, payload: any) => {
-  const resp = await fetch(`http://${RUNNER_HOST}:4141/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      what,
-      payload,
-    }),
+  return await runner({
+    what,
+    payload,
   });
-  if (resp.status !== 200) throw new Error('Runner errored out');
-  return await resp.json();
 }
 
 const createBackportComment = (pr: PullRequest) => {
@@ -93,7 +86,6 @@ const backportImpl = async (robot: Probot,
   queue.enterQueue(async () => {
     log(`Executing ${bp} for "${slug}"`);
     if (!await waitForRunner()) return;
-    await tellRunnerTo(commands.FRESH, {});
     await new Promise(resolve => setTimeout(resolve, 5000));
     if (!await waitForRunner()) return;
     const pr = context.payload.pull_request;
@@ -112,6 +104,7 @@ const backportImpl = async (robot: Probot,
       owner: base.repo.owner.login,
       repo: base.repo.name,
     })).data;
+
     let forkReady = false;
     let attempt = 0;
     while (!forkReady && attempt < 20) {
@@ -167,6 +160,7 @@ const backportImpl = async (robot: Probot,
 
       return;
     }
+    
     log(`Found ${commits.length} commits to backport, requesting details now`);
     const patches: string[] = [];
     let i = 1;

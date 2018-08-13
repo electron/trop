@@ -1,17 +1,12 @@
-import * as express from 'express';
 import * as fs from 'fs-extra';
-import * as bodyParser from 'body-parser';
 import * as path from 'path';
+import * as os from 'os';
 import * as simpleGit from 'simple-git/promise';
-
 import * as commands from './commands';
 
 const PATCH_NAME = 'current.patch';
 
-const app = express();
-app.use(bodyParser.json());
-
-const baseDir = path.resolve(__dirname, '..', '..', 'working');
+const baseDir = path.resolve(os.tmpdir(), 'trop-working');
 const getGit = (slug: string) => simpleGit(path.resolve(baseDir, slug));
 
 const TROP_NAME = 'Electron Bot';
@@ -82,32 +77,16 @@ const backportCommitsToBranch = async (details: { slug: string, targetRemote: st
   return { success: true };
 }
 
-app.get('/up', (req, res) => res.send('OK'));
-
-app.post('/', async (req, res) => {
-  try {
-    console.info(`Instruction: ${req.body.what}`);
-    switch (req.body.what) {
-      case commands.INIT_REPO:
-        return res.json(await initRepo(req.body.payload));
-      case commands.SET_UP_REMOTES:
-        return res.json(await setUpRemotes(req.body.payload));
-      case commands.BACKPORT:
-        return res.json(await backportCommitsToBranch(req.body.payload));
-      case commands.FRESH:
-        res.json({});
-        console.info('Self killing');
-        process.exit(1);
-        return;
-      default:
-        res.status(404).json({ error: 'wut u doin\' kiddo' });
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message, stack: err.stack });
+export default async (options) => {
+  console.info(`Instruction: ${options.what}`);
+  switch (options.what) {
+    case commands.INIT_REPO:
+      return await initRepo(options.payload);
+    case commands.SET_UP_REMOTES:
+      return await setUpRemotes(options.payload);
+    case commands.BACKPORT:
+      return await backportCommitsToBranch(options.payload);
+    default:
+      throw new Error('wut u doin\' kiddo');
   }
-});
-
-app.listen(4141, () => {
-  console.log('Listening on port 4141');
-});
+}
