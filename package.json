@@ -8,12 +8,12 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "prestart": "tsc",
     "runner:start": "./docker/run",
     "runner:stop": "./docker/stop",
     "start": "probot run ./lib/index.js",
     "pretest": "tsc",
-    "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/ && standard"
+    "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/ && standard",
+    "postinstall": "tsc"
   },
   "dependencies": {
     "body-parser": "^1.18.2",
