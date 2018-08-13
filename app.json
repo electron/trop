@@ -4,7 +4,13 @@
   "scripts": {
   },
   "env": {
-    "TROP_PRIVATE_KEY": {
+    "APP_ID": {
+      "required": true
+    },
+    "GITHUB_FORK_USER_TOKEN": {
+      "required": true
+    },
+    "PRIVATE_KEY": {
       "required": true
     }
   },
