@@ -61,33 +61,9 @@ const backportImpl = async (robot: Probot,
 
   const log = (...args: string[]) => robot.log(slug, ...args);
 
-  const waitForRunner = async () => {
-    log('Waiting for runner...');
-    let runnerReady = false;
-    let runnerTries = 0;
-    while (!runnerReady && runnerTries < 20) {
-      try {
-        const resp = await fetch(`http://${RUNNER_HOST}:4141/up`);
-        runnerReady = resp.status === 200;
-      } catch (err) {
-        // Ignore
-      }
-      runnerTries += 1;
-      if (!runnerReady) await new Promise(resolve => setTimeout(resolve, 5000));
-    }
-    if (!runnerReady || runnerTries >= 20) {
-      log('Runner is dead...')
-      return false;
-    }
-    log('Runner is alive');
-    return true;
-  }
-
   queue.enterQueue(async () => {
     log(`Executing ${bp} for "${slug}"`);
-    if (!await waitForRunner()) return;
     await new Promise(resolve => setTimeout(resolve, 5000));
-    if (!await waitForRunner()) return;
     const pr = context.payload.pull_request;
     // Set up empty repo on master
     log('Setting up local repository');
@@ -160,7 +136,7 @@ const backportImpl = async (robot: Probot,
 
       return;
     }
-    
+
     log(`Found ${commits.length} commits to backport, requesting details now`);
     const patches: string[] = [];
     let i = 1;
