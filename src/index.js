@@ -76,10 +76,11 @@ module.exports = async (robot) => {
       execute: async (targetBranches) => {
         const branches = targetBranches.split(',')
         for (const branch of branches) {
-          console.log(branch)
-          if (!(branch.trim())) continue
           robot.log(`backport-to ${branch}`)
+
+          if (!(branch.trim())) continue
           const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
+
           try {
             (await context.github.repos.getBranch(context.repo({branch})))
           } catch (err) {
