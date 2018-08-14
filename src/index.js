@@ -73,26 +73,30 @@ module.exports = async (robot) => {
     }, {
       name: 'backport to branch',
       command: /^run backport-to ([^\s:]+)/,
-      execute: async (targetBranch) => {
-        robot.log(`backport-to ${targetBranch}`)
-        const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
-        try {
-          (await context.github.repos.getBranch(context.repo({
-            branch: targetBranch
-          })))
-        } catch (err) {
+      execute: async (targetBranches) => {
+        const branches = targetBranches.split(',')
+        for (const branch of branches) {
+          robot.log(`backport-to ${branch}`)
+
+          if (!(branch.trim())) continue
+          const pr = (await context.github.pullRequests.get(context.repo({number: payload.issue.number}))).data
+
+          try {
+            (await context.github.repos.getBranch(context.repo({branch})))
+          } catch (err) {
+            await context.github.issues.createComment(context.repo({
+              number: payload.issue.number,
+              body: `The branch you provided "${branch}" does not appear to exist :cry:`
+            }))
+            return true
+          }
           await context.github.issues.createComment(context.repo({
             number: payload.issue.number,
-            body: `The branch you provided "${targetBranch}" does not appear to exist :cry:`
+            body: `The backport process for this PR has been manually initiated, sending your 1's and 0's to "${branch}" here we go! :D`
           }))
-          return true
+          context.payload.pull_request = context.payload.pull_request || pr
+          backportToBranch(robot, context, branch)
         }
-        await context.github.issues.createComment(context.repo({
-          number: payload.issue.number,
-          body: `The backport process for this PR has been manually initiated, sending your 1's and 0's to "${targetBranch}" here we go! :D`
-        }))
-        context.payload.pull_request = context.payload.pull_request || pr
-        backportToBranch(robot, context, targetBranch)
         return true
       }
     }]
