@@ -54,7 +54,6 @@ const backportImpl = async (robot: Probot,
                             labelToRemove?: string,
                             labelToAdd?: string) => {
   const base = context.payload.pull_request.base;
-  const head = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
   robot.log(`Queuing ${bp} for "${slug}"`);

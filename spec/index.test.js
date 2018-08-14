@@ -8,6 +8,7 @@ const trop = require('../lib/index.js')
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
 const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json')
 const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json')
+const issueCommentBackportToMultipleCreatedEvent = require('./fixtures/issue_comment_backport_to_multiple.created.json')
 
 describe('trop', () => {
   let robot, github
@@ -28,6 +29,14 @@ describe('trop', () => {
         get: jest.fn().mockReturnValue(Promise.resolve({
           data: {
             'merged': true,
+            'base': {
+              'repo': {
+                'name': 'test',
+                'owner': {
+                  'login': 'codebytere'
+                }
+              }
+            },
             'labels': [
               {
                 'url': 'my_cool_url',
@@ -64,6 +73,7 @@ describe('trop', () => {
       expect(github.issues.createComment).toHaveBeenCalled()
       expect(utils.backportToLabel).toHaveBeenCalled()
     })
+
     it('does not triggers the backport on comment if the PR is not merged', async () => {
       utils.backportToLabel = jest.fn()
       github.pullRequests.get = jest.fn().mockReturnValue(Promise.resolve({data: {'merged': false}}))
@@ -74,6 +84,7 @@ describe('trop', () => {
       expect(github.issues.createComment).toHaveBeenCalled()
       expect(utils.backportToLabel).not.toHaveBeenCalled()
     })
+
     it('manually triggers the backport on comment to a targetted branch', async () => {
       utils.backportToBranch = jest.fn()
       await robot.receive(issueCommentBackportToCreatedEvent)
@@ -82,6 +93,16 @@ describe('trop', () => {
       expect(github.issues.createComment).toHaveBeenCalled()
       expect(utils.backportToBranch).toHaveBeenCalled()
     })
+
+    it('allows for multiple PRs to be triggered in the same comment', async () => {
+      utils.backportToBranch = jest.fn()
+      await robot.receive(issueCommentBackportToMultipleCreatedEvent)
+
+      expect(github.pullRequests.get).toHaveBeenCalledTimes(3)
+      expect(github.issues.createComment).toHaveBeenCalledTimes(2)
+      expect(utils.backportToBranch).toHaveBeenCalledTimes(2)
+    })
+
     it('does not manually trigger the backport on comment to a targetted branch if the branch does not exist', async () => {
       utils.backportToBranch = jest.fn()
       github.repos.getBranch = jest.fn().mockReturnValue(Promise.reject(new Error('404')))
