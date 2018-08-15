@@ -40,10 +40,20 @@ const tellRunnerTo = async (what: string, payload: any) => {
 const createBackportComment = (pr: PullRequest) => {
   let body = `Backport of #${pr.number}\n\nSee that PR for details.`;
 
-  const re = new RegExp(`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) (${pr.base.repo.html_url}/issues/\\d+)`, 'i');
-  const match = pr.body.match(re);
-  if (Array.isArray(match) && match.length>1)
-    body += '\n\n' + match[0];
+  const issueFixInfo = new RegExp(`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) (${pr.base.repo.html_url}/issues/\\d+)`, 'i');
+  const issueMatch = pr.body.match(issueFixInfo);
+
+  const notesInfo = new RegExp(`(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)`, 'gi');
+  const notesMatch = pr.body.match(notesInfo);
+
+  // attach information about issues resolved, if any
+  if (Array.isArray(issueMatch) && issueMatch.length > 1) {
+    body += `\n\n ${issueMatch[0]}`;
+  }
+
+  // PRs can't be merged without notes, 
+  // so we can assume this match will exist
+  body += `\n\n ${notesMatch}`;
 
   return body;
 }
