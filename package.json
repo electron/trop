@@ -10,8 +10,9 @@
     "build": "tsc",
     "runner:start": "./docker/run",
     "runner:stop": "./docker/stop",
-    "start": "probot run ./lib/index.js",
+    "start": "probot run ./lib/index.ts",
     "pretest": "tsc",
+    "lint": "tslint --project '.'",
     "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/ && standard",
     "postinstall": "tsc"
   },
@@ -35,6 +36,7 @@
     "jest": "^23.4.0",
     "smee-client": "^1.0.1",
     "standard": "^11.0.1",
+    "tslint": "^5.11.0",
     "typescript": "^2.7.2"
   },
   "engines": {

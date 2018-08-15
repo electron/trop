@@ -1,6 +1,6 @@
 import * as fs from 'fs-extra';
-import * as path from 'path';
 import * as os from 'os';
+import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 import * as commands from './commands';
 
@@ -21,7 +21,7 @@ const initRepo = async (details: { owner: string, repo: string }) => {
   const git = getGit(slug);
   await git.clone(
     `https://github.com/${slug}.git`,
-    '.'
+    '.',
   );
 
   // Clean up scraps
@@ -29,18 +29,26 @@ const initRepo = async (details: { owner: string, repo: string }) => {
   try { await (git as any).raw(['am', '--abort']); } catch (e) {}
   await (git as any).reset('hard');
   const status = await git.status();
+
   for (const file of status.not_added) {
     await fs.remove(path.resolve(dir, file));
   }
+
   await git.checkout('master');
   await git.pull();
   await git.addConfig('user.email', TROP_EMAIL);
   await git.addConfig('user.name', TROP_NAME);
   await git.addConfig('commit.gpgsign', 'false');
   return { success: true };
-}
+};
 
-const setUpRemotes = async (details: { slug: string, remotes: { name: string, value: string }[] }) => {
+const setUpRemotes = async (details: {
+  slug: string,
+  remotes: {
+    name: string,
+    value: string,
+  }[],
+}) => {
   const git = getGit(details.slug);
 
   // Add remotes
@@ -53,9 +61,16 @@ const setUpRemotes = async (details: { slug: string, remotes: { name: string, va
     await (git as any).raw(['fetch', remote.name]);
   }
   return { success: true };
-}
+};
 
-const backportCommitsToBranch = async (details: { slug: string, targetRemote: string, targetBranch: string, tempRemote: string, tempBranch: string, patches: string[] }) => {
+const backportCommitsToBranch = async (details: {
+  slug: string,
+  targetRemote: string,
+  targetBranch: string,
+  tempRemote: string,
+  tempBranch: string,
+  patches: string[],
+}) => {
   const git = getGit(details.slug);
   // Create branch
   await git.checkout(`target_repo/${details.targetBranch}`);
@@ -75,10 +90,9 @@ const backportCommitsToBranch = async (details: { slug: string, targetRemote: st
     '--set-upstream': true,
   });
   return { success: true };
-}
+};
 
 export default async (options) => {
-  console.info(`Instruction: ${options.what}`);
   switch (options.what) {
     case commands.INIT_REPO:
       return await initRepo(options.payload);
@@ -89,4 +103,4 @@ export default async (options) => {
     default:
       throw new Error('wut u doin\' kiddo');
   }
-}
+};

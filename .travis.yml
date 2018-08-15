@@ -5,4 +5,4 @@ node_js:
 notifications:
   disabled: true
 script:
-  - npm run test
+  - npm run lint && npm test

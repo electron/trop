@@ -1,11 +1,10 @@
 import * as GitHub from '@octokit/rest';
 import fetch from 'node-fetch';
-import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 
 import * as commands from './commands';
-import { Probot, ProbotContext, Label, PullRequest, PullRequestEvent, Repository } from './Probot';
+import { Label, Probot, ProbotContext, PullRequest, PullRequestEvent, Repository } from './Probot';
 import queue from './Queue';
 import runner from './runner';
 
@@ -15,11 +14,11 @@ const RUNNER_HOST = process.env.RUNNER_HOST || 'localhost';
 
 const labelToTargetBranch = (label: Label, prefix: string) => {
   return label.name.replace(prefix, '');
-}
+};
 
 const tokenFromContext = (robot: any, context: any) => {
   return robot.cache.get(`app:${context.payload.installation.id}:token`) as string;
-}
+};
 
 const getGitHub = () => {
   const g = new GitHub();
@@ -28,25 +27,28 @@ const getGitHub = () => {
     token: process.env.GITHUB_FORK_USER_TOKEN,
   });
   return g;
-}
+};
 
 const tellRunnerTo = async (what: string, payload: any) => {
   return await runner({
     what,
     payload,
   });
-}
+};
 
 const createBackportComment = (pr: PullRequest) => {
   let body = `Backport of #${pr.number}\n\nSee that PR for details.`;
 
+  // tslint:disable-next-line
   const re = new RegExp(`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) (${pr.base.repo.html_url}/issues/\\d+)`, 'i');
   const match = pr.body.match(re);
-  if (Array.isArray(match) && match.length>1)
+
+  if (Array.isArray(match) && match.length > 1) {
     body += '\n\n' + match[0];
+  }
 
   return body;
-}
+};
 
 const backportImpl = async (robot: Probot,
                             context: ProbotContext<PullRequestEvent>,
@@ -62,7 +64,7 @@ const backportImpl = async (robot: Probot,
 
   queue.enterQueue(async () => {
     log(`Executing ${bp} for "${slug}"`);
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise((resolve) => setTimeout(resolve, 5000));
     const pr = context.payload.pull_request;
     // Set up empty repo on master
     log('Setting up local repository');
@@ -94,7 +96,7 @@ const backportImpl = async (robot: Probot,
         // Ignore
       }
       attempt += 1;
-      if (!forkReady) await new Promise(resolve => setTimeout(resolve, 5000));
+      if (!forkReady) await new Promise((resolve) => setTimeout(resolve, 5000));
     }
     if (attempt >= 20) {
       log('fork wasn\'t ready fast enough, giving up');
@@ -111,6 +113,7 @@ const backportImpl = async (robot: Probot,
         value: `https://github.com/${slug}.git`,
       }, {
         name: 'fork',
+        // tslint:disable-next-line
         value: `https://${fork.owner.login}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${fork.owner.login}/${fork.name}.git`,
       }],
     });
@@ -119,7 +122,7 @@ const backportImpl = async (robot: Probot,
     log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
     const commits: string[] = (await context.github.pullRequests.getCommits(context.repo({
       number: pr.number,
-    }))).data.map(commit => commit.sha);
+    }))).data.map((commit) => commit.sha);
 
     // No commits == WTF
     if (commits.length === 0) {
@@ -145,13 +148,15 @@ const backportImpl = async (robot: Probot,
       log(`Got patch (${i}/${commits.length})`);
       i += 1;
     }
-    log('Got all commit info')
+    log('Got all commit info');
 
     // Temp branch on the fork
     const sanitizedTitle = pr.title.replace(/ /g, '-').replace(/\:/g, '-').toLowerCase();
     const tempBranch = `${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
+
     log(`Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
-    log('Will start backporting now')
+    log('Will start backporting now');
+
     await tellRunnerTo(commands.BACKPORT, {
       slug,
       targetBranch,
@@ -160,6 +165,7 @@ const backportImpl = async (robot: Probot,
       targetRemote: 'target_repo',
       tempRemote: 'fork',
     });
+
     log('Cherry pick success, pushed up to fork');
 
     log('Creating Pull Request');
@@ -171,14 +177,14 @@ const backportImpl = async (robot: Probot,
       maintainer_can_modify: false,
     }))).data;
 
-    log('Adding breadcrumb comment')
+    log('Adding breadcrumb comment');
     await context.github.issues.createComment(context.repo({
       number: pr.number,
       body: `We have automatically backported this PR to "${targetBranch}", please check out #${newPr.number}`,
     }) as any);
 
     if (labelToRemove) {
-      log(`Removing label '${labelToRemove}'`)
+      log(`Removing label '${labelToRemove}'`);
       await context.github.issues.removeLabel(context.repo({
         number: pr.number,
         name: labelToRemove,
@@ -186,10 +192,10 @@ const backportImpl = async (robot: Probot,
     }
 
     if (labelToAdd) {
-      log(`Adding label '${labelToAdd}'`)
+      log(`Adding label '${labelToAdd}'`);
       await context.github.issues.addLabels(context.repo({
         number: pr.number,
-	labels: [labelToAdd],
+        labels: [labelToAdd],
       }));
     }
 
@@ -197,23 +203,25 @@ const backportImpl = async (robot: Probot,
       number: newPr.number,
       labels: ['backport'],
     }));
+
     log('Backport complete');
   }, async () => {
     const pr = context.payload.pull_request;
 
     await context.github.issues.createComment(context.repo({
       number: pr.number,
-      body: `An error occurred while attempting to backport this PR to "${targetBranch}", you will need to perform this backport manually`,
+      body: `An error occurred while attempting to backport this PR to "${targetBranch}",
+      you will need to perform this backport manually`,
     }) as any);
   });
-}
+};
 
 const getLabelPrefixes = async (context: ProbotContext<any>) => {
   const config = await context.config('config.yml');
   const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
   const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
-  return { target, merged }
-}
+  return { target, merged };
+};
 
 export const backportToLabel = async (robot: Probot, context: ProbotContext<PullRequestEvent>, label: Label) => {
   const labelPrefixes = await getLabelPrefixes(context);
@@ -231,12 +239,16 @@ export const backportToLabel = async (robot: Probot, context: ProbotContext<Pull
   const labelToRemove = label.name;
   const labelToAdd = label.name.replace(labelPrefixes.target, labelPrefixes.merged);
   await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
-}
+};
 
-export const backportToBranch = async (robot: Probot, context: ProbotContext<PullRequestEvent>, targetBranch: string) => {
+export const backportToBranch = async (
+  robot: Probot,
+  context: ProbotContext<PullRequestEvent>,
+  targetBranch: string,
+) => {
   const labelPrefixes = await getLabelPrefixes(context);
 
   const labelToRemove = null;
   const labelToAdd = labelPrefixes.merged + targetBranch;
   await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
-}
+};
