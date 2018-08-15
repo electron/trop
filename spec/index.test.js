@@ -1,8 +1,8 @@
 jest.mock('request')
-const {createRobot} = require('probot')
+const { Application } = require('probot')
 
 const utils = require('../lib/backport/utils')
-const trop = require('../lib/index.js')
+const trop = require('../lib/index')
 
 // event fixtures
 const prClosedEvent = require('./fixtures/pull_request.closed.json')
@@ -15,7 +15,7 @@ describe('trop', () => {
 
   beforeEach(async () => {
     process.env.GITHUB_FORK_USER_TOKEN = 'fake'
-    robot = createRobot()
+    robot = new Application()
     await trop(robot)
 
     github = {

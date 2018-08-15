@@ -1,5 +1,3 @@
-import * as GitHub from '@octokit/rest';
-
 export interface Label {
   id: number;
   url: string;
@@ -40,31 +38,8 @@ export interface PullRequest {
   body: string;
 }
 
-export interface PullRequestEvent {
-  action: 'assigned' | 'unassigned' | 'review_requested'
-          | 'review_request_removed' | 'labeled' | 'unlabeled'
-          | 'opened' | 'edited' | 'closed' | 'reopened';
-  number: number;
-  pull_request: PullRequest;
-}
-
-interface Config {
-  targetLabelPrefix: string;
-  mergedLabelPrefix: string;
-}
-
-export interface ProbotContext<T> {
-  payload: T;
-  github: GitHub;
-  config: (key: string) => Config;
-  repo<U>(a: U): U & { repo: string, owner: string };
-}
-
-type HookHandler<T> = (context: ProbotContext<T>) => void;
-
-export interface Probot {
-  on(
-    event: 'pull_request.closed',
-    handler: HookHandler<PullRequestEvent>): void;
-  log(...things: string[]): void;
+export interface TropConfig {
+  targetLabelPrefix?: string;
+  mergedLabelPrefix?: string;
+  authorizedUsers?: string[];
 }
