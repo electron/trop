@@ -10,7 +10,7 @@
     "build": "tsc",
     "runner:start": "./docker/run",
     "runner:stop": "./docker/stop",
-    "start": "probot run ./lib/index.ts",
+    "start": "probot run ./lib/index.js",
     "pretest": "tsc",
     "lint": "tslint --project '.'",
     "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/ && standard",

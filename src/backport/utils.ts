@@ -56,6 +56,7 @@ const createBackportComment = (pr: PullRequest) => {
     body += `\n\n ${notesMatch}`;
   } else {
     body += '\n\n notes: no-notes';
+  }
 
   return body;
 };
@@ -221,7 +222,7 @@ const backportImpl = async (robot: Probot,
     await context.github.issues.createComment(context.repo({
       number: pr.number,
       body: `An error occurred while attempting to backport this PR to "${targetBranch}",
-      you will need to perform this backport manually`,
+you will need to perform this backport manually`,
     }) as any);
   });
 };

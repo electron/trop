@@ -92,7 +92,7 @@ module.exports = async (robot) => {
           }
           await context.github.issues.createComment(context.repo({
             body: `The backport process for this PR has been manually initiated,
-                  sending your 1's and 0's to "${branch}" here we go! :D`,
+sending your 1's and 0's to "${branch}" here we go! :D`,
             number: payload.issue.number,
           }));
           context.payload.pull_request = context.payload.pull_request || pr;
