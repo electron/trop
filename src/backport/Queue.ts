@@ -25,7 +25,7 @@ class ExecutionQueue {
     if (this.queue.length === 0) {
       this.locked = false;
     } else {
-      this.run(this.queue.shift());
+      this.run(this.queue.shift()!);
     }
   }
 }

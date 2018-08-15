@@ -1,16 +1,6 @@
 {
-    "extends": [
-        "tslint:recommended"
-    ],
-    "jsRules": {},
-    "rules": {
-        "interface-name": [true, "never-prefix"],
-        "quotemark": [true, "single"],
-        "object-literal-sort-keys": false,
-        "curly": [true, "ignore-same-line"],
-        "no-empty": false,
-        "no-console": false,
-        "array-type": false
-    },
-    "rulesDirectory": []
+  "extends": "tslint-config-airbnb",
+  "rules": {
+    "import-name": false
+  }
 }
