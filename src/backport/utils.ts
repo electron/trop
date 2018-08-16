@@ -47,7 +47,7 @@ const createBackportComment = (pr: PullRequest) => {
   if (Array.isArray(notesMatch) && notesMatch.length > 1) {
     body += `\n\n ${notesMatch}`;
   } else {
-    body += '\n\n notes: no-notes';
+    body += '\n\nNotes: no-notes';
   }
 
   return body;
