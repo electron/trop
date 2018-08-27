@@ -101,7 +101,7 @@ const backportCommitsToBranch = async (options: BackportOptions) => {
   const patchPath = path.resolve(baseDir, options.slug, PATCH_NAME);
   for (const patch of options.patches) {
     await fs.writeFile(patchPath, patch, 'utf8');
-    await (git as any).raw(['am', '-3', '>', PATCH_NAME]);
+    await (git as any).raw(['am', '-3', PATCH_NAME]);
     await fs.remove(patchPath);
   }
 
