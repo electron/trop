@@ -23,7 +23,7 @@
     "fs-extra": "^5.0.0",
     "node-fetch": "^2.1.1",
     "pify": "^3.0.0",
-    "probot": "^7.0.0",
+    "probot": "~7.0.0",
     "randomcolor": "^0.5.3",
     "simple-git": "1.92.0"
   },

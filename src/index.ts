@@ -73,7 +73,7 @@ module.exports = async (robot: Application) => {
       execute: async () => {
         const pr = (await context.github.pullRequests.get(
           context.repo({ number: payload.issue.number }))
-        ).data;
+        ).data as any;
         await context.github.issues.createComment(context.repo({
           body: `The backport process for this PR has been manually initiated, here we go! :D`,
           number: payload.issue.number,
