@@ -3,20 +3,15 @@ import * as GitHub from '@octokit/rest';
 import fetch from 'node-fetch';
 
 import * as commands from './commands';
-import { Label, PullRequest, Repository, TropConfig } from './Probot';
+import { Label, PullRequest, TropConfig } from './Probot';
 import queue from './Queue';
-import { runCommand, RunnerOptions } from './runner';
+import { runCommand } from './runner';
 
 const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
-const RUNNER_HOST = process.env.RUNNER_HOST || 'localhost';
 
 const labelToTargetBranch = (label: Label, prefix: string) => {
   return label.name.replace(prefix, '');
-};
-
-const tokenFromContext = (robot: any, context: any) => {
-  return robot.cache.get(`app:${context.payload.installation.id}:token`) as string;
 };
 
 const getGitHub = () => {
@@ -84,7 +79,7 @@ const backportImpl = async (robot: Application,
       // Fork repository to trop
       log('forking base repo');
       const gh = getGitHub();
-      const fork: Repository = (await gh.repos.fork({
+      const fork = (await gh.repos.fork({
         owner: base.repo.owner.login,
         repo: base.repo.name,
       })).data;
@@ -96,7 +91,7 @@ const backportImpl = async (robot: Application,
         try {
           const { data } = await gh.repos.getCommits({
             owner: fork.owner.login,
-            repo: fork.name,
+            repo: fork.name!,
           });
           forkReady = data.length > 0;
         } catch (err) {
@@ -132,7 +127,7 @@ const backportImpl = async (robot: Application,
       log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
       const commits: string[] = (await context.github.pullRequests.getCommits(context.repo({
         number: pr.number,
-      }))).data.map((commit: { sha: string }) => commit.sha);
+      }))).data.map(commit => commit.sha!);
 
       // No commits == WTF
       if (commits.length === 0) {
@@ -218,7 +213,7 @@ const backportImpl = async (robot: Application,
       }
 
       await context.github.issues.addLabels(context.repo({
-        number: newPr.number,
+        number: newPr.number!,
         labels: ['backport'],
       }));
 
