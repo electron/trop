@@ -46,6 +46,7 @@ const TROP_EMAIL = 'electron@github.com';
 
 const initRepo = async (options: InitRepoOptions) => {
   const slug = `${options.owner}/${options.repo}`;
+  await fs.mkdirp(path.resolve(baseDir, slug));
   const prefix = path.resolve(baseDir, slug, 'tmp-');
   const dir = await fs.mkdtemp(prefix);
   await fs.mkdirp(dir);
