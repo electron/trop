@@ -8,8 +8,6 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "runner:start": "./docker/run",
-    "runner:stop": "./docker/stop",
     "start": "probot run ./lib/index.js",
     "pretest": "tsc",
     "lint": "tslint --project '.'",
@@ -24,8 +22,10 @@
     "node-fetch": "^2.1.1",
     "pify": "^3.0.0",
     "probot": "~7.0.0",
+    "queue": "^4.5.0",
     "randomcolor": "^0.5.3",
-    "simple-git": "1.92.0"
+    "simple-git": "1.92.0",
+    "what-the-diff": "^0.4.0"
   },
   "devDependencies": {
     "@types/body-parser": "^1.16.8",

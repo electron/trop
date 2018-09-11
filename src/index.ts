@@ -1,6 +1,7 @@
 import { Application, Context } from 'probot';
-import { backportToBranch, backportToLabel } from './backport/utils';
+import { backportToBranch, backportToLabel, getLabelPrefixes, labelToTargetBranch, backportImpl, BackportPurpose } from './backport/utils';
 import { PullRequest, TropConfig } from './backport/Probot';
+import { CHECK_PREFIX } from './backport/constants';
 
 module.exports = async (robot: Application) => {
   if (!process.env.GITHUB_FORK_USER_TOKEN) {
@@ -14,6 +15,78 @@ module.exports = async (robot: Application) => {
       backportToLabel(robot, context, label);
     }
   };
+
+  const runCheck = async (context: Context, pr: PullRequest) => {
+    const allChecks = await context.github.checks.listForRef(context.repo({
+      ref: pr.head.sha,
+      per_page: 100,
+    }));
+    const checkRuns = allChecks.data.check_runs.filter(run => run.name.startsWith(CHECK_PREFIX));
+    const labelPrefixes = await getLabelPrefixes(context);
+
+    for (const label of pr.labels) {
+      if (!label.name.startsWith(labelPrefixes.target)) continue;
+      const targetBranch = labelToTargetBranch(label, labelPrefixes.target);
+      const runName = `${CHECK_PREFIX}${targetBranch}`;
+      const existing = checkRuns.find(run => run.name === runName);
+      if (existing) {
+        if (existing.conclusion !== 'neutral') continue;
+
+        await context.github.checks.update(context.repo({
+          name: existing.name,
+          check_run_id: `${existing.id}`,
+          status: 'queued' as 'queued',
+        }));
+      } else {
+        await context.github.checks.create(context.repo({
+          name: runName,
+          head_sha: pr.head.sha,
+          status: 'queued' as 'queued',
+          details_url: 'https://github.com/electron/trop',
+        }));
+      }
+
+      await backportImpl(
+        robot,
+        context,
+        targetBranch,
+        BackportPurpose.Check,
+      );
+    }
+
+    for (const checkRun of checkRuns) {
+      if (!pr.labels.find(
+        label => label.name === `${labelPrefixes.target}${checkRun.name.replace(CHECK_PREFIX, '')}`,
+      )) {
+        context.github.checks.update(context.repo({
+          check_run_id: `${checkRun.id}`,
+          name: checkRun.name,
+          conclusion: 'neutral' as 'neutral',
+          completed_at: (new Date()).toISOString(),
+          output: {
+            title: 'Cancelled',
+            summary: 'This trop check was cancelled and can be ignored as this \
+PR is no longer targetting this branch for a backport',
+            annotations: [],
+          },
+        }));
+      }
+    }
+  };
+
+  const maybeRunCheck = async (context: Context) => {
+    const payload = context.payload;
+    console.log(!payload.pull_request.merged);
+    if (!payload.pull_request.merged) {
+      await runCheck(context, payload.pull_request as any);
+    }
+  };
+
+  robot.on('pull_request.opened', maybeRunCheck);
+  robot.on('pull_request.reopened', maybeRunCheck);
+  robot.on('pull_request.labeled', maybeRunCheck);
+  robot.on('pull_request.unlabeled', maybeRunCheck);
+  robot.on('pull_request.synchronize', maybeRunCheck);
 
   // backport pull requests to labeled targets when PR is merged
   robot.on('pull_request.closed', async (context) => {
