@@ -318,15 +318,6 @@ export const backportImpl = async (robot: Application,
 
         await fs.remove(createdDir);
       }
-      const pr = context.payload.pull_request;
-
-      if (purpose === BackportPurpose.ExecuteBackport) {
-        await context.github.issues.createComment(context.repo({
-          number: pr.number,
-          body: `An error occurred while attempting to backport this PR to "${targetBranch}",
-    you will need to perform this backport manually`,
-        }) as any);
-      }
 
       if (purpose === BackportPurpose.Check) {
         const checkRun = await getCheckRun();
