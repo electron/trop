@@ -203,7 +203,11 @@ export const backportImpl = async (robot: Application,
       log('Got all commit info');
 
       // Temp branch on the fork
-      const sanitizedTitle = pr.title.replace(/ /g, '-').replace(/\:/g, '-').toLowerCase();
+      const sanitizedTitle = pr.title
+        .replace(/ /g, '-')
+        .replace(/\:/g, '-')
+        .replace(/\[/g, '-')
+        .replace(/\]/g, '-').toLowerCase();
       const tempBranch = `${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
 
       log(`Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
