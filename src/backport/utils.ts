@@ -1,16 +1,23 @@
 import { Application, Context } from 'probot';
 import * as GitHub from '@octokit/rest';
 import fetch from 'node-fetch';
+import * as fs from 'fs-extra';
+import { IQueue } from 'queue';
+import * as simpleGit from 'simple-git/promise';
 
 import * as commands from './commands';
 import { Label, PullRequest, TropConfig } from './Probot';
 import queue from './Queue';
 import { runCommand } from './runner';
+import { CHECK_PREFIX } from './constants';
+
+const makeQueue: IQueue = require('queue');
+const { parse: parseDiff } = require('what-the-diff');
 
 const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
 
-const labelToTargetBranch = (label: Label, prefix: string) => {
+export const labelToTargetBranch = (label: Label, prefix: string) => {
   return label.name.replace(prefix, '');
 };
 
@@ -48,11 +55,17 @@ const createBackportComment = (pr: PullRequest) => {
   return body;
 };
 
-const backportImpl = async (robot: Application,
-                            context: Context,
-                            targetBranch: string,
-                            labelToRemove?: string,
-                            labelToAdd?: string) => {
+export enum BackportPurpose {
+  ExecuteBackport,
+  Check,
+}
+
+export const backportImpl = async (robot: Application,
+                                   context: Context,
+                                   targetBranch: string,
+                                   purpose: BackportPurpose,
+                                   labelToRemove?: string,
+                                   labelToAdd?: string) => {
   const base = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
@@ -60,21 +73,43 @@ const backportImpl = async (robot: Application,
 
   const log = (...args: string[]) => robot.log(slug, ...args);
 
+  const getCheckRun = async () => {
+    const allChecks = await context.github.checks.listForRef(context.repo({
+      ref: context.payload.pull_request.head.sha,
+      per_page: 100,
+    }));
+    return allChecks.data.check_runs.find(run => run.name === `${CHECK_PREFIX}${targetBranch}`);
+  };
+
+  let createdDir: string | null = null;
+
   queue.enterQueue(
+    `backport-${context.payload.pull_request.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log(`Executing ${bp} for "${slug}"`);
-      await new Promise<void>(resolve => setTimeout(resolve, 5000));
+      if (purpose === BackportPurpose.Check) {
+        const checkRun = await getCheckRun();
+        if (checkRun) {
+          await context.github.checks.update(context.repo({
+            check_run_id: `${checkRun.id}`,
+            name: checkRun.name,
+            status: 'in_progress' as 'in_progress',
+          }));
+        }
+      }
+
       const pr = context.payload.pull_request as any as PullRequest;
       // Set up empty repo on master
       log('Setting up local repository');
-      await runCommand({
+      const { dir } = await runCommand({
         what: commands.INIT_REPO,
         payload: {
           owner: base.repo.owner.login,
           repo: base.repo.name,
         },
       });
-      log('Working directory cleaned');
+      createdDir = dir;
+      log(`Working directory cleaned: ${dir}`);
 
       // Fork repository to trop
       log('forking base repo');
@@ -111,6 +146,7 @@ const backportImpl = async (robot: Application,
       await runCommand({
         what: commands.SET_UP_REMOTES,
         payload: {
+          dir,
           slug,
           remotes: [{
             name: 'target_repo',
@@ -148,15 +184,22 @@ const backportImpl = async (robot: Application,
       }
 
       log(`Found ${commits.length} commits to backport, requesting details now`);
-      const patches: string[] = [];
-      let i = 1;
-      for (const commit of commits) {
-        const patchUrl = `https://github.com/${slug}/pull/${pr.number}/commits/${commit}.patch`;
-        const patchBody = await fetch(patchUrl);
-        patches.push(await patchBody.text());
-        log(`Got patch (${i}/${commits.length})`);
-        i += 1;
+      const patches: string[] = (new Array(commits.length)).fill('');
+      const q = makeQueue({
+        concurrency: 5,
+      });
+      q.stop();
+
+      for (const [i, commit] of commits.entries()) {
+        q.push(async () => {
+          const patchUrl = `https://github.com/${slug}/pull/${pr.number}/commits/${commit}.patch`;
+          const patchBody = await fetch(patchUrl);
+          patches[i] = await patchBody.text();
+          log(`Got patch (${i + 1}/${commits.length})`);
+        });
       }
+
+      await new Promise(r => q.start(r));
       log('Got all commit info');
 
       // Temp branch on the fork
@@ -169,6 +212,7 @@ const backportImpl = async (robot: Application,
       await runCommand({
         what: commands.BACKPORT,
         payload: {
+          dir,
           slug,
           targetBranch,
           tempBranch,
@@ -180,58 +224,129 @@ const backportImpl = async (robot: Application,
 
       log('Cherry pick success, pushed up to fork');
 
-      log('Creating Pull Request');
-      const newPr = (await context.github.pullRequests.create(context.repo({
-        head: `${fork.owner.login}:${tempBranch}`,
-        base: targetBranch,
-        title: `${pr.title} (backport: ${targetBranch})`,
-        body: createBackportComment(pr),
-        maintainer_can_modify: false,
-      }))).data;
+      if (purpose === BackportPurpose.ExecuteBackport) {
+        log('Creating Pull Request');
+        const newPr = (await context.github.pullRequests.create(context.repo({
+          head: `${fork.owner.login}:${tempBranch}`,
+          base: targetBranch,
+          title: `${pr.title} (backport: ${targetBranch})`,
+          body: createBackportComment(pr),
+          maintainer_can_modify: false,
+        }))).data;
 
-      log('Adding breadcrumb comment');
-      await context.github.issues.createComment(context.repo({
-        number: pr.number,
-        body: `We have automatically backported this PR to "${targetBranch}", \
-  please check out #${newPr.number}`,
-      }) as any);
-
-      if (labelToRemove) {
-        log(`Removing label '${labelToRemove}'`);
-        await context.github.issues.removeLabel(context.repo({
+        log('Adding breadcrumb comment');
+        await context.github.issues.createComment(context.repo({
           number: pr.number,
-          name: labelToRemove,
-        }));
-      }
+          body: `We have automatically backported this PR to "${targetBranch}", \
+    please check out #${newPr.number}`,
+        }) as any);
 
-      if (labelToAdd) {
-        log(`Adding label '${labelToAdd}'`);
+        if (labelToRemove) {
+          log(`Removing label '${labelToRemove}'`);
+          await context.github.issues.removeLabel(context.repo({
+            number: pr.number,
+            name: labelToRemove,
+          }));
+        }
+
+        if (labelToAdd) {
+          log(`Adding label '${labelToAdd}'`);
+          await context.github.issues.addLabels(context.repo({
+            number: pr.number,
+            labels: [labelToAdd],
+          }));
+        }
+
         await context.github.issues.addLabels(context.repo({
-          number: pr.number,
-          labels: [labelToAdd],
+          number: newPr.number!,
+          labels: ['backport'],
         }));
+
+        log('Backport complete');
       }
 
-      await context.github.issues.addLabels(context.repo({
-        number: newPr.number!,
-        labels: ['backport'],
-      }));
+      if (purpose === BackportPurpose.Check) {
+        const checkRun = await getCheckRun();
+        if (checkRun) {
+          context.github.checks.update(context.repo({
+            check_run_id: `${checkRun.id}`,
+            name: checkRun.name,
+            conclusion: 'success' as 'success',
+            completed_at: (new Date()).toISOString(),
+            details_url: `https://github.com/electron/electron/compare/master...${fork.owner.login}:${tempBranch}`,
+            output: {
+              title: 'Can Backport',
+              summary: `This PR was checked and can be backported to "${targetBranch}" cleanly`,
+            },
+          }));
+        }
+      }
 
-      log('Backport complete');
+      await fs.remove(createdDir);
     },
     async () => {
+      let annotations: any[] | null = null;
+      let diff;
+      let rawDiff;
+      if (createdDir) {
+        const git = simpleGit(createdDir);
+        rawDiff = await git.diff();
+        diff = parseDiff(rawDiff);
+
+        annotations = [];
+        for (const file of diff) {
+          if (file.binary) continue;
+
+          for (const hunk of file.hunks) {
+            const startOffset = hunk.lines.findIndex((line: string) => line.includes('<<<<<<<'));
+            const endOffset = hunk.lines.findIndex((line: string) => line.includes('=======')) - 2;
+            const finalOffset = hunk.lines.findIndex((line: string) => line.includes('>>>>>>>'));
+            annotations.push({
+              path: file.filePath,
+              start_line: hunk.theirStartLine + Math.max(0, startOffset),
+              end_line: hunk.theirStartLine + Math.max(0, endOffset),
+              annotation_level: 'failure',
+              message: 'Patch Conflict',
+              raw_details: hunk.lines.filter((_: any, i: number) => i >= startOffset && i <= finalOffset).join('\n'),
+            });
+          }
+        }
+
+        await fs.remove(createdDir);
+      }
       const pr = context.payload.pull_request;
 
-      await context.github.issues.createComment(context.repo({
-        number: pr.number,
-        body: `An error occurred while attempting to backport this PR to "${targetBranch}",
-  you will need to perform this backport manually`,
-      }) as any);
+      if (purpose === BackportPurpose.ExecuteBackport) {
+        await context.github.issues.createComment(context.repo({
+          number: pr.number,
+          body: `An error occurred while attempting to backport this PR to "${targetBranch}",
+    you will need to perform this backport manually`,
+        }) as any);
+      }
+
+      if (purpose === BackportPurpose.Check) {
+        const checkRun = await getCheckRun();
+        if (checkRun) {
+          const mdSep = '``````````````````````````````';
+          context.github.checks.update(context.repo({
+            check_run_id: `${checkRun.id}`,
+            name: checkRun.name,
+            conclusion: 'failure' as 'failure',
+            completed_at: (new Date()).toISOString(),
+            output: {
+              title: 'Backport Failed',
+              summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
+              text: diff ? `Failed Diff:\n\n${mdSep}diff\n${rawDiff}\n${mdSep}` : undefined,
+              annotations: annotations ? annotations : undefined,
+            },
+          }));
+        }
+      }
     },
   );
 };
 
-const getLabelPrefixes = async (context: Context) => {
+export const getLabelPrefixes = async (context: Context) => {
   const config = await context.config<TropConfig>('config.yml') || {};
   const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
   const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
@@ -257,7 +372,9 @@ export const backportToLabel = async (
 
   const labelToRemove = label.name;
   const labelToAdd = label.name.replace(labelPrefixes.target, labelPrefixes.merged);
-  await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
+  await backportImpl(
+    robot, context, targetBranch, BackportPurpose.ExecuteBackport, labelToRemove, labelToAdd,
+  );
 };
 
 export const backportToBranch = async (
@@ -269,5 +386,7 @@ export const backportToBranch = async (
 
   const labelToRemove = undefined;
   const labelToAdd = labelPrefixes.merged + targetBranch;
-  await backportImpl(robot, context, targetBranch, labelToRemove, labelToAdd);
+  await backportImpl(
+    robot, context, targetBranch, BackportPurpose.ExecuteBackport, labelToRemove, labelToAdd,
+  );
 };

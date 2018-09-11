@@ -10,6 +10,7 @@ export interface InitRepoOptions {
 }
 
 export interface RemotesOptions {
+  dir: string;
   slug: string;
   remotes: {
     name: string,
@@ -18,6 +19,7 @@ export interface RemotesOptions {
 }
 
 export interface BackportOptions {
+  dir: string;
   slug: string;
   targetRemote: string;
   targetBranch: string;
@@ -37,21 +39,19 @@ export type RunnerOptions = {
   payload: BackportOptions;
 };
 
-const PATCH_NAME = 'current.patch';
-
 const baseDir = path.resolve(os.tmpdir(), 'trop-working');
-const getGit = (slug: string) => simpleGit(path.resolve(baseDir, slug));
 
 const TROP_NAME = 'Electron Bot';
 const TROP_EMAIL = 'electron@github.com';
 
 const initRepo = async (options: InitRepoOptions) => {
   const slug = `${options.owner}/${options.repo}`;
-  const dir = path.resolve(baseDir, slug);
+  const prefix = path.resolve(baseDir, slug, 'tmp-');
+  const dir = await fs.mkdtemp(prefix);
   await fs.mkdirp(dir);
   await fs.remove(dir);
   await fs.mkdirp(dir);
-  const git = getGit(slug);
+  const git = simpleGit(dir);
   await git.clone(
     `https://github.com/${slug}.git`,
     '.',
@@ -72,11 +72,11 @@ const initRepo = async (options: InitRepoOptions) => {
   await git.addConfig('user.email', TROP_EMAIL);
   await git.addConfig('user.name', TROP_NAME);
   await git.addConfig('commit.gpgsign', 'false');
-  return { success: true };
+  return { dir };
 };
 
 const setUpRemotes = async (options: RemotesOptions) => {
-  const git = getGit(options.slug);
+  const git = simpleGit(options.dir);
 
   // Add remotes
   for (const remote of options.remotes) {
@@ -87,21 +87,21 @@ const setUpRemotes = async (options: RemotesOptions) => {
   for (const remote of options.remotes) {
     await (git as any).raw(['fetch', remote.name]);
   }
-  return { success: true };
+  return { dir: options.dir };
 };
 
 const backportCommitsToBranch = async (options: BackportOptions) => {
-  const git = getGit(options.slug);
+  const git = simpleGit(options.dir);
   // Create branch
   await git.checkout(`target_repo/${options.targetBranch}`);
   await git.pull('target_repo', options.targetBranch);
   await git.checkoutBranch(options.tempBranch, `target_repo/${options.targetBranch}`);
 
   // Cherry pick
-  const patchPath = path.resolve(baseDir, options.slug, PATCH_NAME);
+  const patchPath = `${options.dir}.patch`;
   for (const patch of options.patches) {
     await fs.writeFile(patchPath, patch, 'utf8');
-    await (git as any).raw(['am', '-3', PATCH_NAME]);
+    await (git as any).raw(['am', '-3', patchPath]);
     await fs.remove(patchPath);
   }
 
@@ -109,10 +109,10 @@ const backportCommitsToBranch = async (options: BackportOptions) => {
   await git.push(options.tempRemote, options.tempBranch, {
     '--set-upstream': true,
   });
-  return { success: true };
+  return { dir: options.dir };
 };
 
-export const runCommand = async (options: RunnerOptions) => {
+export const runCommand = async (options: RunnerOptions): Promise<{ dir: string }> => {
   switch (options.what) {
     case commands.INIT_REPO:
       return await initRepo(options.payload);
