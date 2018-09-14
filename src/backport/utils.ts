@@ -301,7 +301,7 @@ export const backportImpl = async (robot: Application,
         for (const file of diff) {
           if (file.binary) continue;
 
-          for (const hunk of file.hunks) {
+          for (const hunk of (file.hunks || [])) {
             const startOffset = hunk.lines.findIndex((line: string) => line.includes('<<<<<<<'));
             const endOffset = hunk.lines.findIndex((line: string) => line.includes('=======')) - 2;
             const finalOffset = hunk.lines.findIndex((line: string) => line.includes('>>>>>>>'));
