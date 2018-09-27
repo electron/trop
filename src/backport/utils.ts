@@ -39,15 +39,15 @@ const createBackportComment = (pr: PullRequest) => {
 
   // attach information about issues resolved, if any
   if (Array.isArray(issueMatch) && issueMatch.length > 1) {
-    body += `\n\n ${issueMatch[0]}`;
+    body += `\n\n${issueMatch[0]}`;
   }
 
   const notesInfo = new RegExp(`(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)`, 'gi');
   const notesMatch = pr.body.match(notesInfo);
 
   // attach release notes to backport PR body
-  if (Array.isArray(notesMatch) && notesMatch.length > 1) {
-    body += `\n\n ${notesMatch}`;
+  if (Array.isArray(notesMatch) && notesMatch.length >= 1) {
+    body += `\n\n${notesMatch}`;
   } else {
     body += '\n\nNotes: no-notes';
   }
