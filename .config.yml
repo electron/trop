@@ -1,0 +1,5 @@
+# Configuration for trop
+
+# the name and email that will be used to open the backport
+tropName: Electron Bot
+tropEmail: electron@github.com

@@ -279,9 +279,9 @@ export const backportImpl = async (robot: Application,
             name: checkRun.name,
             conclusion: 'success' as 'success',
             completed_at: (new Date()).toISOString(),
-            details_url: `https://github.com/electron/electron/compare/master...${fork.owner.login}:${tempBranch}`,
+            details_url: `https://github.com/${slug}/compare/master...${fork.owner.login}:${tempBranch}`,
             output: {
-              title: 'Can Backport',
+              title: 'Clean Backport',
               summary: `This PR was checked and can be backported to "${targetBranch}" cleanly`,
             },
           }));
