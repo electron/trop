@@ -42,15 +42,15 @@ const createBackportComment = (pr: PullRequest) => {
     body += `\n\n${issueMatch[0]}`;
   }
 
-  const onelineMatch = /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi.exec(pr.body);
+  const onelineMatch = pr.body.match(/(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi);
   const multilineMatch =
-      /(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/gi.exec(pr.body);
+      pr.body.match(/(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/gi);
 
   // attach release notes to backport PR body
-  if (onelineMatch && onelineMatch[1]) {
+  if (onelineMatch && onelineMatch[0]) {
     body += `\n\n${onelineMatch[1]}`;
-  } else if (multilineMatch && multilineMatch[1]) {
-    body += `\n\n${multilineMatch[1]}`;
+  } else if (multilineMatch && multilineMatch[0]) {
+    body += `\n\n${multilineMatch[0]}`;
   } else {
     body += '\n\nNotes: no-notes';
   }
