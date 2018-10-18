@@ -11,7 +11,6 @@ export interface InitRepoOptions {
 
 export interface RemotesOptions {
   dir: string;
-  slug: string;
   remotes: {
     name: string,
     value: string,
@@ -44,7 +43,7 @@ const baseDir = path.resolve(os.tmpdir(), 'trop-working');
 const TROP_NAME = 'Electron Bot';
 const TROP_EMAIL = 'electron@github.com';
 
-const initRepo = async (options: InitRepoOptions) => {
+export const initRepo = async (options: InitRepoOptions) => {
   const slug = `${options.owner}/${options.repo}`;
   await fs.mkdirp(path.resolve(baseDir, slug));
   const prefix = path.resolve(baseDir, slug, 'tmp-');
@@ -58,10 +57,8 @@ const initRepo = async (options: InitRepoOptions) => {
     '.',
   );
 
-  // Clean up scraps
-  try { await (git as any).raw(['cherry-pick', '--abort']); } catch (e) {}
-  try { await (git as any).raw(['am', '--abort']); } catch (e) {}
-  await (git as any).reset('hard');
+  // Clean up just in case
+  await git.reset('hard');
   const status = await git.status();
 
   for (const file of status.not_added) {
@@ -76,7 +73,7 @@ const initRepo = async (options: InitRepoOptions) => {
   return { dir };
 };
 
-const setUpRemotes = async (options: RemotesOptions) => {
+export const setUpRemotes = async (options: RemotesOptions) => {
   const git = simpleGit(options.dir);
 
   // Add remotes
@@ -86,12 +83,12 @@ const setUpRemotes = async (options: RemotesOptions) => {
 
   // Fetch remotes
   for (const remote of options.remotes) {
-    await (git as any).raw(['fetch', remote.name]);
+    await git.raw(['fetch', remote.name]);
   }
   return { dir: options.dir };
 };
 
-const backportCommitsToBranch = async (options: BackportOptions) => {
+export const backportCommitsToBranch = async (options: BackportOptions) => {
   const git = simpleGit(options.dir);
   // Create branch
   await git.checkout(`target_repo/${options.targetBranch}`);
@@ -102,7 +99,7 @@ const backportCommitsToBranch = async (options: BackportOptions) => {
   const patchPath = `${options.dir}.patch`;
   for (const patch of options.patches) {
     await fs.writeFile(patchPath, patch, 'utf8');
-    await (git as any).raw(['am', '-3', patchPath]);
+    await git.raw(['am', '-3', patchPath]);
     await fs.remove(patchPath);
   }
 

@@ -150,7 +150,6 @@ export const backportImpl = async (robot: Application,
         what: commands.SET_UP_REMOTES,
         payload: {
           dir,
-          slug,
           remotes: [{
             name: 'target_repo',
             value: `https://github.com/${slug}.git`,
@@ -181,7 +180,7 @@ export const backportImpl = async (robot: Application,
           number: pr.number,
           body: 'This PR has wayyyy too many commits to automatically backport, \
   please do this manually',
-        }) as any);
+        }));
 
         return;
       }
@@ -246,7 +245,7 @@ export const backportImpl = async (robot: Application,
           number: pr.number,
           body: `We have automatically backported this PR to "${targetBranch}", \
     please check out #${newPr.number}`,
-        }) as any);
+        }));
 
         if (labelToRemove) {
           log(`Removing label '${labelToRemove}'`);
@@ -344,7 +343,7 @@ export const backportImpl = async (robot: Application,
   );
 };
 
-export const getLabelPrefixes = async (context: Context) => {
+export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
   const config = await context.config<TropConfig>('config.yml') || {};
   const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
   const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;

@@ -18,6 +18,7 @@
 		"node_modules",
 		"spec",
 		"lib",
-		"working"
+		"working",
+		"jest.config.js"
 	]
 }
