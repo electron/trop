@@ -48,7 +48,7 @@ const createBackportComment = (pr: PullRequest) => {
 
   // attach release notes to backport PR body
   if (onelineMatch && onelineMatch[0]) {
-    body += `\n\n${onelineMatch[1]}`;
+    body += `\n\n${onelineMatch[0]}`;
   } else if (multilineMatch && multilineMatch[0]) {
     body += `\n\n${multilineMatch[0]}`;
   } else {
