@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 import * as commands from './commands';
+import * as config from 'config-yml';
 
 export interface InitRepoOptions {
   owner: string;
@@ -40,9 +41,6 @@ export type RunnerOptions = {
 
 const baseDir = path.resolve(os.tmpdir(), 'trop-working');
 
-const TROP_NAME = 'Electron Bot';
-const TROP_EMAIL = 'electron@github.com';
-
 export const initRepo = async (options: InitRepoOptions) => {
   const slug = `${options.owner}/${options.repo}`;
   await fs.mkdirp(path.resolve(baseDir, slug));
@@ -67,8 +65,8 @@ export const initRepo = async (options: InitRepoOptions) => {
 
   await git.checkout('master');
   await git.pull();
-  await git.addConfig('user.email', TROP_EMAIL);
-  await git.addConfig('user.name', TROP_NAME);
+  await git.addConfig('user.email', config.tropEmail || 'trop@example.com');
+  await git.addConfig('user.name', config.tropName || 'Trop Bot');
   await git.addConfig('commit.gpgsign', 'false');
   return { dir };
 };

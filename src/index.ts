@@ -66,7 +66,7 @@ module.exports = async (robot: Application) => {
           output: {
             title: 'Cancelled',
             summary: 'This trop check was cancelled and can be ignored as this \
-PR is no longer targetting this branch for a backport',
+PR is no longer targeting this branch for a backport',
             annotations: [],
           },
         }));

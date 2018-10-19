@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@octokit/rest": "^15.15.0",
+    "config-yml": "^0.10.2",
     "fs-extra": "^7.0.0",
     "node-fetch": "^2.1.1",
     "probot": "~7.0.0",
