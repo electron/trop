@@ -148,7 +148,7 @@ PR is no longer targetting this branch for a backport',
           context.repo({ number: payload.issue.number }))
         ).data as any;
         await context.github.issues.createComment(context.repo({
-          body: `The backport process for this PR has been manually initiated, here we go! :D`,
+          body: 'The backport process for this PR has been manually initiated, here we go! :D',
           number: payload.issue.number,
         }));
         backportAllLabels(context, pr);
