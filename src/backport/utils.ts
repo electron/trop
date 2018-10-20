@@ -265,7 +265,7 @@ export const backportImpl = async (robot: Application,
 
         await context.github.issues.addLabels(context.repo({
           number: newPr.number!,
-          labels: ['backport'],
+          labels: ['backport', `${targetBranch}`],
         }));
 
         log('Backport complete');
