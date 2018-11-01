@@ -40,6 +40,7 @@ export interface PullRequest {
 
 export interface TropConfig {
   targetLabelPrefix?: string;
+  inFlightLabelPrefix?: string;
   mergedLabelPrefix?: string;
   authorizedUsers?: string[];
 }

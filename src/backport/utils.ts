@@ -16,6 +16,7 @@ const { parse: parseDiff } = require('what-the-diff');
 
 const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
+const IN_FLIGHT_LABEL_PREFIX = 'in-flight/';
 
 export const labelToTargetBranch = (label: Label, prefix: string) => {
   return label.name.replace(prefix, '');
@@ -30,17 +31,26 @@ const getGitHub = () => {
   return g;
 };
 
+export const labelMergedPR = async (context: Context, pr: PullRequest, targetBranch: String) => {
+  const prMatch = pr.body.match(/#[0-9]{1,7}/);
+  if (prMatch && prMatch[0]) {
+    const labelPrefixes = await getLabelPrefixes(context);
+    const prNumber = parseInt(prMatch[0].substring(1), 10);
+
+    await context.github.issues.removeLabel(context.repo({
+      number: prNumber,
+      name: labelPrefixes.inFlight + targetBranch,
+    }));
+
+    await context.github.issues.addLabels(context.repo({
+      number: prNumber,
+      labels: [`${labelPrefixes.merged}${targetBranch}`],
+    }));
+  }
+};
+
 const createBackportComment = (pr: PullRequest) => {
   let body = `Backport of #${pr.number}\n\nSee that PR for details.`;
-
-  // tslint:disable-next-line
-  const issueFixInfo = new RegExp(`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) (${pr.base.repo.html_url}/issues/\\d+)`, 'i');
-  const issueMatch = pr.body.match(issueFixInfo);
-
-  // attach information about issues resolved, if any
-  if (Array.isArray(issueMatch) && issueMatch.length > 1) {
-    body += `\n\n${issueMatch[0]}`;
-  }
 
   const onelineMatch = pr.body.match(/(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi);
   const multilineMatch =
@@ -173,19 +183,19 @@ export const backportImpl = async (robot: Application,
         return;
       }
 
+      // Over 240 commits is probably the limit from github so let's not bother
       if (commits.length >= 240) {
-        // Over 240 commits is probably the limit from github so let's not bother
-        log(`Way to many commits (${commits.length})... Giving up`);
+        log(`Too many commits (${commits.length})...backport will not be performed.`);
         await context.github.issues.createComment(context.repo({
           number: pr.number,
-          body: 'This PR has wayyyy too many commits to automatically backport, \
-  please do this manually',
+          body: 'This PR has exceeded the automatic backport commit limit \
+    and must be performed manually.',
         }));
 
         return;
       }
 
-      log(`Found ${commits.length} commits to backport, requesting details now`);
+      log(`Found ${commits.length} commits to backport, requesting details now.`);
       const patches: string[] = (new Array(commits.length)).fill('');
       const q = makeQueue({
         concurrency: 5,
@@ -243,7 +253,7 @@ export const backportImpl = async (robot: Application,
         log('Adding breadcrumb comment');
         await context.github.issues.createComment(context.repo({
           number: pr.number,
-          body: `We have automatically backported this PR to "${targetBranch}", \
+          body: `I have automatically backported this PR to "${targetBranch}", \
     please check out #${newPr.number}`,
         }));
 
@@ -282,7 +292,7 @@ export const backportImpl = async (robot: Application,
             details_url: `https://github.com/${slug}/compare/master...${fork.owner.login}:${tempBranch}`,
             output: {
               title: 'Clean Backport',
-              summary: `This PR was checked and can be backported to "${targetBranch}" cleanly`,
+              summary: `This PR was checked and can be backported to "${targetBranch}" cleanly.`,
             },
           }));
         }
@@ -355,8 +365,9 @@ export const backportImpl = async (robot: Application,
 export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
   const config = await context.config<TropConfig>('config.yml') || {};
   const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
+  const inFlight = config.inFlightLabelPrefix || IN_FLIGHT_LABEL_PREFIX;
   const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
-  return { target, merged };
+  return { target, inFlight, merged };
 };
 
 export const backportToLabel = async (
@@ -377,7 +388,7 @@ export const backportToLabel = async (
   }
 
   const labelToRemove = label.name;
-  const labelToAdd = label.name.replace(labelPrefixes.target, labelPrefixes.merged);
+  const labelToAdd = label.name.replace(labelPrefixes.target, labelPrefixes.inFlight);
   await backportImpl(
     robot, context, targetBranch, BackportPurpose.ExecuteBackport, labelToRemove, labelToAdd,
   );
