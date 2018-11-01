@@ -1,5 +1,15 @@
 import { Application, Context } from 'probot';
-import { backportToBranch, backportToLabel, getLabelPrefixes, labelToTargetBranch, backportImpl, BackportPurpose } from './backport/utils';
+
+import {
+  backportToBranch,
+  backportToLabel,
+  getLabelPrefixes,
+  labelToTargetBranch,
+  backportImpl,
+  BackportPurpose,
+  labelMergedPR,
+} from './backport/utils';
+
 import { PullRequest, TropConfig } from './backport/Probot';
 import { CHECK_PREFIX } from './backport/constants';
 
@@ -8,6 +18,15 @@ module.exports = async (robot: Application) => {
     robot.log.error('You must set GITHUB_FORK_USER_TOKEN');
     process.exit(1);
   }
+
+  const labelMergedPRs = async (context: Context, pr: PullRequest) => {
+    for (const label of pr.labels) {
+      const targetBranch = label.name.match(/(\d)-(\d)-x/);
+      if (targetBranch && targetBranch[0]) {
+        await labelMergedPR(context, pr, label.name);
+      }
+    }
+  };
 
   const backportAllLabels = (context: Context, pr: PullRequest) => {
     for (const label of pr.labels) {
@@ -92,9 +111,11 @@ PR is no longer targeting this branch for a backport',
   robot.on('pull_request.closed', async (context) => {
     const payload = context.payload;
     if (payload.pull_request.merged) {
-      // Check if the author is us, if so stop processing
-      if (payload.pull_request.user.login.endsWith('[bot]')) return;
-      backportAllLabels(context, payload.pull_request as any);
+      if (payload.pull_request.user.login.endsWith('[bot]')) {
+        await labelMergedPRs(context, payload.pull_request as any);
+      } else {
+        backportAllLabels(context, payload.pull_request as any);
+      }
     }
   });
 
