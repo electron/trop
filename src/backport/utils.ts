@@ -344,8 +344,8 @@ export const backportImpl = async (robot: Application,
         const checkRun = await getCheckRun();
         if (checkRun) {
           const mdSep = '``````````````````````````````';
-          context.github.checks.update(context.repo({
-            check_run_id: `${checkRun.id}`,
+          const updateOpts: GitHub.ChecksUpdateParams = context.repo({
+            check_run_id: checkRun.id,
             name: checkRun.name,
             conclusion: 'failure' as 'failure',
             completed_at: (new Date()).toISOString(),
@@ -355,7 +355,14 @@ export const backportImpl = async (robot: Application,
               text: diff ? `Failed Diff:\n\n${mdSep}diff\n${rawDiff}\n${mdSep}` : undefined,
               annotations: annotations ? annotations : undefined,
             },
-          }));
+          });
+          try {
+            await context.github.checks.update(updateOpts as any);
+          } catch (err) {
+            // A github error occurred, let's try mark it as a failure without annotations
+            updateOpts.output!.annotations = undefined;
+            await context.github.checks.update(updateOpts as any);
+          }
         }
       }
     },
