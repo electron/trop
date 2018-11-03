@@ -2,7 +2,9 @@ jest.mock('request');
 const { Application } = require('probot');
 
 import * as utils from '../utils';
-import trop from '../../index';
+import { ProbotHandler } from '../../index';
+
+const trop: ProbotHandler = require('../../index');
 
 // event fixtures
 const prClosedEvent = require('./fixtures/pull_request.closed.json');
