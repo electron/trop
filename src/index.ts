@@ -13,7 +13,7 @@ import {
 import { PullRequest, TropConfig } from './backport/Probot';
 import { CHECK_PREFIX } from './backport/constants';
 
-module.exports = async (robot: Application) => {
+const probotHandler = async (robot: Application) => {
   if (!process.env.GITHUB_FORK_USER_TOKEN) {
     robot.log.error('You must set GITHUB_FORK_USER_TOKEN');
     process.exit(1);
@@ -223,3 +223,8 @@ sending your 1's and 0's to "${branch}" here we go! :D`,
     }
   });
 };
+
+module.exports = probotHandler;
+
+type ProbotHandler = typeof probotHandler;
+export { ProbotHandler };
