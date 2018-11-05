@@ -219,7 +219,8 @@ export const backportImpl = async (robot: Application,
         .replace(/ /g, '-')
         .replace(/\:/g, '-')
         .replace(/\[/g, '-')
-        .replace(/\]/g, '-').toLowerCase();
+        .replace(/\]/g, '-')
+        .replace(/\*/g, 'x').toLowerCase();
       const tempBranch = `${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
 
       log(`Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
