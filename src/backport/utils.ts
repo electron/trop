@@ -407,7 +407,7 @@ export const backportToBranch = async (
   const labelPrefixes = await getLabelPrefixes(context);
 
   const labelToRemove = undefined;
-  const labelToAdd = labelPrefixes.merged + targetBranch;
+  const labelToAdd = labelPrefixes.inFlight + targetBranch;
   await backportImpl(
     robot, context, targetBranch, BackportPurpose.ExecuteBackport, labelToRemove, labelToAdd,
   );
