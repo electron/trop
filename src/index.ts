@@ -139,7 +139,10 @@ PR is no longer targeting this branch for a backport',
     if (!cmd.startsWith(TROP_COMMAND_PREFIX)) return;
 
     if (!config.authorizedUsers.includes(payload.comment.user.login)) {
-      robot.log.error('This user is not authorized to use trop');
+      await context.github.issues.createComment(context.repo({
+        number: payload.issue.number,
+        body: `@${payload.comment.user.login} is not authorized to run PR backports.`,
+      }));
       return;
     }
 
