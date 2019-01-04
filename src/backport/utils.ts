@@ -341,10 +341,12 @@ export const backportImpl = async (robot: Application,
         const labelPrefixes = await getLabelPrefixes(context);
 
         const labelToRemove = labelPrefixes.target + targetBranch;
-        await context.github.issues.removeLabel(context.repo({
-          number: pr.number,
-          name: labelToRemove,
-        }));
+        if (labelExistsOnPR(context, labelToRemove)) {
+          await context.github.issues.removeLabel(context.repo({
+            number: pr.number,
+            name: labelToRemove,
+          }));
+        }
 
         const labelToAdd = labelPrefixes.needsManual + targetBranch;
         await context.github.issues.addLabels(context.repo({
@@ -380,6 +382,20 @@ export const backportImpl = async (robot: Application,
       }
     },
   );
+};
+
+const labelExistsOnPR = async (context: Context, labelName: string) => {
+  const base = context.payload.pull_request.base;
+
+  const labels = await context.github.issues.getIssueLabels(context.repo({
+    owner: base.repo.owner.login,
+    repo: base.repo.name,
+    number: context.payload.pull_request.number,
+    per_page: 100,
+    page: 1,
+  }));
+
+  return labels.data.some(label => label.name === labelName);
 };
 
 export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
