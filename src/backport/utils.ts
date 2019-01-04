@@ -17,6 +17,7 @@ const { parse: parseDiff } = require('what-the-diff');
 const TARGET_LABEL_PREFIX = 'target/';
 const MERGED_LABEL_PREFIX = 'merged/';
 const IN_FLIGHT_LABEL_PREFIX = 'in-flight/';
+const NEEDS_MANUAL_LABEL_PREFIX = 'needs-manual-bp/';
 
 export const labelToTargetBranch = (label: Label, prefix: string) => {
   return label.name.replace(prefix, '');
@@ -336,6 +337,20 @@ export const backportImpl = async (robot: Application,
           body: `I was unable to backport this PR to "${targetBranch}" cleanly;
    you will need to perform this backport manually.`,
         }) as any);
+
+        const labelPrefixes = await getLabelPrefixes(context);
+
+        const labelToRemove = labelPrefixes.target + targetBranch;
+        await context.github.issues.removeLabel(context.repo({
+          number: pr.number,
+          name: labelToRemove,
+        }));
+
+        const labelToAdd = labelPrefixes.needsManual + targetBranch;
+        await context.github.issues.addLabels(context.repo({
+          number: pr.number,
+          labels: [labelToAdd],
+        }));
       }
 
       if (purpose === BackportPurpose.Check) {
@@ -372,7 +387,9 @@ export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
   const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
   const inFlight = config.inFlightLabelPrefix || IN_FLIGHT_LABEL_PREFIX;
   const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
-  return { target, inFlight, merged };
+  const needsManual = config.needsManualLabelPrefix || NEEDS_MANUAL_LABEL_PREFIX;
+
+  return { target, inFlight, merged, needsManual };
 };
 
 export const backportToLabel = async (
