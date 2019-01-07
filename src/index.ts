@@ -53,7 +53,7 @@ const probotHandler = async (robot: Application) => {
 
         await context.github.checks.update(context.repo({
           name: existing.name,
-          check_run_id: `${existing.id}`,
+          check_run_id: existing.id,
           status: 'queued' as 'queued',
         }));
       } else {
@@ -78,7 +78,7 @@ const probotHandler = async (robot: Application) => {
         label => label.name === `${labelPrefixes.target}${checkRun.name.replace(CHECK_PREFIX, '')}`,
       )) {
         context.github.checks.update(context.repo({
-          check_run_id: `${checkRun.id}`,
+          check_run_id: checkRun.id,
           name: checkRun.name,
           conclusion: 'neutral' as 'neutral',
           completed_at: (new Date()).toISOString(),
