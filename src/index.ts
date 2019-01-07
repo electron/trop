@@ -53,7 +53,6 @@ const probotHandler = async (robot: Application) => {
 
         await context.github.checks.update(context.repo({
           name: existing.name,
-          owner: pr.base.repo.owner.login,
           check_run_id: existing.id,
           status: 'queued' as 'queued',
         }));
@@ -80,7 +79,6 @@ const probotHandler = async (robot: Application) => {
       )) {
         context.github.checks.update(context.repo({
           check_run_id: checkRun.id,
-          owner: pr.base.repo.owner.login,
           name: checkRun.name,
           conclusion: 'neutral' as 'neutral',
           completed_at: (new Date()).toISOString(),

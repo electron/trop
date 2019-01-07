@@ -106,8 +106,6 @@ export const backportImpl = async (robot: Application,
         if (checkRun) {
           await context.github.checks.update(context.repo({
             check_run_id: checkRun.id,
-            owner: base.repo.owner.login,
-            repo: base.repo.name,
             name: checkRun.name,
             status: 'in_progress' as 'in_progress',
           }));
@@ -288,7 +286,6 @@ export const backportImpl = async (robot: Application,
           context.github.checks.update(context.repo({
             check_run_id: checkRun.id,
             name: checkRun.name,
-            owner: base.repo.owner.login,
             conclusion: 'success' as 'success',
             completed_at: (new Date()).toISOString(),
             details_url: `https://github.com/${slug}/compare/master...${fork.owner.login}:${tempBranch}`,
@@ -391,8 +388,6 @@ const labelExistsOnPR = async (context: Context, labelName: string) => {
   const base = context.payload.pull_request.base;
 
   const labels = await context.github.issues.listLabelsOnIssue(context.repo({
-    owner: base.repo.owner.login,
-    repo: base.repo.name,
     number: context.payload.pull_request.number,
     per_page: 100,
     page: 1,
