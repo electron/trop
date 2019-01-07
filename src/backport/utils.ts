@@ -105,7 +105,9 @@ export const backportImpl = async (robot: Application,
         const checkRun = await getCheckRun();
         if (checkRun) {
           await context.github.checks.update(context.repo({
-            check_run_id: `${checkRun.id}`,
+            check_run_id: checkRun.id,
+            owner: base.repo.owner.login,
+            repo: base.repo.name,
             name: checkRun.name,
             status: 'in_progress' as 'in_progress',
           }));
@@ -128,7 +130,7 @@ export const backportImpl = async (robot: Application,
       // Fork repository to trop
       log('forking base repo');
       const gh = getGitHub();
-      const fork = (await gh.repos.fork({
+      const fork = (await gh.repos.createFork({
         owner: base.repo.owner.login,
         repo: base.repo.name,
       })).data;
@@ -138,7 +140,7 @@ export const backportImpl = async (robot: Application,
       while (!forkReady && attempt < 20) {
         log(`testing fork - Attempt ${attempt + 1}/20`);
         try {
-          const { data } = await gh.repos.getCommits({
+          const { data } = await gh.repos.listCommits({
             owner: fork.owner.login,
             repo: fork.name!,
           });
@@ -174,7 +176,7 @@ export const backportImpl = async (robot: Application,
 
       // Get list of commits
       log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
-      const commits: string[] = (await context.github.pullRequests.getCommits(context.repo({
+      const commits: string[] = (await context.github.pullRequests.listCommits(context.repo({
         number: pr.number,
       }))).data.map(commit => commit.sha!);
 
@@ -284,8 +286,9 @@ export const backportImpl = async (robot: Application,
         const checkRun = await getCheckRun();
         if (checkRun) {
           context.github.checks.update(context.repo({
-            check_run_id: `${checkRun.id}`,
+            check_run_id: checkRun.id,
             name: checkRun.name,
+            owner: base.repo.owner.login,
             conclusion: 'success' as 'success',
             completed_at: (new Date()).toISOString(),
             details_url: `https://github.com/${slug}/compare/master...${fork.owner.login}:${tempBranch}`,
@@ -387,7 +390,7 @@ export const backportImpl = async (robot: Application,
 const labelExistsOnPR = async (context: Context, labelName: string) => {
   const base = context.payload.pull_request.base;
 
-  const labels = await context.github.issues.getIssueLabels(context.repo({
+  const labels = await context.github.issues.listLabelsOnIssue(context.repo({
     owner: base.repo.owner.login,
     repo: base.repo.name,
     number: context.payload.pull_request.number,
