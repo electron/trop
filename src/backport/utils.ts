@@ -19,6 +19,11 @@ const MERGED_LABEL_PREFIX = 'merged/';
 const IN_FLIGHT_LABEL_PREFIX = 'in-flight/';
 const NEEDS_MANUAL_LABEL_PREFIX = 'needs-manual-bp/';
 
+export enum PRChange {
+  OPEN,
+  CLOSE,
+}
+
 export const labelToTargetBranch = (label: Label, prefix: string) => {
   return label.name.replace(prefix, '');
 };
@@ -404,6 +409,43 @@ export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
   const needsManual = config.needsManualLabelPrefix || NEEDS_MANUAL_LABEL_PREFIX;
 
   return { target, inFlight, merged, needsManual };
+};
+
+export const updateManualBackport = async (
+  context: Context,
+  type: PRChange,
+  oldPRNumber: number,
+) => {
+  const pr = context.payload.pull_request;
+  let labelToRemove;
+  let labelToAdd;
+
+  const labelPrefixes = await getLabelPrefixes(context);
+
+  if (type === PRChange.OPEN) {
+    labelToRemove = labelPrefixes.needsManual + pr.base.ref;
+    labelToAdd = labelPrefixes.inFlight + pr.base.ref;
+
+    // comment on the original PR with the manual backport link
+    await context.github.issues.createComment(context.repo({
+      number: oldPRNumber,
+      body: `A maintainer has manually backported this PR to "${pr.base.ref}", \
+      please check out #${pr.number}`,
+    }));
+  } else {
+    labelToRemove = labelPrefixes.inFlight + pr.base.ref;
+    labelToAdd = labelPrefixes.merged + pr.base.ref;
+  }
+
+  await context.github.issues.removeLabel(context.repo({
+    number: oldPRNumber,
+    name: labelToRemove,
+  }));
+
+  await context.github.issues.addLabels(context.repo({
+    number: oldPRNumber,
+    labels: [labelToAdd],
+  }));
 };
 
 export const backportToLabel = async (
