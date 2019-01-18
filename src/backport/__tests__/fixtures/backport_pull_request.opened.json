@@ -1,7 +1,7 @@
 {
   "event": "pull_request",
   "payload": {
-    "action": "closed",
+    "action": "opened",
     "number": 7,
     "pull_request": {
       "url": "my_cool_url",

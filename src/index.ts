@@ -8,6 +8,8 @@ import {
   backportImpl,
   BackportPurpose,
   labelMergedPR,
+  updateManualBackport,
+  PRChange,
 } from './backport/utils';
 
 import { PullRequest, TropConfig } from './backport/Probot';
@@ -95,13 +97,36 @@ PR is no longer targeting this branch for a backport',
 
   const maybeRunCheck = async (context: Context) => {
     const payload = context.payload;
-    console.log(!payload.pull_request.merged);
     if (!payload.pull_request.merged) {
       await runCheck(context, payload.pull_request as any);
     }
   };
 
-  robot.on('pull_request.opened', maybeRunCheck);
+  const maybeGetManualBackportNumber = (context: Context) => {
+    const pr = context.payload.pull_request;
+    let backportNumber: null | number = null;
+
+    if (!pr.user.login.endsWith('[bot]')) {
+      // check if this PR is a manual backport of another PR
+      const backportPattern = /^(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
+      const match: Array<string> | null = pr.body.match(backportPattern);
+      if (match && match[1]) {
+        backportNumber = parseInt(match[1], 10);
+      }
+    }
+
+    return backportNumber;
+  };
+
+  robot.on('pull_request.opened', async (context: Context) => {
+    const oldPRNumber = maybeGetManualBackportNumber(context);
+    if (oldPRNumber) {
+      await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
+    }
+
+    maybeRunCheck(context);
+  });
+
   robot.on('pull_request.reopened', maybeRunCheck);
   robot.on('pull_request.labeled', maybeRunCheck);
   robot.on('pull_request.unlabeled', maybeRunCheck);
@@ -111,6 +136,11 @@ PR is no longer targeting this branch for a backport',
   robot.on('pull_request.closed', async (context) => {
     const payload = context.payload;
     if (payload.pull_request.merged) {
+      const oldPRNumber = maybeGetManualBackportNumber(context);
+      if (typeof oldPRNumber === 'number') {
+        await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
+      }
+
       if (payload.pull_request.user.login.endsWith('[bot]')) {
         await labelMergedPRs(context, payload.pull_request as any);
       } else {
