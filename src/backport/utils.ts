@@ -212,7 +212,7 @@ export const backportImpl = async (robot: Application,
 
       for (const [i, commit] of commits.entries()) {
         q.push(async () => {
-          const patchUrl = `https://api.github.com/repos/${slug}/commits/${commit}`
+          const patchUrl = `https://api.github.com/repos/${slug}/commits/${commit}`;
           const patchBody = await fetch(patchUrl, {
             headers: {
               Accept: 'application/vnd.github.VERSION.patch',
