@@ -50,6 +50,7 @@ export const initRepo = async (options: InitRepoOptions) => {
   await fs.remove(dir);
   await fs.mkdirp(dir);
   const git = simpleGit(dir);
+  // This adds support for the target_repo being private as long as the fork user has read access
   if (process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
     await git.clone(
       `https://${process.env.GITHUB_FORK_USER_CLONE_LOGIN}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${slug}.git`,

@@ -158,13 +158,19 @@ export const backportImpl = async (robot: Application,
 
       // Set up remotes
       log('setting up remotes');
+      let targetRepoRemote = `https://github.com/${slug}.git`;
+      // This adds support for the target_repo being private as long as the fork user has read access
+      if (process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
+        targetRepoRemote =
+          `https://${process.env.GITHUB_FORK_USER_CLONE_LOGIN}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${slug}.git`;
+      }
       await runCommand({
         what: commands.SET_UP_REMOTES,
         payload: {
           dir,
           remotes: [{
             name: 'target_repo',
-            value: `https://github.com/${slug}.git`,
+            value: targetRepoRemote,
           }, {
             name: 'fork',
             // tslint:disable-next-line
@@ -206,8 +212,13 @@ export const backportImpl = async (robot: Application,
 
       for (const [i, commit] of commits.entries()) {
         q.push(async () => {
-          const patchUrl = `https://github.com/${slug}/pull/${pr.number}/commits/${commit}.patch`;
-          const patchBody = await fetch(patchUrl);
+          const patchUrl = `https://api.github.com/repos/${slug}/commits/${commit}`;
+          const patchBody = await fetch(patchUrl, {
+            headers: {
+              Accept: 'application/vnd.github.VERSION.patch',
+              Authorization: `token ${process.env.GITHUB_FORK_USER_TOKEN}`,
+            },
+          });
           patches[i] = await patchBody.text();
           log(`Got patch (${i + 1}/${commits.length})`);
         });
@@ -242,7 +253,16 @@ export const backportImpl = async (robot: Application,
 
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('Creating Pull Request');
-        const newPr = (await context.github.pullRequests.create(context.repo({
+        let createFn = context.github.pullRequests.create;
+        if (process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
+          const customGithub = new GitHub();
+          customGithub.authenticate({
+            type: 'token',
+            token: process.env.GITHUB_FORK_USER_TOKEN!,
+          });
+          createFn = customGithub.pulls.create as any;
+        }
+        const newPr = (await createFn(context.repo({
           head: `${fork.owner.login}:${tempBranch}`,
           base: targetBranch,
           title: `${pr.title} (backport: ${targetBranch})`,
