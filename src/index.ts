@@ -106,7 +106,7 @@ PR is no longer targeting this branch for a backport',
     const pr = context.payload.pull_request;
     let backportNumber: null | number = null;
 
-    if (!pr.user.login.endsWith('[bot]')) {
+    if (!pr.user.login.endsWith('[bot]') && pr.user.login !== process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
       // check if this PR is a manual backport of another PR
       const backportPattern = /^(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
       const match: Array<string> | null = pr.body.match(backportPattern);
