@@ -260,7 +260,7 @@ export const backportImpl = async (robot: Application,
             type: 'token',
             token: process.env.GITHUB_FORK_USER_TOKEN!,
           });
-          createFn = customGithub.pulls.create;
+          createFn = customGithub.pulls.create as any;
         }
         const newPr = (await createFn(context.repo({
           head: `${fork.owner.login}:${tempBranch}`,
