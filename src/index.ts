@@ -14,6 +14,7 @@ import {
 import { PullRequest, TropConfig } from './backport/Probot';
 import { CHECK_PREFIX } from './constants';
 import { PRChange } from './enums';
+import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
 
 const probotHandler = async (robot: Application) => {
   if (!process.env.GITHUB_FORK_USER_TOKEN) {
@@ -118,19 +119,95 @@ PR is no longer targeting this branch for a backport',
     return backportNumber;
   };
 
-  robot.on('pull_request.opened', async (context: Context) => {
+  const VALID_BACKPORT_CHECK_NAME = 'Valid Backport';
+
+  robot.on(['pull_request.opened', 'pull_request.edited', 'pull_request.synchronize'], async (context: Context) => {
     const oldPRNumber = maybeGetManualBackportNumber(context);
     if (oldPRNumber) {
       await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
     }
 
-    maybeRunCheck(context);
+    // Check if the PR is going to master, if it's not check if it's correctly
+    // tagged as a backport of a PR that has already been merged into master
+    const pr = context.payload.pull_request;
+    const { data: allChecks } = await context.github.checks.listForRef(context.repo({
+      ref: pr.head.sha,
+      per_page: 100,
+    }));
+    let checkRun = allChecks.check_runs.find(run => run.name === VALID_BACKPORT_CHECK_NAME);
+
+    if (pr.base.ref !== 'master') {
+      if (!checkRun) {
+        checkRun = (await context.github.checks.create(context.repo({
+          name: VALID_BACKPORT_CHECK_NAME,
+          head_sha: pr.head.sha,
+          status: 'queued' as 'queued',
+          details_url: 'https://github.com/electron/trop',
+        }))).data as any as ChecksListForRefResponseCheckRunsItem;
+      }
+
+      let goodOldPR = Boolean(oldPRNumber);
+      if (oldPRNumber) {
+        const oldPR = (await context.github.pullRequests.get(context.repo({
+          number: oldPRNumber,
+        }))).data;
+
+        // The target PR is only "good" if it was merged to master
+        goodOldPR = oldPR.base.ref === 'master' && oldPR.merged;
+      }
+
+      if (goodOldPR) {
+        await context.github.checks.update(context.repo({
+          check_run_id: checkRun.id,
+          name: checkRun.name,
+          conclusion: 'success' as 'success',
+          completed_at: (new Date()).toISOString(),
+          details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
+          output: {
+            title: 'Valid Backport',
+            summary: `This PR is declared as backporting "#${oldPRNumber}" which is valid PR that has been merged into master`,
+          },
+        }));
+      } else {
+        await context.github.checks.update(context.repo({
+          check_run_id: checkRun.id,
+          name: checkRun.name,
+          conclusion: 'failure' as 'failure',
+          completed_at: (new Date()).toISOString(),
+          details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
+          output: {
+            title: 'Invalid Backport',
+            summary: 'This PR is targetting a branch that is not master but is not marked as \
+backporting a PR that has been merged into master',
+          },
+        }));
+      }
+    } else if (checkRun) {
+      // We are targetting master but for some reason have a check run???
+      // Let's mark this check as cancelled
+      await context.github.checks.update(context.repo({
+        check_run_id: checkRun.id,
+        name: checkRun.name,
+        conclusion: 'neutral' as 'neutral',
+        completed_at: (new Date()).toISOString(),
+        output: {
+          title: 'Cancelled',
+          summary: 'This PR is targetting master so there is no way it can be a backport (let alone a bad backport)',
+          annotations: [],
+        },
+      }));
+    }
+
+    // Only run the backportable checks on "opened" and "synchronize"
+    // an "edited" change can not impact backportability
+    if (context.payload.action !== 'edited') {
+      maybeRunCheck(context);
+    }
   });
 
   robot.on('pull_request.reopened', maybeRunCheck);
   robot.on('pull_request.labeled', maybeRunCheck);
   robot.on('pull_request.unlabeled', maybeRunCheck);
-  robot.on('pull_request.synchronize', maybeRunCheck);
 
   // backport pull requests to labeled targets when PR is merged
   robot.on('pull_request.closed', async (context) => {
