@@ -109,7 +109,7 @@ PR is no longer targeting this branch for a backport',
 
     if (!pr.user.login.endsWith('[bot]') && pr.user.login !== process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
       // check if this PR is a manual backport of another PR
-      const backportPattern = /^(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
+      const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
       const match: Array<string> | null = pr.body.match(backportPattern);
       if (match && match[1]) {
         backportNumber = parseInt(match[1], 10);
@@ -146,17 +146,30 @@ PR is no longer targeting this branch for a backport',
         }))).data as any as ChecksListForRefResponseCheckRunsItem;
       }
 
-      let goodOldPR = Boolean(oldPRNumber);
-      if (oldPRNumber) {
+      const FASTTRACK_PREFIXES = ['build:', 'ci:'];
+      let failureCause = '';
+
+      if (!oldPRNumber) {
+        // Allow fast-track prefixes through this check
+        if (!FASTTRACK_PREFIXES.some(pre => pr.title.startsWith(pre))) {
+          failureCause = 'is missing a "Backport of #{N}" declaration.  \
+Check out the trop documentation linked below for more information.';
+        }
+      } else {
         const oldPR = (await context.github.pullRequests.get(context.repo({
           number: oldPRNumber,
         }))).data;
 
         // The target PR is only "good" if it was merged to master
-        goodOldPR = oldPR.base.ref === 'master' && oldPR.merged;
+        if (oldPR.base.ref !== 'master') {
+          failureCause = 'the PR that it is backporting was not not targetting the master branch.';
+        } else if (!oldPR.merged) {
+          failureCause = 'the PR that is is backporting has not been merged yet.';
+        }
       }
 
-      if (goodOldPR) {
+      // No reason for failure === must be good
+      if (failureCause === '') {
         await context.github.checks.update(context.repo({
           check_run_id: checkRun.id,
           name: checkRun.name,
@@ -165,7 +178,7 @@ PR is no longer targeting this branch for a backport',
           details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
           output: {
             title: 'Valid Backport',
-            summary: `This PR is declared as backporting "#${oldPRNumber}" which is valid PR that has been merged into master`,
+            summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into master`,
           },
         }));
       } else {
@@ -177,8 +190,7 @@ PR is no longer targeting this branch for a backport',
           details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
           output: {
             title: 'Invalid Backport',
-            summary: 'This PR is targetting a branch that is not master but is not marked as \
-backporting a PR that has been merged into master',
+            summary: `This PR is targetting a branch that is not master but ${failureCause}`,
           },
         }));
       }
@@ -192,7 +204,7 @@ backporting a PR that has been merged into master',
         completed_at: (new Date()).toISOString(),
         output: {
           title: 'Cancelled',
-          summary: 'This PR is targetting master so there is no way it can be a backport (let alone a bad backport)',
+          summary: 'This PR is targetting `master` and is not a backport',
           annotations: [],
         },
       }));

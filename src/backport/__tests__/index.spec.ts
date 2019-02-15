@@ -73,6 +73,9 @@ describe('trop', () => {
           ],
         })),
       },
+      checks: {
+        listForRef: jest.fn().mockReturnValue(Promise.resolve({ data: { check_runs: [] } })),
+      },
     };
 
     robot.auth = () => Promise.resolve(github);

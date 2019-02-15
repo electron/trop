@@ -14,7 +14,13 @@
       "labels": [{
         "name": "todo",
         "color": "8cb728"
-      }]
+      }],
+      "head": {
+        "sha": "ABC"
+      },
+      "base": {
+        "ref": "master"
+      }
     },
     "label": {
       "name": "todo",

@@ -7,9 +7,18 @@ in the PR yourself locally and pushing up a new branch.
 When you make a PR for a manual backport it must be in the following format.
 
 ```markdown
-Backport of #[Original PR Number]
+#### Description of Change
 
-{Normal PR Body}
+Backport of #[Original PR Number]
+See that PR for details.
+
+#### Checklist
+
+< Checklist Items>
+
+#### Release Notes
+
+Notes: <COPY ORIGINAL PR RELEASE NOTES HERE>
 ```
 
 If you raise a PR to a branch that isn't master without correctly tagging
