@@ -265,7 +265,7 @@ export const backportImpl = async (robot: Application,
         const newPr = (await createFn(context.repo({
           head: `${fork.owner.login}:${tempBranch}`,
           base: targetBranch,
-          title: `${pr.title} (backport: ${targetBranch})`,
+          title: pr.title,
           body: createBackportComment(pr),
           maintainer_can_modify: true,
         }))).data;
