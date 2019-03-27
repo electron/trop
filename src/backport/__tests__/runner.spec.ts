@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 
-import { initRepo, setUpRemotes } from '../runner';
+import { initRepo, setupRemotes } from '../../operations/task-runner';
 
 let dirObject: { dir?: string } | null = null;
 
@@ -57,7 +57,7 @@ describe('runner', () => {
     });
 
     it('should set new remotes correctly', async () => {
-      await setUpRemotes({
+      await setupRemotes({
         dir,
         remotes: [{
           name: 'origin',

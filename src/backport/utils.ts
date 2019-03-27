@@ -7,16 +7,14 @@ import * as simpleGit from 'simple-git/promise';
 
 import { Label, PullRequest, TropConfig } from './Probot';
 import queue from './Queue';
-import { runCommand } from './runner';
+import { runCommand } from '../operations/task-runner';
 import { CHECK_PREFIX } from '../constants';
 import { PRChange, TropAction, PRStatus } from '../enums';
 
+import * as labelUtils from '../utils/label-utils';
+
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
-
-export const labelToTargetBranch = (label: Label, prefix: string) => {
-  return label.name.replace(prefix, '');
-};
 
 const getGitHub = () => {
   const g = new GitHub();
@@ -36,8 +34,8 @@ export const labelMergedPR = async (context: Context, pr: PullRequest, targetBra
     const labelToAdd = `${labelPrefixes.merged}${targetBranch}`;
     const labelToRemove = labelPrefixes.inFlight + targetBranch;
 
-    await removeLabel(context, prNumber, labelToRemove);
-    await addLabel(context, prNumber, [labelToAdd]);
+    await labelUtils.removeLabel(context, prNumber, labelToRemove);
+    await labelUtils.addLabel(context, prNumber, [labelToAdd]);
   }
 };
 
@@ -154,6 +152,7 @@ export const backportImpl = async (robot: Application,
         targetRepoRemote =
           `https://${process.env.GITHUB_FORK_USER_CLONE_LOGIN}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${slug}.git`;
       }
+
       await runCommand({
         what: TropAction.SET_UP_REMOTES,
         payload: {
@@ -269,15 +268,15 @@ export const backportImpl = async (robot: Application,
 
         if (labelToRemove) {
           log(`Removing label '${labelToRemove}'`);
-          await removeLabel(context, pr.number, labelToRemove);
+          await labelUtils.removeLabel(context, pr.number, labelToRemove);
         }
 
         if (labelToAdd) {
           log(`Adding label '${labelToAdd}'`);
-          await addLabel(context, pr.number, [labelToAdd]);
+          await labelUtils.addLabel(context, pr.number, [labelToAdd]);
         }
 
-        await addLabel(context, newPr.number!, ['backport', `${targetBranch}`]);
+        await labelUtils.addLabel(context, newPr.number!, ['backport', `${targetBranch}`]);
 
         log('Backport complete');
       }
@@ -343,10 +342,10 @@ export const backportImpl = async (robot: Application,
         const labelPrefixes = await getLabelPrefixes(context);
 
         const labelToRemove = labelPrefixes.target + targetBranch;
-        await removeLabel(context, pr.number, labelToRemove);
+        await labelUtils.removeLabel(context, pr.number, labelToRemove);
 
         const labelToAdd = labelPrefixes.needsManual + targetBranch;
-        await addLabel(context, pr.number, [labelToAdd]);
+        await labelUtils.addLabel(context, pr.number, [labelToAdd]);
       }
 
       if (purpose === BackportPurpose.Check) {
@@ -378,16 +377,6 @@ export const backportImpl = async (robot: Application,
   );
 };
 
-const labelExistsOnPR = async (context: Context, labelName: string) => {
-  const labels = await context.github.issues.listLabelsOnIssue(context.repo({
-    number: context.payload.pull_request.number,
-    per_page: 100,
-    page: 1,
-  }));
-
-  return labels.data.some(label => label.name === labelName);
-};
-
 export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
   const config = await context.config<TropConfig>('config.yml') || {};
   const target = config.targetLabelPrefix || PRStatus.TARGET;
@@ -411,7 +400,7 @@ export const updateManualBackport = async (
 
   if (type === PRChange.OPEN) {
     labelToRemove = labelPrefixes.needsManual + pr.base.ref;
-    if (!await labelExistsOnPR(context, labelToRemove)) {
+    if (!await labelUtils.labelExistsOnPR(context, labelToRemove)) {
       labelToRemove = labelPrefixes.target + pr.base.ref;
     }
     labelToAdd = labelPrefixes.inFlight + pr.base.ref;
@@ -441,8 +430,8 @@ please check out #${pr.number}`;
     labelToAdd = labelPrefixes.merged + pr.base.ref;
   }
 
-  await removeLabel(context, oldPRNumber, labelToRemove);
-  await addLabel(context, oldPRNumber, [labelToAdd]);
+  await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
+  await labelUtils.addLabel(context, oldPRNumber, [labelToAdd]);
 };
 
 export const backportToLabel = async (
@@ -456,7 +445,7 @@ export const backportToLabel = async (
     return;
   }
 
-  const targetBranch = labelToTargetBranch(label, labelPrefixes.target);
+  const targetBranch = labelUtils.labelToTargetBranch(label, labelPrefixes.target);
   if (!targetBranch) {
     robot.log('Nothing to do');
     return;
@@ -481,23 +470,4 @@ export const backportToBranch = async (
   await backportImpl(
     robot, context, targetBranch, BackportPurpose.ExecuteBackport, labelToRemove, labelToAdd,
   );
-};
-
-// HELPERS
-
-const addLabel = async (context: Context, prNumber: number, labelsToAdd: string[]) => {
-  return context.github.issues.addLabels(context.repo({
-    number: prNumber,
-    labels: labelsToAdd,
-  }));
-};
-
-const removeLabel = async (context: Context, prNumber: number, labelToRemove: string) => {
-  // If the issue does not have the label, don't try remove it
-  if (!await labelExistsOnPR(context, labelToRemove)) return;
-
-  return context.github.issues.removeLabel(context.repo({
-    number: prNumber,
-    name: labelToRemove,
-  }));
 };

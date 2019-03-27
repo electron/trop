@@ -4,13 +4,13 @@ import {
   backportToBranch,
   backportToLabel,
   getLabelPrefixes,
-  labelToTargetBranch,
   backportImpl,
   BackportPurpose,
   labelMergedPR,
   updateManualBackport,
 } from './backport/utils';
 
+import { labelToTargetBranch } from './utils/label-utils';
 import { PullRequest, TropConfig } from './backport/Probot';
 import { CHECK_PREFIX } from './constants';
 import { PRChange } from './enums';

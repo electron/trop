@@ -24,6 +24,12 @@ export type RunnerOptions = {
 
 const baseDir = path.resolve(os.tmpdir(), 'trop-working');
 
+/*
+* Initializes the cloned repo trop will use to run backports
+*
+* @param {InitRepoOptions} repo and payload for repo initialization
+* @returns {Object} - an object containing the repo initialization directory
+*/
 export const initRepo = async (options: InitRepoOptions) => {
   const slug = `${options.owner}/${options.repo}`;
   await fs.mkdirp(path.resolve(baseDir, slug));
@@ -33,10 +39,15 @@ export const initRepo = async (options: InitRepoOptions) => {
   await fs.remove(dir);
   await fs.mkdirp(dir);
   const git = simpleGit(dir);
-  // This adds support for the target_repo being private as long as the fork user has read access
-  if (process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
+
+  const forkLogin = process.env.GITHUB_FORK_USER_CLONE_LOGIN;
+  const forkToken = process.env.GITHUB_FORK_USER_TOKEN;
+
+  // Adds support for the target_repo being private as
+  // long as the fork user has read access
+  if (forkLogin) {
     await git.clone(
-      `https://${process.env.GITHUB_FORK_USER_CLONE_LOGIN}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${slug}.git`,
+      `https://${forkLogin}:${forkToken}@github.com/${slug}.git`,
       '.',
     );
   } else {
@@ -62,7 +73,15 @@ export const initRepo = async (options: InitRepoOptions) => {
   return { dir };
 };
 
-export const setUpRemotes = async (options: RemotesOptions) => {
+/*
+* Sets up remotes that trop will run backports with.
+*
+* @param {RemotesOptions} - an object containing:
+* 1) dir - the repo directory
+* 2) remotes - the list of remotes to set on the initialized git repository
+* @returns {Object} - an object containing the repo initialization directory
+*/
+export const setupRemotes = async (options: RemotesOptions) => {
   const git = simpleGit(options.dir);
 
   // Add remotes
@@ -77,6 +96,17 @@ export const setUpRemotes = async (options: RemotesOptions) => {
   return { dir: options.dir };
 };
 
+/*
+* Runs the git commands to apply backports in a series of cherry-picked commits.
+*
+* @param {BackportOptions} - an object containing:
+* 1) dir - the repo directory,
+* 2) targetBranch - the target branch
+* 3) patches - a list of patches to apply to the target branch
+* 3) tempBranch - the temporary branch to PR against the target branch
+* 4) tempRemote - the temporary remote for use in backporting
+* @returns {Object} - an object containing the repo initialization directory
+*/
 export const backportCommitsToBranch = async (options: BackportOptions) => {
   const git = simpleGit(options.dir);
   // Create branch
@@ -99,12 +129,13 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
   return { dir: options.dir };
 };
 
+// Helper method for running one of three primary git action sets
 export const runCommand = async (options: RunnerOptions): Promise<{ dir: string }> => {
   switch (options.what) {
     case TropAction.INIT_REPO:
       return await initRepo(options.payload);
     case TropAction.SET_UP_REMOTES:
-      return await setUpRemotes(options.payload);
+      return await setupRemotes(options.payload);
     case TropAction.BACKPORT:
       return await backportCommitsToBranch(options.payload);
     default:
