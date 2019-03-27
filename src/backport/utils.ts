@@ -5,24 +5,14 @@ import * as fs from 'fs-extra';
 import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
-import * as commands from './commands';
 import { Label, PullRequest, TropConfig } from './Probot';
 import queue from './Queue';
 import { runCommand } from './runner';
-import { CHECK_PREFIX } from './constants';
+import * as constants from '../constants';
+import { PRChange } from '../enums';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
-
-const TARGET_LABEL_PREFIX = 'target/';
-const MERGED_LABEL_PREFIX = 'merged/';
-const IN_FLIGHT_LABEL_PREFIX = 'in-flight/';
-const NEEDS_MANUAL_LABEL_PREFIX = 'needs-manual-bp/';
-
-export enum PRChange {
-  OPEN,
-  CLOSE,
-}
 
 export const labelToTargetBranch = (label: Label, prefix: string) => {
   return label.name.replace(prefix, '');
@@ -93,7 +83,7 @@ export const backportImpl = async (robot: Application,
       ref: context.payload.pull_request.head.sha,
       per_page: 100,
     }));
-    return allChecks.data.check_runs.find(run => run.name === `${CHECK_PREFIX}${targetBranch}`);
+    return allChecks.data.check_runs.find(run => run.name === `${constants.CHECK_PREFIX}${targetBranch}`);
   };
 
   let createdDir: string | null = null;
@@ -117,7 +107,7 @@ export const backportImpl = async (robot: Application,
       // Set up empty repo on master
       log('Setting up local repository');
       const { dir } = await runCommand({
-        what: commands.INIT_REPO,
+        what: constants.INIT_REPO,
         payload: {
           owner: base.repo.owner.login,
           repo: base.repo.name,
@@ -165,7 +155,7 @@ export const backportImpl = async (robot: Application,
           `https://${process.env.GITHUB_FORK_USER_CLONE_LOGIN}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${slug}.git`;
       }
       await runCommand({
-        what: commands.SET_UP_REMOTES,
+        what: constants.SET_UP_REMOTES,
         payload: {
           dir,
           remotes: [{
@@ -237,7 +227,7 @@ export const backportImpl = async (robot: Application,
       log('Will start backporting now');
 
       await runCommand({
-        what: commands.BACKPORT,
+        what: constants.BACKPORT,
         payload: {
           dir,
           slug,
@@ -404,10 +394,10 @@ const labelExistsOnPR = async (context: Context, labelName: string) => {
 
 export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
   const config = await context.config<TropConfig>('config.yml') || {};
-  const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
-  const inFlight = config.inFlightLabelPrefix || IN_FLIGHT_LABEL_PREFIX;
-  const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
-  const needsManual = config.needsManualLabelPrefix || NEEDS_MANUAL_LABEL_PREFIX;
+  const target = config.targetLabelPrefix || constants.TARGET_LABEL_PREFIX;
+  const inFlight = config.inFlightLabelPrefix || constants.IN_FLIGHT_LABEL_PREFIX;
+  const merged = config.mergedLabelPrefix || constants.MERGED_LABEL_PREFIX;
+  const needsManual = config.needsManualLabelPrefix || constants. NEEDS_MANUAL_LABEL_PREFIX;
 
   return { target, inFlight, merged, needsManual };
 };

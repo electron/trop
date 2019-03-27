@@ -2,31 +2,14 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
-import * as commands from './commands';
+import * as commands from '../constants';
 import * as config from 'config-yml';
 
-export interface InitRepoOptions {
-  owner: string;
-  repo: string;
-}
-
-export interface RemotesOptions {
-  dir: string;
-  remotes: {
-    name: string,
-    value: string,
-  }[];
-}
-
-export interface BackportOptions {
-  dir: string;
-  slug: string;
-  targetRemote: string;
-  targetBranch: string;
-  tempRemote: string;
-  tempBranch: string;
-  patches: string[];
-}
+import {
+  InitRepoOptions,
+  RemotesOptions,
+  BackportOptions,
+} from '../interfaces';
 
 export type RunnerOptions = {
   what: typeof commands.INIT_REPO;
