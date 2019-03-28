@@ -162,9 +162,9 @@ Check out the trop documentation linked below for more information.';
 
         // The target PR is only "good" if it was merged to master
         if (oldPR.base.ref !== 'master') {
-          failureCause = 'the PR that it is backporting was not not targetting the master branch.';
+          failureCause = 'the PR that it is backporting was not targeting the master branch.';
         } else if (!oldPR.merged) {
-          failureCause = 'the PR that is is backporting has not been merged yet.';
+          failureCause = 'the PR that is backporting has not been merged yet.';
         }
       }
 
@@ -190,12 +190,12 @@ Check out the trop documentation linked below for more information.';
           details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
           output: {
             title: 'Invalid Backport',
-            summary: `This PR is targetting a branch that is not master but ${failureCause}`,
+            summary: `This PR is targeting a branch that is not master but ${failureCause}`,
           },
         }));
       }
     } else if (checkRun) {
-      // We are targetting master but for some reason have a check run???
+      // We are targeting master but for some reason have a check run???
       // Let's mark this check as cancelled
       await context.github.checks.update(context.repo({
         check_run_id: checkRun.id,
@@ -204,7 +204,7 @@ Check out the trop documentation linked below for more information.';
         completed_at: (new Date()).toISOString(),
         output: {
           title: 'Cancelled',
-          summary: 'This PR is targetting `master` and is not a backport',
+          summary: 'This PR is targeting `master` and is not a backport',
           annotations: [],
         },
       }));
