@@ -9,11 +9,11 @@ import {
   BackportPurpose,
   labelMergedPR,
   updateManualBackport,
-  PRChange,
 } from './backport/utils';
 
 import { PullRequest, TropConfig } from './backport/Probot';
-import { CHECK_PREFIX } from './backport/constants';
+import { CHECK_PREFIX } from './constants';
+import { PRChange } from './enums';
 
 const probotHandler = async (robot: Application) => {
   if (!process.env.GITHUB_FORK_USER_TOKEN) {

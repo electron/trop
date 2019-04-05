@@ -2,40 +2,23 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
-import * as commands from './commands';
+import { TropAction } from '../enums';
 import * as config from 'config-yml';
 
-export interface InitRepoOptions {
-  owner: string;
-  repo: string;
-}
-
-export interface RemotesOptions {
-  dir: string;
-  remotes: {
-    name: string,
-    value: string,
-  }[];
-}
-
-export interface BackportOptions {
-  dir: string;
-  slug: string;
-  targetRemote: string;
-  targetBranch: string;
-  tempRemote: string;
-  tempBranch: string;
-  patches: string[];
-}
+import {
+  InitRepoOptions,
+  RemotesOptions,
+  BackportOptions,
+} from '../interfaces';
 
 export type RunnerOptions = {
-  what: typeof commands.INIT_REPO;
+  what: typeof TropAction.INIT_REPO;
   payload: InitRepoOptions;
 } | {
-  what: typeof commands.SET_UP_REMOTES;
+  what: typeof TropAction.SET_UP_REMOTES;
   payload: RemotesOptions;
 } | {
-  what: typeof commands.BACKPORT;
+  what: typeof TropAction.BACKPORT;
   payload: BackportOptions;
 };
 
@@ -118,11 +101,11 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
 
 export const runCommand = async (options: RunnerOptions): Promise<{ dir: string }> => {
   switch (options.what) {
-    case commands.INIT_REPO:
+    case TropAction.INIT_REPO:
       return await initRepo(options.payload);
-    case commands.SET_UP_REMOTES:
+    case TropAction.SET_UP_REMOTES:
       return await setUpRemotes(options.payload);
-    case commands.BACKPORT:
+    case TropAction.BACKPORT:
       return await backportCommitsToBranch(options.payload);
     default:
       throw new Error('wut u doin\' kiddo');

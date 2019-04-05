@@ -5,24 +5,14 @@ import * as fs from 'fs-extra';
 import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
-import * as commands from './commands';
 import { Label, PullRequest, TropConfig } from './Probot';
 import queue from './Queue';
 import { runCommand } from './runner';
-import { CHECK_PREFIX } from './constants';
+import { CHECK_PREFIX } from '../constants';
+import { PRChange, TropAction, PRStatus } from '../enums';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
-
-const TARGET_LABEL_PREFIX = 'target/';
-const MERGED_LABEL_PREFIX = 'merged/';
-const IN_FLIGHT_LABEL_PREFIX = 'in-flight/';
-const NEEDS_MANUAL_LABEL_PREFIX = 'needs-manual-bp/';
-
-export enum PRChange {
-  OPEN,
-  CLOSE,
-}
 
 export const labelToTargetBranch = (label: Label, prefix: string) => {
   return label.name.replace(prefix, '');
@@ -117,7 +107,7 @@ export const backportImpl = async (robot: Application,
       // Set up empty repo on master
       log('Setting up local repository');
       const { dir } = await runCommand({
-        what: commands.INIT_REPO,
+        what: TropAction.INIT_REPO,
         payload: {
           owner: base.repo.owner.login,
           repo: base.repo.name,
@@ -165,7 +155,7 @@ export const backportImpl = async (robot: Application,
           `https://${process.env.GITHUB_FORK_USER_CLONE_LOGIN}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${slug}.git`;
       }
       await runCommand({
-        what: commands.SET_UP_REMOTES,
+        what: TropAction.SET_UP_REMOTES,
         payload: {
           dir,
           remotes: [{
@@ -237,7 +227,7 @@ export const backportImpl = async (robot: Application,
       log('Will start backporting now');
 
       await runCommand({
-        what: commands.BACKPORT,
+        what: TropAction.BACKPORT,
         payload: {
           dir,
           slug,
@@ -404,10 +394,10 @@ const labelExistsOnPR = async (context: Context, labelName: string) => {
 
 export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
   const config = await context.config<TropConfig>('config.yml') || {};
-  const target = config.targetLabelPrefix || TARGET_LABEL_PREFIX;
-  const inFlight = config.inFlightLabelPrefix || IN_FLIGHT_LABEL_PREFIX;
-  const merged = config.mergedLabelPrefix || MERGED_LABEL_PREFIX;
-  const needsManual = config.needsManualLabelPrefix || NEEDS_MANUAL_LABEL_PREFIX;
+  const target = config.targetLabelPrefix || PRStatus.TARGET;
+  const inFlight = config.inFlightLabelPrefix || PRStatus.IN_FLIGHT;
+  const merged = config.mergedLabelPrefix || PRStatus.MERGED;
+  const needsManual = config.needsManualLabelPrefix || PRStatus.NEEDS_MANUAL;
 
   return { target, inFlight, merged, needsManual };
 };
