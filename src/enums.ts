@@ -17,3 +17,8 @@ export enum TropAction {
   SET_UP_REMOTES = 'SET_UP_REMOTES',
   BACKPORT = 'BACKPORT',
 }
+
+export enum BackportPurpose {
+  ExecuteBackport,
+  Check,
+}

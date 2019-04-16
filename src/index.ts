@@ -3,17 +3,15 @@ import { Application, Context } from 'probot';
 import {
   backportToBranch,
   backportToLabel,
-  getLabelPrefixes,
   backportImpl,
-  BackportPurpose,
   labelMergedPR,
-  updateManualBackport,
 } from './backport/utils';
 
-import { labelToTargetBranch } from './utils/label-utils';
+import { updateManualBackport } from './operations/update-manual-backport';
+import { labelToTargetBranch, getLabelPrefixes } from './utils/label-utils';
 import { PullRequest, TropConfig } from './backport/Probot';
 import { CHECK_PREFIX } from './constants';
-import { PRChange } from './enums';
+import { PRChange, BackportPurpose } from './enums';
 import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
 
 const probotHandler = async (robot: Application) => {

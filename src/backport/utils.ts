@@ -5,11 +5,11 @@ import * as fs from 'fs-extra';
 import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
-import { Label, PullRequest, TropConfig } from './Probot';
+import { Label, PullRequest } from './Probot';
 import queue from './Queue';
 import { runCommand } from '../operations/task-runner';
 import { CHECK_PREFIX } from '../constants';
-import { PRChange, TropAction, PRStatus } from '../enums';
+import { TropAction, BackportPurpose } from '../enums';
 
 import * as labelUtils from '../utils/label-utils';
 
@@ -28,7 +28,7 @@ const getGitHub = () => {
 export const labelMergedPR = async (context: Context, pr: PullRequest, targetBranch: String) => {
   const prMatch = pr.body.match(/#[0-9]{1,7}/);
   if (prMatch && prMatch[0]) {
-    const labelPrefixes = await getLabelPrefixes(context);
+    const labelPrefixes = await labelUtils.getLabelPrefixes(context);
     const prNumber = parseInt(prMatch[0].substring(1), 10);
 
     const labelToAdd = `${labelPrefixes.merged}${targetBranch}`;
@@ -57,11 +57,6 @@ const createBackportComment = (pr: PullRequest) => {
 
   return body;
 };
-
-export enum BackportPurpose {
-  ExecuteBackport,
-  Check,
-}
 
 export const backportImpl = async (robot: Application,
                                    context: Context,
@@ -339,7 +334,7 @@ export const backportImpl = async (robot: Application,
    you will need to perform this backport manually.`,
         }) as any);
 
-        const labelPrefixes = await getLabelPrefixes(context);
+        const labelPrefixes = await labelUtils.getLabelPrefixes(context);
 
         const labelToRemove = labelPrefixes.target + targetBranch;
         await labelUtils.removeLabel(context, pr.number, labelToRemove);
@@ -377,69 +372,12 @@ export const backportImpl = async (robot: Application,
   );
 };
 
-export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
-  const config = await context.config<TropConfig>('config.yml') || {};
-  const target = config.targetLabelPrefix || PRStatus.TARGET;
-  const inFlight = config.inFlightLabelPrefix || PRStatus.IN_FLIGHT;
-  const merged = config.mergedLabelPrefix || PRStatus.MERGED;
-  const needsManual = config.needsManualLabelPrefix || PRStatus.NEEDS_MANUAL;
-
-  return { target, inFlight, merged, needsManual };
-};
-
-export const updateManualBackport = async (
-  context: Context,
-  type: PRChange,
-  oldPRNumber: number,
-) => {
-  const pr = context.payload.pull_request;
-  let labelToRemove;
-  let labelToAdd;
-
-  const labelPrefixes = await getLabelPrefixes(context);
-
-  if (type === PRChange.OPEN) {
-    labelToRemove = labelPrefixes.needsManual + pr.base.ref;
-    if (!await labelUtils.labelExistsOnPR(context, labelToRemove)) {
-      labelToRemove = labelPrefixes.target + pr.base.ref;
-    }
-    labelToAdd = labelPrefixes.inFlight + pr.base.ref;
-
-    const commentBody = `A maintainer has manually backported this PR to "${pr.base.ref}", \
-please check out #${pr.number}`;
-
-    // TODO: Once probot updates to @octokit/rest@16 we can use .paginate to
-    // get all the comments properly, for now 100 should do
-    const { data: existingComments } = await context.github.issues.listComments(context.repo({
-      number: oldPRNumber,
-      per_page: 100,
-    }));
-
-    // We should only comment if we haven't done it before
-    const shouldComment = !existingComments.some(comment => comment.body === commentBody);
-
-    if (shouldComment) {
-      // comment on the original PR with the manual backport link
-      await context.github.issues.createComment(context.repo({
-        number: oldPRNumber,
-        body: commentBody,
-      }));
-    }
-  } else {
-    labelToRemove = labelPrefixes.inFlight + pr.base.ref;
-    labelToAdd = labelPrefixes.merged + pr.base.ref;
-  }
-
-  await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
-  await labelUtils.addLabel(context, oldPRNumber, [labelToAdd]);
-};
-
 export const backportToLabel = async (
   robot: Application,
   context: Context,
   label: Label,
 ) => {
-  const labelPrefixes = await getLabelPrefixes(context);
+  const labelPrefixes = await labelUtils.getLabelPrefixes(context);
   if (!label.name.startsWith(labelPrefixes.target)) {
     robot.log(`Label '${label.name}' does not begin with '${labelPrefixes.target}'`);
     return;
@@ -463,7 +401,7 @@ export const backportToBranch = async (
   context: Context,
   targetBranch: string,
 ) => {
-  const labelPrefixes = await getLabelPrefixes(context);
+  const labelPrefixes = await labelUtils.getLabelPrefixes(context);
 
   const labelToRemove = undefined;
   const labelToAdd = labelPrefixes.inFlight + targetBranch;

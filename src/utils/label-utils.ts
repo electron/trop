@@ -1,5 +1,6 @@
 import { Context } from 'probot';
-import { Label } from '../backport/Probot';
+import { Label, TropConfig } from '../backport/Probot';
+import { PRStatus } from '../enums';
 
 export const addLabel = async (context: Context, prNumber: number, labelsToAdd: string[]) => {
   return context.github.issues.addLabels(context.repo({
@@ -30,4 +31,14 @@ export const labelExistsOnPR = async (context: Context, labelName: string) => {
   }));
 
   return labels.data.some(label => label.name === labelName);
+};
+
+export const getLabelPrefixes = async (context: Pick<Context, 'config'>) => {
+  const config = await context.config<TropConfig>('config.yml') || {};
+  const target = config.targetLabelPrefix || PRStatus.TARGET;
+  const inFlight = config.inFlightLabelPrefix || PRStatus.IN_FLIGHT;
+  const merged = config.mergedLabelPrefix || PRStatus.MERGED;
+  const needsManual = config.needsManualLabelPrefix || PRStatus.NEEDS_MANUAL;
+
+  return { target, inFlight, merged, needsManual };
 };

@@ -2,6 +2,7 @@ jest.mock('request');
 const { Application } = require('probot');
 
 import * as utils from '../utils';
+import { updateManualBackport } from '../../operations/update-manual-backport';
 import { ProbotHandler } from '../../index';
 
 const trop: ProbotHandler = require('../../index');
@@ -142,10 +143,8 @@ describe('trop', () => {
 
   describe('pull_request.opened event', () => {
     it('labels the original PR when a manual backport PR has been opened', async () => {
-      Object.defineProperty(utils, 'updateManualBackport', { value: jest.fn() });
       await robot.receive(backportPROpenedEvent);
-
-      expect(utils.updateManualBackport).toHaveBeenCalled();
+      expect(updateManualBackport).toHaveBeenCalled();
     });
   });
 
@@ -165,17 +164,15 @@ describe('trop', () => {
     });
 
     it('labels the original PR when a manual backport PR has been merged', async () => {
-      Object.defineProperty(utils, 'updateManualBackport', { value: jest.fn() });
       await robot.receive(backportPRClosedEvent);
-
-      expect(utils.updateManualBackport).toHaveBeenCalled();
+      expect(updateManualBackport).toHaveBeenCalled();
     });
 
     it('adds a label when a backport PR has been merged', async () => {
       Object.defineProperty(utils, 'labelMergedPR', { value: jest.fn() });
       await robot.receive(backportPRClosedEvent);
 
-      expect(utils.updateManualBackport).toHaveBeenCalled();
+      expect(updateManualBackport).toHaveBeenCalled();
     });
   });
 });
