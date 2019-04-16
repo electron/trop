@@ -355,7 +355,7 @@ export const backportImpl = async (robot: Application,
           const updateOpts: GitHub.ChecksUpdateParams = context.repo({
             check_run_id: checkRun.id,
             name: checkRun.name,
-            conclusion: 'failure' as 'failure',
+            conclusion: 'neutral' as 'neutral',
             completed_at: (new Date()).toISOString(),
             output: {
               title: 'Backport Failed',
