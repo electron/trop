@@ -22,6 +22,7 @@ export interface Repository {
 interface Ref {
   sha: string;
   repo: Repository;
+  ref: string;
 }
 
 export interface PullRequest {

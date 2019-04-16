@@ -343,9 +343,7 @@ export const backportImpl = async (robot: Application,
         const labelPrefixes = await getLabelPrefixes(context);
 
         const labelToRemove = labelPrefixes.target + targetBranch;
-        if (labelExistsOnPR(context, labelToRemove)) {
-          await removeLabel(context, pr.number, labelToRemove);
-        }
+        await removeLabel(context, pr.number, labelToRemove);
 
         const labelToAdd = labelPrefixes.needsManual + targetBranch;
         await addLabel(context, pr.number, [labelToAdd]);
@@ -381,8 +379,6 @@ export const backportImpl = async (robot: Application,
 };
 
 const labelExistsOnPR = async (context: Context, labelName: string) => {
-  const base = context.payload.pull_request.base;
-
   const labels = await context.github.issues.listLabelsOnIssue(context.repo({
     number: context.payload.pull_request.number,
     per_page: 100,
@@ -415,17 +411,31 @@ export const updateManualBackport = async (
 
   if (type === PRChange.OPEN) {
     labelToRemove = labelPrefixes.needsManual + pr.base.ref;
-    if (labelExistsOnPR(context, labelToRemove)) {
+    if (!await labelExistsOnPR(context, labelToRemove)) {
       labelToRemove = labelPrefixes.target + pr.base.ref;
     }
     labelToAdd = labelPrefixes.inFlight + pr.base.ref;
 
-    // comment on the original PR with the manual backport link
-    await context.github.issues.createComment(context.repo({
+    const commentBody = `A maintainer has manually backported this PR to "${pr.base.ref}", \
+please check out #${pr.number}`;
+
+    // TODO: Once probot updates to @octokit/rest@16 we can use .paginate to
+    // get all the comments properly, for now 100 should do
+    const { data: existingComments } = await context.github.issues.listComments(context.repo({
       number: oldPRNumber,
-      body: `A maintainer has manually backported this PR to "${pr.base.ref}", \
-      please check out #${pr.number}`,
+      per_page: 100,
     }));
+
+    // We should only comment if we haven't done it before
+    const shouldComment = !existingComments.some(comment => comment.body === commentBody);
+
+    if (shouldComment) {
+      // comment on the original PR with the manual backport link
+      await context.github.issues.createComment(context.repo({
+        number: oldPRNumber,
+        body: commentBody,
+      }));
+    }
   } else {
     labelToRemove = labelPrefixes.inFlight + pr.base.ref;
     labelToAdd = labelPrefixes.merged + pr.base.ref;
@@ -483,6 +493,9 @@ const addLabel = async (context: Context, prNumber: number, labelsToAdd: string[
 };
 
 const removeLabel = async (context: Context, prNumber: number, labelToRemove: string) => {
+  // If the issue does not have the label, don't try remove it
+  if (!await labelExistsOnPR(context, labelToRemove)) return;
+
   return context.github.issues.removeLabel(context.repo({
     number: prNumber,
     name: labelToRemove,
