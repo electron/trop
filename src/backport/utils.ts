@@ -256,7 +256,6 @@ export const backportImpl = async (robot: Application,
           base: targetBranch,
           title: pr.title,
           body: createBackportComment(pr),
-          maintainer_can_modify: true,
         }))).data;
 
         log('Adding breadcrumb comment');
