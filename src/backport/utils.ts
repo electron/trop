@@ -7,11 +7,13 @@ import * as simpleGit from 'simple-git/promise';
 
 import { Label, PullRequest, TropConfig } from './Probot';
 import queue from './Queue';
-import { runCommand } from '../operations/task-runner';
 import { CHECK_PREFIX } from '../constants';
-import { PRChange, TropAction, PRStatus } from '../enums';
+import { PRChange, PRStatus } from '../enums';
 
 import * as labelUtils from '../utils/label-utils';
+import { initRepo } from '../operations/init-repo';
+import { setupRemotes } from '../operations/setup-remotes';
+import { backportCommitsToBranch } from '../operations/backport-commits';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
@@ -104,12 +106,9 @@ export const backportImpl = async (robot: Application,
       const pr = context.payload.pull_request as any as PullRequest;
       // Set up empty repo on master
       log('Setting up local repository');
-      const { dir } = await runCommand({
-        what: TropAction.INIT_REPO,
-        payload: {
-          owner: base.repo.owner.login,
-          repo: base.repo.name,
-        },
+      const { dir } = await initRepo({
+        owner: base.repo.owner.login,
+        repo: base.repo.name,
       });
       createdDir = dir;
       log(`Working directory cleaned: ${dir}`);
@@ -153,19 +152,16 @@ export const backportImpl = async (robot: Application,
           `https://${process.env.GITHUB_FORK_USER_CLONE_LOGIN}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${slug}.git`;
       }
 
-      await runCommand({
-        what: TropAction.SET_UP_REMOTES,
-        payload: {
-          dir,
-          remotes: [{
-            name: 'target_repo',
-            value: targetRepoRemote,
-          }, {
-            name: 'fork',
-            // tslint:disable-next-line
-            value: `https://${fork.owner.login}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${fork.owner.login}/${fork.name}.git`,
-          }],
-        },
+      await setupRemotes({
+        dir,
+        remotes: [{
+          name: 'target_repo',
+          value: targetRepoRemote,
+        }, {
+          name: 'fork',
+          // tslint:disable-next-line
+          value: `https://${fork.owner.login}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${fork.owner.login}/${fork.name}.git`,
+        }],
       });
 
       // Get list of commits
@@ -225,17 +221,14 @@ export const backportImpl = async (robot: Application,
       log(`Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
       log('Will start backporting now');
 
-      await runCommand({
-        what: TropAction.BACKPORT,
-        payload: {
-          dir,
-          slug,
-          targetBranch,
-          tempBranch,
-          patches,
-          targetRemote: 'target_repo',
-          tempRemote: 'fork',
-        },
+      await backportCommitsToBranch({
+        dir,
+        slug,
+        targetBranch,
+        tempBranch,
+        patches,
+        targetRemote: 'target_repo',
+        tempRemote: 'fork',
       });
 
       log('Cherry pick success, pushed up to fork');
