@@ -6,9 +6,9 @@ export interface BackportOptions {
   slug: string;
   targetRemote: string;
   targetBranch: string;
-  tempRemote: string;
   tempBranch: string;
   patches: string[];
+  shouldPush: boolean;
 }
 
 /*
@@ -19,7 +19,6 @@ export interface BackportOptions {
 * 2) targetBranch - the target branch
 * 3) patches - a list of patches to apply to the target branch
 * 3) tempBranch - the temporary branch to PR against the target branch
-* 4) tempRemote - the temporary remote for use in backporting
 * @returns {Object} - an object containing the repo initialization directory
 */
 export const backportCommitsToBranch = async (options: BackportOptions) => {
@@ -38,8 +37,10 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
   }
 
   // Push
-  await git.push(options.tempRemote, options.tempBranch, {
-    '--set-upstream': true,
-  });
+  if (options.shouldPush) {
+    await git.push(options.targetRemote, options.tempBranch, {
+      '--set-upstream': true,
+    });
+  }
   return { dir: options.dir };
 };

@@ -14,18 +14,10 @@ import * as labelUtils from '../utils/label-utils';
 import { initRepo } from '../operations/init-repo';
 import { setupRemotes } from '../operations/setup-remotes';
 import { backportCommitsToBranch } from '../operations/backport-commits';
+import { getRepoToken } from './token';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
-
-const getGitHub = () => {
-  const g = new GitHub();
-  g.authenticate({
-    type: 'token',
-    token: process.env.GITHUB_FORK_USER_TOKEN!,
-  });
-  return g;
-};
 
 export const labelMergedPR = async (context: Context, pr: PullRequest, targetBranch: String) => {
   const prMatch = pr.body.match(/#[0-9]{1,7}/);
@@ -103,64 +95,29 @@ export const backportImpl = async (robot: Application,
         }
       }
 
+      log('getting repo access token');
+      const repoAccessToken = await getRepoToken(robot, context);
+
       const pr = context.payload.pull_request as any as PullRequest;
       // Set up empty repo on master
       log('Setting up local repository');
       const { dir } = await initRepo({
-        owner: base.repo.owner.login,
-        repo: base.repo.name,
+        slug,
+        accessToken: repoAccessToken,
       });
       createdDir = dir;
       log(`Working directory cleaned: ${dir}`);
 
-      // Fork repository to trop
-      log('forking base repo');
-      const gh = getGitHub();
-      const fork = (await gh.repos.createFork({
-        owner: base.repo.owner.login,
-        repo: base.repo.name,
-      })).data;
-
-      let forkReady = false;
-      let attempt = 0;
-      while (!forkReady && attempt < 20) {
-        log(`testing fork - Attempt ${attempt + 1}/20`);
-        try {
-          const { data } = await gh.repos.listCommits({
-            owner: fork.owner.login,
-            repo: fork.name!,
-          });
-          forkReady = data.length > 0;
-        } catch (err) {
-          // Ignore
-        }
-        attempt += 1;
-        if (!forkReady) await new Promise<void>(resolve => setTimeout(resolve, 5000));
-      }
-      if (attempt >= 20) {
-        log('fork wasn\'t ready fast enough, giving up');
-        throw new Error('Not ready in time');
-      }
-      log('fork ready');
-
       // Set up remotes
       log('setting up remotes');
-      let targetRepoRemote = `https://github.com/${slug}.git`;
-      // This adds support for the target_repo being private as long as the fork user has read access
-      if (process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
-        targetRepoRemote =
-          `https://${process.env.GITHUB_FORK_USER_CLONE_LOGIN}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${slug}.git`;
-      }
+      const targetRepoRemote =
+          `https://x-access-token:${repoAccessToken}@github.com/${slug}.git`;
 
       await setupRemotes({
         dir,
         remotes: [{
           name: 'target_repo',
           value: targetRepoRemote,
-        }, {
-          name: 'fork',
-          // tslint:disable-next-line
-          value: `https://${fork.owner.login}:${process.env.GITHUB_FORK_USER_TOKEN}@github.com/${fork.owner.login}/${fork.name}.git`,
         }],
       });
 
@@ -201,7 +158,7 @@ export const backportImpl = async (robot: Application,
           const patchBody = await fetch(patchUrl, {
             headers: {
               Accept: 'application/vnd.github.VERSION.patch',
-              Authorization: `token ${process.env.GITHUB_FORK_USER_TOKEN}`,
+              Authorization: `token ${repoAccessToken}`,
             },
           });
           patches[i] = await patchBody.text();
@@ -212,11 +169,11 @@ export const backportImpl = async (robot: Application,
       await new Promise(r => q.start(r));
       log('Got all commit info');
 
-      // Temp branch on the fork
+      // Temp branch
       const sanitizedTitle = pr.title
         .replace(/\*/g, 'x').toLowerCase()
         .replace(/[^a-z0-9_]+/g, '-');
-      const tempBranch = `${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
+      const tempBranch = `trop/${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
 
       log(`Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
       log('Will start backporting now');
@@ -228,24 +185,15 @@ export const backportImpl = async (robot: Application,
         tempBranch,
         patches,
         targetRemote: 'target_repo',
-        tempRemote: 'fork',
+        shouldPush: purpose === BackportPurpose.ExecuteBackport,
       });
 
-      log('Cherry pick success, pushed up to fork');
+      log('Cherry pick success, pushed up to target_repo');
 
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('Creating Pull Request');
-        let createFn = context.github.pullRequests.create;
-        if (process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
-          const customGithub = new GitHub();
-          customGithub.authenticate({
-            type: 'token',
-            token: process.env.GITHUB_FORK_USER_TOKEN!,
-          });
-          createFn = customGithub.pulls.create as any;
-        }
-        const newPr = (await createFn(context.repo({
-          head: `${fork.owner.login}:${tempBranch}`,
+        const newPr = (await context.github.pullRequests.create(context.repo({
+          head: `${tempBranch}`,
           base: targetBranch,
           title: pr.title,
           body: createBackportComment(pr),
@@ -282,7 +230,6 @@ export const backportImpl = async (robot: Application,
             name: checkRun.name,
             conclusion: 'success' as 'success',
             completed_at: (new Date()).toISOString(),
-            details_url: `https://github.com/${slug}/compare/master...${fork.owner.login}:${tempBranch}`,
             output: {
               title: 'Clean Backport',
               summary: `This PR was checked and can be backported to "${targetBranch}" cleanly.`,

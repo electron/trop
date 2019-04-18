@@ -25,15 +25,6 @@ To run your app in development, you will need to configure a GitHub App to deliv
 6. Update your GitHub App’s Webhook URL to your [smee.io](https://smee.io/) URL.
 7. Run `$ npm start` to start the server.
 
-### Configuring a Bot User
-
-To make things as safe as possible backports are done in a third party repo (a real github account).
-This bot will fork the base repo to this users account, backport the commits and then push to the
-fork.  For instance, we use [trop-bot](https://github.com/trop-bot) as our user to handle the forks.
-
-You must define your own bot user to use by declaring the `GITHUB_FORK_USER_TOKEN` variable in the
-`.env` file.  The value must be a personal access token with full "repo" access.
-
 ### Testing
 
 ```sh
