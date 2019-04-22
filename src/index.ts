@@ -15,13 +15,9 @@ import { PullRequest, TropConfig } from './backport/Probot';
 import { CHECK_PREFIX } from './constants';
 import { PRChange } from './enums';
 import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
+import { getRepoToken } from './backport/token';
 
 const probotHandler = async (robot: Application) => {
-  if (!process.env.GITHUB_FORK_USER_TOKEN) {
-    robot.log.error('You must set GITHUB_FORK_USER_TOKEN');
-    process.exit(1);
-  }
-
   const labelMergedPRs = async (context: Context, pr: PullRequest) => {
     for (const label of pr.labels) {
       const targetBranch = label.name.match(/(\d)-(\d)-x/);
@@ -107,7 +103,7 @@ PR is no longer targeting this branch for a backport',
     const pr = context.payload.pull_request;
     let backportNumber: null | number = null;
 
-    if (!pr.user.login.endsWith('[bot]') && pr.user.login !== process.env.GITHUB_FORK_USER_CLONE_LOGIN) {
+    if (!pr.user.login.endsWith('[bot]')) {
       // check if this PR is a manual backport of another PR
       const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
       const match: Array<string> | null = pr.body.match(backportPattern);

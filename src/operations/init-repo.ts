@@ -7,8 +7,8 @@ import * as simpleGit from 'simple-git/promise';
 const baseDir = path.resolve(os.tmpdir(), 'trop-working');
 
 export interface InitRepoOptions {
-  owner: string;
-  repo: string;
+  slug: string;
+  accessToken: string;
 }
 
 /*
@@ -17,32 +17,22 @@ export interface InitRepoOptions {
 * @param {InitRepoOptions} repo and payload for repo initialization
 * @returns {Object} - an object containing the repo initialization directory
 */
-export const initRepo = async (options: InitRepoOptions) => {
-  const slug = `${options.owner}/${options.repo}`;
+export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
   await fs.mkdirp(path.resolve(baseDir, slug));
-  const prefix = path.resolve(baseDir, slug, 'tmp-');
+  const prefix = path.resolve(baseDir, slug, 'job-');
   const dir = await fs.mkdtemp(prefix);
+
+  // Be super-duper sure that this directory is empty
   await fs.mkdirp(dir);
   await fs.remove(dir);
   await fs.mkdirp(dir);
+
   const git = simpleGit(dir);
 
-  const forkLogin = process.env.GITHUB_FORK_USER_CLONE_LOGIN;
-  const forkToken = process.env.GITHUB_FORK_USER_TOKEN;
-
-  // Adds support for the target_repo being private as
-  // long as the fork user has read access
-  if (forkLogin) {
-    await git.clone(
-      `https://${forkLogin}:${forkToken}@github.com/${slug}.git`,
-      '.',
-    );
-  } else {
-    await git.clone(
-      `https://github.com/${slug}.git`,
-      '.',
-    );
-  }
+  await git.clone(
+    `https://x-access-token:${accessToken}@github.com/${slug}.git`,
+    '.',
+  );
 
   // Clean up just in case
   await git.reset('hard');

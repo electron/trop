@@ -26,8 +26,8 @@ describe('runner', () => {
   describe('initRepo()', () => {
     it('should clone a github repository', async () => {
       const dir = saveDir(await initRepo({
-        owner: 'electron',
-        repo: 'trop',
+        slug: 'electron/trop',
+        accessToken: '',
       }));
       expect(await fs.pathExists(dir)).toBe(true);
       expect(await fs.pathExists(path.resolve(dir, '.git'))).toBe(true);
@@ -35,8 +35,8 @@ describe('runner', () => {
 
     it('should fail if the github repository does not exist', async () => {
       await expect(initRepo({
-        owner: 'electron',
-        repo: 'this-is-not-trop',
+        slug: 'electron/this-is-not-trop',
+        accessToken: '',
       })).rejects.toBeTruthy();
     });
   });

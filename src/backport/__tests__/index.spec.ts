@@ -20,7 +20,6 @@ describe('trop', () => {
   let github: any;
 
   beforeEach(async () => {
-    process.env.GITHUB_FORK_USER_TOKEN = 'fake';
     robot = new Application();
     await trop(robot);
 
