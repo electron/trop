@@ -151,7 +151,7 @@ PR is no longer targeting this branch for a backport',
         }
 
         const FASTTRACK_PREFIXES = ['build:', 'ci:'];
-        const FASTTRACK_USERS = ['electron-bot'];
+        const FASTTRACK_USERS = ['electron-bot', 'trop[bot]'];
         const FASTTRACK_LABELS: string[] = ['fast-track 🚅'];
         let failureCause = '';
 
