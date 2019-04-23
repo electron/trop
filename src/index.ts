@@ -12,10 +12,9 @@ import {
 
 import { labelToTargetBranch } from './utils/label-utils';
 import { PullRequest, TropConfig } from './backport/Probot';
-import { CHECK_PREFIX } from './constants';
+import { CHECK_PREFIX, TROP_BOT, ELECTRON_BOT } from './constants';
 import { PRChange } from './enums';
 import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
-import { getRepoToken } from './backport/token';
 
 const probotHandler = async (robot: Application) => {
   const labelMergedPRs = async (context: Context, pr: PullRequest) => {
@@ -103,7 +102,7 @@ PR is no longer targeting this branch for a backport',
     const pr = context.payload.pull_request;
     let backportNumber: null | number = null;
 
-    if (pr.user.login !== 'trop[bot]') {
+    if (pr.user.login !== TROP_BOT) {
       // check if this PR is a manual backport of another PR
       const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
       const match: Array<string> | null = pr.body.match(backportPattern);
@@ -151,7 +150,7 @@ PR is no longer targeting this branch for a backport',
         }
 
         const FASTTRACK_PREFIXES = ['build:', 'ci:'];
-        const FASTTRACK_USERS = ['electron-bot', 'trop[bot]'];
+        const FASTTRACK_USERS = [ELECTRON_BOT, TROP_BOT];
         const FASTTRACK_LABELS: string[] = ['fast-track 🚅'];
         let failureCause = '';
 
@@ -237,7 +236,7 @@ PR is no longer targeting this branch for a backport',
     const pr = context.payload.pull_request;
     if (pr.merged) {
       // check that the closed PR is trop's own and close
-      if (pr.user.login === 'trop[bot]') {
+      if (pr.user.login === TROP_BOT) {
         context.github.gitdata.deleteRef(context.repo({
           ref: pr.base.ref,
         }));
@@ -248,7 +247,7 @@ PR is no longer targeting this branch for a backport',
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
       }
 
-      if (pr.user.login === 'trop[bot]') {
+      if (pr.user.login === TROP_BOT) {
         await labelMergedPRs(context, pr as any);
       } else {
         backportAllLabels(context, pr as any);
