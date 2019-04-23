@@ -30,6 +30,9 @@ describe('trop', () => {
         })),
         getBranch: jest.fn().mockReturnValue(Promise.resolve()),
       },
+      gitdata: {
+        deleteRef: jest.fn().mockReturnValue(Promise.resolve()),
+      },
       pullRequests: {
         get: jest.fn().mockReturnValue(Promise.resolve({
           data: {
