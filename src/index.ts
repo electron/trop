@@ -103,7 +103,7 @@ PR is no longer targeting this branch for a backport',
     const pr = context.payload.pull_request;
     let backportNumber: null | number = null;
 
-    if (!pr.user.login.endsWith('[bot]')) {
+    if (pr.user.login !== 'trop[bot]') {
       // check if this PR is a manual backport of another PR
       const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
       const match: Array<string> | null = pr.body.match(backportPattern);
@@ -234,17 +234,24 @@ PR is no longer targeting this branch for a backport',
 
   // backport pull requests to labeled targets when PR is merged
   robot.on('pull_request.closed', async (context) => {
-    const payload = context.payload;
-    if (payload.pull_request.merged) {
+    const pr = context.payload.pull_request;
+    if (pr.merged) {
+      // check that the closed PR is trop's own and close
+      if (pr.user.login === 'trop[bot]') {
+        context.github.gitdata.deleteRef(context.repo({
+          ref: pr.base.ref,
+        }));
+      }
+
       const oldPRNumber = maybeGetManualBackportNumber(context);
       if (typeof oldPRNumber === 'number') {
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
       }
 
-      if (payload.pull_request.user.login.endsWith('[bot]')) {
-        await labelMergedPRs(context, payload.pull_request as any);
+      if (pr.user.login === 'trop[bot]') {
+        await labelMergedPRs(context, pr as any);
       } else {
-        backportAllLabels(context, payload.pull_request as any);
+        backportAllLabels(context, pr as any);
       }
     }
   });
