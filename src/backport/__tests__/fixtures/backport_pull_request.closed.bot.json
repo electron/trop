@@ -7,7 +7,10 @@
       "state": "closed",
       "title": "mirror (backport: 4-0-x)",
       "user": {
-        "login": "tropvel[bot]"
+        "login": "trop[bot]"
+      },
+      "base": {
+        "ref": "123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg"
       },
       "body": "Backport of #14\n\nSee that PR for details.\n\n\r\nNotes: <!-- One-line Change Summary Here-->",
       "created_at": "2018-11-01T17:29:51Z",
