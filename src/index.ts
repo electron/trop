@@ -3,7 +3,6 @@ import { Application, Context } from 'probot';
 import {
   backportToBranch,
   backportToLabel,
-  getLabelPrefixes,
   backportImpl,
   BackportPurpose,
   labelMergedPR,
@@ -13,7 +12,7 @@ import {
 import { labelToTargetBranch } from './utils/label-utils';
 import { PullRequest, TropConfig } from './backport/Probot';
 import { CHECK_PREFIX, TROP_BOT, ELECTRON_BOT } from './constants';
-import { PRChange } from './enums';
+import { PRChange, PRStatus } from './enums';
 import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
 
 const probotHandler = async (robot: Application) => {
@@ -39,11 +38,10 @@ const probotHandler = async (robot: Application) => {
       per_page: 100,
     }));
     const checkRuns = allChecks.data.check_runs.filter(run => run.name.startsWith(CHECK_PREFIX));
-    const labelPrefixes = await getLabelPrefixes(context);
 
     for (const label of pr.labels) {
-      if (!label.name.startsWith(labelPrefixes.target)) continue;
-      const targetBranch = labelToTargetBranch(label, labelPrefixes.target);
+      if (!label.name.startsWith(PRStatus.TARGET)) continue;
+      const targetBranch = labelToTargetBranch(label, PRStatus.TARGET);
       const runName = `${CHECK_PREFIX}${targetBranch}`;
       const existing = checkRuns.find(run => run.name === runName);
       if (existing) {
@@ -73,7 +71,7 @@ const probotHandler = async (robot: Application) => {
 
     for (const checkRun of checkRuns) {
       if (!pr.labels.find(
-        label => label.name === `${labelPrefixes.target}${checkRun.name.replace(CHECK_PREFIX, '')}`,
+        label => label.name === `${PRStatus.TARGET}${checkRun.name.replace(CHECK_PREFIX, '')}`,
       )) {
         context.github.checks.update(context.repo({
           check_run_id: checkRun.id,
