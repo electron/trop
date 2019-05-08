@@ -1,5 +1,4 @@
 import { Context } from 'probot';
-import { PRStatus } from '../enums';
 import { Label } from '../backport/Probot';
 
 export const addLabel = async (context: Context, prNumber: number, labelsToAdd: string[]) => {
