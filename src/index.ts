@@ -243,6 +243,7 @@ PR is no longer targeting this branch for a backport',
       const oldPRNumber = maybeGetManualBackportNumber(context);
       if (typeof oldPRNumber === 'number') {
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
+        await labelMergedPRs(context, pr as any);
       }
 
       if (pr.user.login === TROP_BOT) {
