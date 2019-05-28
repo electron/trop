@@ -124,7 +124,9 @@ PR is no longer targeting this branch for a backport',
     ],
     async (context: Context) => {
       const oldPRNumber = maybeGetManualBackportNumber(context);
-      if (oldPRNumber) {
+
+      // only check for manual backports when a new PR is opened or if the PR body is edited
+      if (oldPRNumber && ['opened', 'edited'].includes(context.payload.action)) {
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
       }
 
@@ -241,7 +243,7 @@ PR is no longer targeting this branch for a backport',
       }
 
       const oldPRNumber = maybeGetManualBackportNumber(context);
-      if (typeof oldPRNumber === 'number') {
+      if (oldPRNumber) {
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
         await labelMergedPRs(context, pr as any);
       }
