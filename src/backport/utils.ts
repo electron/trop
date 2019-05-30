@@ -325,7 +325,7 @@ export const updateManualBackport = async (
 
   if (type === PRChange.OPEN) {
     labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
-    if (!await labelUtils.labelExistsOnPR(context, pr.number, labelToRemove)) {
+    if (!await labelUtils.labelExistsOnPR(context, oldPRNumber, labelToRemove)) {
       labelToRemove = PRStatus.TARGET + pr.base.ref;
     }
     labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
