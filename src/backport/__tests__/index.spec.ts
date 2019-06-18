@@ -18,6 +18,7 @@ const issueCommentBackportToMultipleCreatedEvent = require('./fixtures/issue_com
 describe('trop', () => {
   let robot: any;
   let github: any;
+  process.env = { BOT_USER_NAME: 'electron-bot' };
 
   beforeEach(async () => {
     robot = new Application();
