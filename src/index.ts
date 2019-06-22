@@ -104,8 +104,9 @@ PR is no longer targeting this branch for a backport',
       // check if this PR is a manual backport of another PR
       const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
       const match: Array<string> | null = pr.body.match(backportPattern);
-      if (match && match[1]) {
-        backportNumber = parseInt(match[1], 10);
+      if (match) {
+        // This might be the first or second capture group depending on if it's a link or not
+        backportNumber = !!match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10);
       }
     }
 
