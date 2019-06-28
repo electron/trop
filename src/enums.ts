@@ -3,6 +3,11 @@ export enum PRChange {
   CLOSE,
 }
 
+export enum BackportPurpose {
+  ExecuteBackport,
+  Check,
+}
+
 // trop comment labeling prefixes
 export enum PRStatus {
   TARGET = 'target/',

@@ -8,7 +8,7 @@ import * as simpleGit from 'simple-git/promise';
 import { Label, PullRequest } from './Probot';
 import queue from './Queue';
 import { CHECK_PREFIX } from '../constants';
-import { PRChange, PRStatus } from '../enums';
+import { PRChange, PRStatus, BackportPurpose } from '../enums';
 
 import * as labelUtils from '../utils/label-utils';
 import { initRepo } from '../operations/init-repo';
@@ -50,11 +50,6 @@ const createBackportComment = (pr: PullRequest) => {
 
   return body;
 };
-
-export enum BackportPurpose {
-  ExecuteBackport,
-  Check,
-}
 
 export const backportImpl = async (robot: Application,
                                    context: Context,
@@ -357,39 +352,4 @@ please check out #${pr.number}`;
 
   await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
   await labelUtils.addLabel(context, oldPRNumber, [labelToAdd]);
-};
-
-export const backportToLabel = async (
-  robot: Application,
-  context: Context,
-  label: Label,
-) => {
-  if (!label.name.startsWith(PRStatus.TARGET)) {
-    robot.log(`Label '${label.name}' does not begin with '${PRStatus.TARGET}'`);
-    return;
-  }
-
-  const targetBranch = labelUtils.labelToTargetBranch(label, PRStatus.TARGET);
-  if (!targetBranch) {
-    robot.log('Nothing to do');
-    return;
-  }
-
-  const labelToRemove = label.name;
-  const labelToAdd = label.name.replace(PRStatus.TARGET, PRStatus.IN_FLIGHT);
-  await backportImpl(
-    robot, context, targetBranch, BackportPurpose.ExecuteBackport, labelToRemove, labelToAdd,
-  );
-};
-
-export const backportToBranch = async (
-  robot: Application,
-  context: Context,
-  targetBranch: string,
-) => {
-  const labelToRemove = undefined;
-  const labelToAdd = PRStatus.IN_FLIGHT + targetBranch;
-  await backportImpl(
-    robot, context, targetBranch, BackportPurpose.ExecuteBackport, labelToRemove, labelToAdd,
-  );
 };
