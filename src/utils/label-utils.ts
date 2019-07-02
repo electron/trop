@@ -1,5 +1,5 @@
 import { Context } from 'probot';
-import { Label } from '../backport/Probot';
+import { Label } from '../Probot';
 
 export const addLabel = async (context: Context, prNumber: number, labelsToAdd: string[]) => {
   return context.github.issues.addLabels(context.repo({

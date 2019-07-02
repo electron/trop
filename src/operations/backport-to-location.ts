@@ -1,5 +1,5 @@
 import { Application, Context } from 'probot';
-import { Label } from '../backport/Probot';
+import { Label } from '../Probot';
 import { PRStatus, BackportPurpose } from '../enums';
 import * as labelUtils from '../utils/label-utils';
 import { backportImpl } from '../backport/utils';

@@ -3,6 +3,7 @@ const { Application } = require('probot');
 
 import * as utils from '../utils';
 import * as backportOperations from '../../operations/backport-to-location';
+import { updateManualBackport } from '../../operations/update-manual-backport';
 import { ProbotHandler } from '../../index';
 
 const trop: ProbotHandler = require('../../index');
@@ -15,6 +16,8 @@ const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.j
 const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json');
 const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json');
 const issueCommentBackportToMultipleCreatedEvent = require('./fixtures/issue_comment_backport_to_multiple.created.json');
+
+jest.mock('../../operations/update-manual-backport', () => ({ updateManualBackport: jest.fn() }));
 
 describe('trop', () => {
   let robot: any;
@@ -146,10 +149,9 @@ describe('trop', () => {
 
   describe('pull_request.opened event', () => {
     it('labels the original PR when a manual backport PR has been opened', async () => {
-      Object.defineProperty(utils, 'updateManualBackport', { value: jest.fn() });
       await robot.receive(backportPROpenedEvent);
 
-      expect(utils.updateManualBackport).toHaveBeenCalled();
+      expect(updateManualBackport).toHaveBeenCalled();
     });
   });
 
@@ -169,17 +171,16 @@ describe('trop', () => {
     });
 
     it('labels the original PR when a manual backport PR has been merged', async () => {
-      Object.defineProperty(utils, 'updateManualBackport', { value: jest.fn() });
       await robot.receive(backportPRClosedEvent);
 
-      expect(utils.updateManualBackport).toHaveBeenCalled();
+      expect(updateManualBackport).toHaveBeenCalled();
     });
 
     it('adds a label when a backport PR has been merged', async () => {
       Object.defineProperty(utils, 'labelMergedPR', { value: jest.fn() });
       await robot.receive(backportPRClosedEvent);
 
-      expect(utils.updateManualBackport).toHaveBeenCalled();
+      expect(updateManualBackport).toHaveBeenCalled();
     });
   });
 });

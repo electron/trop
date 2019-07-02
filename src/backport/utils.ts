@@ -5,16 +5,16 @@ import * as fs from 'fs-extra';
 import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
-import { Label, PullRequest } from './Probot';
+import { PullRequest } from '../Probot';
 import queue from './Queue';
 import { CHECK_PREFIX } from '../constants';
-import { PRChange, PRStatus, BackportPurpose } from '../enums';
+import { PRStatus, BackportPurpose } from '../enums';
 
 import * as labelUtils from '../utils/label-utils';
 import { initRepo } from '../operations/init-repo';
 import { setupRemotes } from '../operations/setup-remotes';
 import { backportCommitsToBranch } from '../operations/backport-commits';
-import { getRepoToken } from './token';
+import { getRepoToken } from '../utils/token-util';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
@@ -307,49 +307,4 @@ export const backportImpl = async (robot: Application,
       }
     },
   );
-};
-
-export const updateManualBackport = async (
-  context: Context,
-  type: PRChange,
-  oldPRNumber: number,
-) => {
-  const pr = context.payload.pull_request;
-  let labelToRemove;
-  let labelToAdd;
-
-  if (type === PRChange.OPEN) {
-    labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
-    if (!await labelUtils.labelExistsOnPR(context, oldPRNumber, labelToRemove)) {
-      labelToRemove = PRStatus.TARGET + pr.base.ref;
-    }
-    labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
-
-    const commentBody = `A maintainer has manually backported this PR to "${pr.base.ref}", \
-please check out #${pr.number}`;
-
-    // TODO: Once probot updates to @octokit/rest@16 we can use .paginate to
-    // get all the comments properly, for now 100 should do
-    const { data: existingComments } = await context.github.issues.listComments(context.repo({
-      number: oldPRNumber,
-      per_page: 100,
-    }));
-
-    // We should only comment if we haven't done it before
-    const shouldComment = !existingComments.some(comment => comment.body === commentBody);
-
-    if (shouldComment) {
-      // comment on the original PR with the manual backport link
-      await context.github.issues.createComment(context.repo({
-        number: oldPRNumber,
-        body: commentBody,
-      }));
-    }
-  } else {
-    labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
-    labelToAdd = PRStatus.MERGED + pr.base.ref;
-  }
-
-  await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
-  await labelUtils.addLabel(context, oldPRNumber, [labelToAdd]);
 };
