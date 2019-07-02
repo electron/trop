@@ -2,7 +2,7 @@ jest.mock('request');
 const { Application } = require('probot');
 
 import * as utils from '../utils';
-import * as backportOperations from '../../operations/backport-to-location';
+import { backportToBranch, backportToLabel } from '../../operations/backport-to-location';
 import { updateManualBackport } from '../../operations/update-manual-backport';
 import { ProbotHandler } from '../../index';
 
@@ -18,6 +18,10 @@ const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_bac
 const issueCommentBackportToMultipleCreatedEvent = require('./fixtures/issue_comment_backport_to_multiple.created.json');
 
 jest.mock('../../operations/update-manual-backport', () => ({ updateManualBackport: jest.fn() }));
+jest.mock('../../operations/backport-to-location', () => ({
+  backportToBranch: jest.fn(),
+  backportToLabel: jest.fn(),
+}));
 
 describe('trop', () => {
   let robot: any;
@@ -99,51 +103,46 @@ describe('trop', () => {
 
   describe('issue_comment.created event', () => {
     it('manually triggers the backport on comment', async () => {
-      Object.defineProperty(backportOperations, 'backportToLabel', { value: jest.fn() });
       await robot.receive(issueCommentBackportCreatedEvent);
 
       expect(github.pullRequests.get).toHaveBeenCalled();
       expect(github.issues.createComment).toHaveBeenCalled();
-      expect(backportOperations.backportToLabel).toHaveBeenCalled();
+      expect(backportToLabel).toHaveBeenCalled();
     });
 
     it('does not trigger the backport on comment if the PR is not merged', async () => {
-      Object.defineProperty(backportOperations, 'backportToLabel', { value: jest.fn() });
       github.pullRequests.get = jest.fn().mockReturnValue(Promise.resolve({ data: { merged: false } }));
 
       await robot.receive(issueCommentBackportCreatedEvent);
 
       expect(github.pullRequests.get).toHaveBeenCalled();
       expect(github.issues.createComment).toHaveBeenCalled();
-      expect(backportOperations.backportToLabel).not.toHaveBeenCalled();
+      expect(backportToLabel).not.toHaveBeenCalled();
     });
 
     it('triggers the backport on comment to a targeted branch', async () => {
-      Object.defineProperty(backportOperations, 'backportToBranch', { value: jest.fn() });
       await robot.receive(issueCommentBackportToCreatedEvent);
 
       expect(github.pullRequests.get).toHaveBeenCalled();
       expect(github.issues.createComment).toHaveBeenCalled();
-      expect(backportOperations.backportToBranch).toHaveBeenCalled();
+      expect(backportToBranch).toHaveBeenCalled();
     });
 
     it('allows for multiple PRs to be triggered in the same comment', async () => {
-      Object.defineProperty(backportOperations, 'backportToBranch', { value: jest.fn() });
       await robot.receive(issueCommentBackportToMultipleCreatedEvent);
 
       expect(github.pullRequests.get).toHaveBeenCalledTimes(3);
       expect(github.issues.createComment).toHaveBeenCalledTimes(2);
-      expect(backportOperations.backportToBranch).toHaveBeenCalledTimes(2);
+      expect(backportToBranch).toHaveBeenCalledTimes(2);
     });
 
     it('does not trigger the backport on comment to a targeted branch if the branch does not exist', async () => {
-      Object.defineProperty(backportOperations, 'backportToBranch', { value: jest.fn() });
       github.repos.getBranch = jest.fn().mockReturnValue(Promise.reject(new Error('404')));
       await robot.receive(issueCommentBackportToCreatedEvent);
 
       expect(github.pullRequests.get).toHaveBeenCalled();
       expect(github.issues.createComment).toHaveBeenCalled();
-      expect(backportOperations.backportToBranch).toHaveBeenCalledTimes(0);
+      expect(backportToBranch).toHaveBeenCalledTimes(0);
     });
   });
 
@@ -157,10 +156,9 @@ describe('trop', () => {
 
   describe('pull_request.closed event', () => {
     it('begins the backporting process if the PR was merged', async () => {
-      Object.defineProperty(backportOperations, 'backportToLabel', { value: jest.fn() });
       await robot.receive(prClosedEvent);
 
-      expect(backportOperations.backportToLabel).toHaveBeenCalled();
+      expect(backportToLabel).toHaveBeenCalled();
     });
 
     it('adds a label when a backport PR has been merged', async () => {
