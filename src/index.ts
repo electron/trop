@@ -1,18 +1,14 @@
 import { Application, Context } from 'probot';
 
-import {
-  backportImpl,
-  labelMergedPR,
-  updateManualBackport,
-} from './backport/utils';
-
+import { backportImpl, labelMergedPR } from './backport/utils';
 import { labelToTargetBranch } from './utils/label-utils';
-import { PullRequest, TropConfig } from './backport/Probot';
+import { PullRequest, TropConfig } from './Probot';
 import { CHECK_PREFIX } from './constants';
 import { getEnvVar } from './utils/env-utils';
 import { PRChange, PRStatus, BackportPurpose } from './enums';
 import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
 import { backportToLabel, backportToBranch } from './operations/backport-to-location';
+import { updateManualBackport } from './operations/update-manual-backport';
 
 const probotHandler = async (robot: Application) => {
   const labelMergedPRs = async (context: Context, pr: PullRequest) => {
