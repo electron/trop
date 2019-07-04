@@ -1,5 +1,5 @@
 {
-  "event": "pull_request",
+  "name": "pull_request",
   "payload": {
     "action": "closed",
     "number": 7,
@@ -25,9 +25,6 @@
       "owner": {
         "login": "codebytere"
       }
-    },
-    "installation": {
-      "id": 103619
     }
   }
 }

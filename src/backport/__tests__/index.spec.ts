@@ -1,5 +1,5 @@
 jest.mock('request');
-const { Application } = require('probot');
+import { Application } from 'probot';
 
 import * as utils from '../utils';
 import { backportToBranch, backportToLabel } from '../../operations/backport-to-location';
@@ -24,17 +24,17 @@ jest.mock('../../operations/backport-to-location', () => ({
 }));
 
 describe('trop', () => {
-  let robot: any;
+  let robot: Application;
   let github: any;
   process.env = { BOT_USER_NAME: 'electron-bot' };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     robot = new Application();
-    await trop(robot);
+    robot.load(trop);
 
     github = {
       repos: {
-        getContent: jest.fn().mockReturnValue(Promise.resolve({
+        getContents: jest.fn().mockReturnValue(Promise.resolve({
           data: { content: Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - codebytere').toString('base64') },
         })),
         getBranch: jest.fn().mockReturnValue(Promise.resolve()),
@@ -96,7 +96,7 @@ describe('trop', () => {
     it('fetches config', async () => {
       await robot.receive(issueCommentBackportCreatedEvent);
 
-      expect(github.repos.getContent).toHaveBeenCalled();
+      expect(github.repos.getContents).toHaveBeenCalled();
     });
   });
 
@@ -110,7 +110,7 @@ describe('trop', () => {
     });
 
     it('does not trigger the backport on comment if the PR is not merged', async () => {
-      github.pullRequests.get = jest.fn().mockReturnValue(Promise.resolve({ data: { merged: false } }));
+      github.pulls.get = jest.fn().mockReturnValue(Promise.resolve({ data: { merged: false } }));
 
       await robot.receive(issueCommentBackportCreatedEvent);
 
