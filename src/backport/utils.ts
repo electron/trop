@@ -65,14 +65,15 @@ export const backportImpl = async (robot: Application,
   const log = (...args: string[]) => robot.log(slug, ...args);
 
   const getCheckRun = async () => {
-    const allChecks = await context.github.checks.listForRef(context.repo({
-      ref: context.payload.pull_request.head.sha,
-      per_page: 100,
-    }));
+    const baseParams = context.repo({ ref: context.payload.pull_request.head.sha });
+    const allChecks = await context.github.paginate(
+      context.github.checks.listForRef(baseParams),
+      res => res.data,
+    );
 
-    return allChecks.data.check_runs.find((run: GitHub.ChecksListForRefResponseCheckRunsItem) => {
-      return run.name === `${CHECK_PREFIX}${targetBranch}`;
-    });
+    return (allChecks as any as GitHub.ChecksListForRefResponse).check_runs.find(
+      (run: GitHub.ChecksListForRefResponseCheckRunsItem) => run.name === `${CHECK_PREFIX}${targetBranch}`,
+    );
   };
 
   let createdDir: string | null = null;

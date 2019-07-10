@@ -23,11 +23,11 @@ export const labelToTargetBranch = (label: Label, prefix: string) => {
 };
 
 export const labelExistsOnPR = async (context: Context, prNumber: number, labelName: string) => {
-  const labels = await context.github.issues.listLabelsOnIssue(context.repo({
-    number: prNumber,
-    per_page: 100,
-    page: 1,
-  }));
+  const baseParams = context.repo({ number: prNumber });
+  const labels = await context.github.paginate(
+    context.github.issues.listLabelsOnIssue(baseParams),
+    res => res.data,
+  );
 
-  return labels.data.some(label => label.name === labelName);
+  return labels.some(label => label.name === labelName);
 };

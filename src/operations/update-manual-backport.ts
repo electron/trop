@@ -27,17 +27,16 @@ export const updateManualBackport = async (
       labelToRemove = PRStatus.TARGET + pr.base.ref;
     }
 
-    const commentBody = `A maintainer has manually backported this PR to "${pr.base.ref}", \
-please check out #${pr.number}`;
-
-    // TODO(codebytere): Once probot updates to @octokit/rest@16 we can use .paginate to
-    // get all the comments properly, for now 100 should do
-    const { data: existingComments } = await context.github.issues.listComments(context.repo({
-      number: oldPRNumber,
-      per_page: 100,
-    }));
+    // Fetch all existing comments across pages
+    const baseParams = context.repo({ number: oldPRNumber });
+    const existingComments = await context.github.paginate(
+      context.github.issues.listComments(baseParams),
+      res => res.data,
+    );
 
     // We should only comment if there is not a previous existing comment
+    const commentBody = `A maintainer has manually backported this PR to "${pr.base.ref}", \
+please check out #${pr.number}`;
     const shouldComment = !existingComments.some(comment => comment.body === commentBody);
 
     if (shouldComment) {

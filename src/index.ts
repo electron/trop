@@ -6,7 +6,7 @@ import { PullRequest, TropConfig } from './Probot';
 import { CHECK_PREFIX } from './constants';
 import { getEnvVar } from './utils/env-utils';
 import { PRChange, PRStatus, BackportPurpose } from './enums';
-import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
+import { ChecksListForRefResponseCheckRunsItem, ChecksListForRefResponse } from '@octokit/rest';
 import { backportToLabel, backportToBranch } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
 
@@ -28,11 +28,15 @@ const probotHandler = async (robot: Application) => {
   };
 
   const runCheck = async (context: Context, pr: PullRequest) => {
-    const allChecks = await context.github.checks.listForRef(context.repo({
-      ref: pr.head.sha,
-      per_page: 100,
-    }));
-    const checkRuns = allChecks.data.check_runs.filter(run => run.name.startsWith(CHECK_PREFIX));
+    const baseParams = context.repo({ ref: pr.head.sha });
+    const allChecks = await context.github.paginate(
+      context.github.checks.listForRef(baseParams),
+      res => res.data,
+    );
+
+    const checkRuns = (allChecks as any as ChecksListForRefResponse).check_runs.filter(
+      (run: ChecksListForRefResponseCheckRunsItem) => run.name.startsWith(CHECK_PREFIX),
+    );
 
     for (const label of pr.labels) {
       if (!label.name.startsWith(PRStatus.TARGET)) continue;
@@ -129,11 +133,15 @@ PR is no longer targeting this branch for a backport',
       // Check if the PR is going to master, if it's not check if it's correctly
       // tagged as a backport of a PR that has already been merged into master
       const pr = context.payload.pull_request;
-      const { data: allChecks } = await context.github.checks.listForRef(context.repo({
-        ref: pr.head.sha,
-        per_page: 100,
-      }));
-      let checkRun = allChecks.check_runs.find(run => run.name === VALID_BACKPORT_CHECK_NAME);
+      const baseParams = context.repo({ ref: pr.head.sha });
+      const allChecks = await context.github.paginate(
+        context.github.checks.listForRef(baseParams),
+        res => res.data,
+      );
+
+      let checkRun = (allChecks as any as ChecksListForRefResponse).check_runs.find(
+        (run: ChecksListForRefResponseCheckRunsItem) => run.name === VALID_BACKPORT_CHECK_NAME,
+      );
 
       if (pr.base.ref !== 'master') {
         if (!checkRun) {
