@@ -164,7 +164,7 @@ PR is no longer targeting this branch for a backport',
   Check out the trop documentation linked below for more information.';
           }
         } else {
-          const oldPR = (await context.github.pullRequests.get(context.repo({
+          const oldPR = (await context.github.pulls.get(context.repo({
             number: oldPRNumber,
           }))).data;
 
@@ -231,12 +231,12 @@ PR is no longer targeting this branch for a backport',
   robot.on('pull_request.unlabeled', maybeRunCheck);
 
   // backport pull requests to labeled targets when PR is merged
-  robot.on('pull_request.closed', async (context) => {
+  robot.on('pull_request.closed', async (context: Context) => {
     const pr = context.payload.pull_request;
     if (pr.merged) {
       // check that the closed PR is trop's own and close
       if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
-        context.github.gitdata.deleteRef(context.repo({
+        context.github.git.deleteRef(context.repo({
           ref: pr.base.ref,
         }));
       }
@@ -258,7 +258,7 @@ PR is no longer targeting this branch for a backport',
   const TROP_COMMAND_PREFIX = '/trop ';
 
   // manually trigger backporting process on trigger comment phrase
-  robot.on('issue_comment.created', async (context) => {
+  robot.on('issue_comment.created', async (context: Context) => {
     const payload = context.payload;
     const config = await context.config<TropConfig>('config.yml');
     if (!config || !Array.isArray(config.authorizedUsers)) {
@@ -288,7 +288,7 @@ PR is no longer targeting this branch for a backport',
       name: 'backport sanity checker',
       command: /^run backport/,
       execute: async () => {
-        const pr = (await context.github.pullRequests.get(
+        const pr = (await context.github.pulls.get(
           context.repo({ number: payload.issue.number }))
         ).data;
         if (!pr.merged) {
@@ -304,7 +304,7 @@ PR is no longer targeting this branch for a backport',
       name: 'backport automatically',
       command: /^run backport$/,
       execute: async () => {
-        const pr = (await context.github.pullRequests.get(
+        const pr = (await context.github.pulls.get(
           context.repo({ number: payload.issue.number }))
         ).data as any;
         await context.github.issues.createComment(context.repo({
@@ -323,7 +323,7 @@ PR is no longer targeting this branch for a backport',
           robot.log(`backport-to ${branch}`);
 
           if (!(branch.trim())) continue;
-          const pr = (await context.github.pullRequests.get(
+          const pr = (await context.github.pulls.get(
             context.repo({ number: payload.issue.number }))
           ).data;
 

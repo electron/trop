@@ -57,7 +57,7 @@ export const backportImpl = async (robot: Application,
                                    purpose: BackportPurpose,
                                    labelToRemove?: string,
                                    labelToAdd?: string) => {
-  const base = context.payload.pull_request.base;
+  const base: GitHub.PullsGetResponseBase = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
   robot.log(`Queuing ${bp} for "${slug}"`);
@@ -69,7 +69,10 @@ export const backportImpl = async (robot: Application,
       ref: context.payload.pull_request.head.sha,
       per_page: 100,
     }));
-    return allChecks.data.check_runs.find(run => run.name === `${CHECK_PREFIX}${targetBranch}`);
+
+    return allChecks.data.check_runs.find((run: GitHub.ChecksListForRefResponseCheckRunsItem) => {
+      return run.name === `${CHECK_PREFIX}${targetBranch}`;
+    });
   };
 
   let createdDir: string | null = null;
@@ -117,9 +120,9 @@ export const backportImpl = async (robot: Application,
 
       // Get list of commits
       log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
-      const commits: string[] = (await context.github.pullRequests.listCommits(context.repo({
+      const commits = (await context.github.pulls.listCommits(context.repo({
         number: pr.number,
-      }))).data.map(commit => commit.sha!);
+      }))).data.map((commit: GitHub.PullsListCommitsResponseItem) => commit.sha!);
 
       // No commits == WTF
       if (commits.length === 0) {
@@ -186,7 +189,7 @@ export const backportImpl = async (robot: Application,
 
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('Creating Pull Request');
-        const newPr = (await context.github.pullRequests.create(context.repo({
+        const newPr = (await context.github.pulls.create(context.repo({
           head: `${tempBranch}`,
           base: targetBranch,
           title: pr.title,

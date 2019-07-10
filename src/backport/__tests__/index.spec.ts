@@ -1,5 +1,5 @@
 jest.mock('request');
-const { Application } = require('probot');
+import { Application } from 'probot';
 
 import * as utils from '../utils';
 import { backportToBranch, backportToLabel } from '../../operations/backport-to-location';
@@ -24,25 +24,25 @@ jest.mock('../../operations/backport-to-location', () => ({
 }));
 
 describe('trop', () => {
-  let robot: any;
+  let robot: Application;
   let github: any;
   process.env = { BOT_USER_NAME: 'electron-bot' };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     robot = new Application();
-    await trop(robot);
+    robot.load(trop);
 
     github = {
       repos: {
-        getContent: jest.fn().mockReturnValue(Promise.resolve({
+        getContents: jest.fn().mockReturnValue(Promise.resolve({
           data: { content: Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - codebytere').toString('base64') },
         })),
         getBranch: jest.fn().mockReturnValue(Promise.resolve()),
       },
-      gitdata: {
+      git: {
         deleteRef: jest.fn().mockReturnValue(Promise.resolve()),
       },
-      pullRequests: {
+      pulls: {
         get: jest.fn().mockReturnValue(Promise.resolve({
           data: {
             merged: true,
@@ -94,10 +94,9 @@ describe('trop', () => {
 
   describe('config', () => {
     it('fetches config', async () => {
-      Object.defineProperty(utils, 'backportToLabel', { value: jest.fn() });
       await robot.receive(issueCommentBackportCreatedEvent);
 
-      expect(github.repos.getContent).toHaveBeenCalled();
+      expect(github.repos.getContents).toHaveBeenCalled();
     });
   });
 
@@ -105,17 +104,17 @@ describe('trop', () => {
     it('manually triggers the backport on comment', async () => {
       await robot.receive(issueCommentBackportCreatedEvent);
 
-      expect(github.pullRequests.get).toHaveBeenCalled();
+      expect(github.pulls.get).toHaveBeenCalled();
       expect(github.issues.createComment).toHaveBeenCalled();
       expect(backportToLabel).toHaveBeenCalled();
     });
 
     it('does not trigger the backport on comment if the PR is not merged', async () => {
-      github.pullRequests.get = jest.fn().mockReturnValue(Promise.resolve({ data: { merged: false } }));
+      github.pulls.get = jest.fn().mockReturnValue(Promise.resolve({ data: { merged: false } }));
 
       await robot.receive(issueCommentBackportCreatedEvent);
 
-      expect(github.pullRequests.get).toHaveBeenCalled();
+      expect(github.pulls.get).toHaveBeenCalled();
       expect(github.issues.createComment).toHaveBeenCalled();
       expect(backportToLabel).not.toHaveBeenCalled();
     });
@@ -123,7 +122,7 @@ describe('trop', () => {
     it('triggers the backport on comment to a targeted branch', async () => {
       await robot.receive(issueCommentBackportToCreatedEvent);
 
-      expect(github.pullRequests.get).toHaveBeenCalled();
+      expect(github.pulls.get).toHaveBeenCalled();
       expect(github.issues.createComment).toHaveBeenCalled();
       expect(backportToBranch).toHaveBeenCalled();
     });
@@ -131,7 +130,7 @@ describe('trop', () => {
     it('allows for multiple PRs to be triggered in the same comment', async () => {
       await robot.receive(issueCommentBackportToMultipleCreatedEvent);
 
-      expect(github.pullRequests.get).toHaveBeenCalledTimes(3);
+      expect(github.pulls.get).toHaveBeenCalledTimes(3);
       expect(github.issues.createComment).toHaveBeenCalledTimes(2);
       expect(backportToBranch).toHaveBeenCalledTimes(2);
     });
@@ -140,7 +139,7 @@ describe('trop', () => {
       github.repos.getBranch = jest.fn().mockReturnValue(Promise.reject(new Error('404')));
       await robot.receive(issueCommentBackportToCreatedEvent);
 
-      expect(github.pullRequests.get).toHaveBeenCalled();
+      expect(github.pulls.get).toHaveBeenCalled();
       expect(github.issues.createComment).toHaveBeenCalled();
       expect(backportToBranch).toHaveBeenCalledTimes(0);
     });
