@@ -147,6 +147,7 @@ describe('trop', () => {
 
   describe('pull_request.opened event', () => {
     it('labels the original PR when a manual backport PR has been opened', async () => {
+      github.paginate = jest.fn().mockReturnValue(Promise.resolve({ check_runs: [] }));
       await robot.receive(backportPROpenedEvent);
 
       expect(updateManualBackport).toHaveBeenCalled();
