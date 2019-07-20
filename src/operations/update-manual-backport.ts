@@ -1,6 +1,7 @@
 import * as labelUtils from '../utils/label-utils';
 import { PRChange, PRStatus } from '../enums';
 import { Context } from 'probot';
+import { IssuesListCommentsResponseItem } from '@octokit/rest';
 
 /*
 * Updates the labels on a backport's original PR as well as comments with links
@@ -28,10 +29,10 @@ export const updateManualBackport = async (
     }
 
     // Fetch all existing comments across pages
-    const baseParams = context.repo({ number: oldPRNumber });
-    const existingComments = await context.github.paginate(
-      context.github.issues.listComments(baseParams),
-      res => res.data,
+    const existingComments: IssuesListCommentsResponseItem[] = await context.github.paginate(
+      context.github.issues.listComments.endpoint.merge(
+        context.repo({ number: oldPRNumber }),
+      ),
     );
 
     // We should only comment if there is not a previous existing comment

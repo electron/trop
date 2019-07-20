@@ -20,7 +20,7 @@
     "config-yml": "^0.10.2",
     "fs-extra": "^7.0.0",
     "node-fetch": "^2.1.1",
-    "probot": "^9.2.5",
+    "probot": "^9.2.19",
     "queue": "^4.5.0",
     "simple-git": "1.105.0",
     "what-the-diff": "^0.4.0"

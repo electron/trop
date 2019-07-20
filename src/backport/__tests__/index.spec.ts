@@ -85,7 +85,11 @@ describe('trop', () => {
         })),
       },
       checks: {
-        listForRef: jest.fn().mockReturnValue(Promise.resolve({ data: { check_runs: [] } })),
+        listForRef: {
+          endpoint: {
+            merge: jest.fn().mockReturnValue(Promise.resolve({ data: { check_runs: [] } })),
+          },
+        },
       },
     };
 

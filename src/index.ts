@@ -28,14 +28,14 @@ const probotHandler = async (robot: Application) => {
   };
 
   const runCheck = async (context: Context, pr: PullRequest) => {
-    const baseParams = context.repo({ ref: pr.head.sha });
     const allChecks = await context.github.paginate(
-      context.github.checks.listForRef(baseParams),
-      res => res.data,
-    );
+      context.github.checks.listForRef.endpoint.merge(
+        context.repo({ ref: pr.head.sha }),
+      ),
+    ) as any as ChecksListForRefResponse;
 
-    const checkRuns = (allChecks as any as ChecksListForRefResponse).check_runs.filter(
-      (run: ChecksListForRefResponseCheckRunsItem) => run.name.startsWith(CHECK_PREFIX),
+    const checkRuns = allChecks.check_runs.filter(
+      run => run.name.startsWith(CHECK_PREFIX),
     );
 
     for (const label of pr.labels) {
@@ -70,7 +70,10 @@ const probotHandler = async (robot: Application) => {
 
     for (const checkRun of checkRuns) {
       if (!pr.labels.find(
-        label => label.name === `${PRStatus.TARGET}${checkRun.name.replace(CHECK_PREFIX, '')}`,
+        (label) => {
+          const checkRunName = checkRun.name.replace(CHECK_PREFIX, '');
+          return label.name === PRStatus.TARGET + checkRunName;
+        },
       )) {
         context.github.checks.update(context.repo({
           check_run_id: checkRun.id,
@@ -133,14 +136,14 @@ PR is no longer targeting this branch for a backport',
       // Check if the PR is going to master, if it's not check if it's correctly
       // tagged as a backport of a PR that has already been merged into master
       const pr = context.payload.pull_request;
-      const baseParams = context.repo({ ref: pr.head.sha });
       const allChecks = await context.github.paginate(
-        context.github.checks.listForRef(baseParams),
-        res => res.data,
-      );
+        context.github.checks.listForRef.endpoint.merge(
+          context.repo({ ref: pr.head.sha }),
+        ),
+      ) as any as ChecksListForRefResponse;
 
-      let checkRun = (allChecks as any as ChecksListForRefResponse).check_runs.find(
-        (run: ChecksListForRefResponseCheckRunsItem) => run.name === VALID_BACKPORT_CHECK_NAME,
+      let checkRun = allChecks.check_runs.find(
+        run => run.name === VALID_BACKPORT_CHECK_NAME,
       );
 
       if (pr.base.ref !== 'master') {
