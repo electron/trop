@@ -1,4 +1,4 @@
-import * as commands from '../../constants';
+import * as commands from '../src/constants';
 
 describe('commands', () => {
   it('should all be unique', () => {

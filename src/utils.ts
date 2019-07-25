@@ -5,16 +5,16 @@ import * as fs from 'fs-extra';
 import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
-import { PullRequest } from '../Probot';
+import { PullRequest } from './Probot';
 import queue from './Queue';
-import { CHECK_PREFIX } from '../constants';
-import { PRStatus, BackportPurpose } from '../enums';
+import { CHECK_PREFIX } from './constants';
+import { PRStatus, BackportPurpose } from './enums';
 
-import * as labelUtils from '../utils/label-utils';
-import { initRepo } from '../operations/init-repo';
-import { setupRemotes } from '../operations/setup-remotes';
-import { backportCommitsToBranch } from '../operations/backport-commits';
-import { getRepoToken } from '../utils/token-util';
+import * as labelUtils from './utils/label-utils';
+import { initRepo } from './operations/init-repo';
+import { setupRemotes } from './operations/setup-remotes';
+import { backportCommitsToBranch } from './operations/backport-commits';
+import { getRepoToken } from './utils/token-util';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');

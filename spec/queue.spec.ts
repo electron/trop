@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import * as sinon from 'sinon';
 
-import { ExecutionQueue } from '../Queue';
+import { ExecutionQueue } from '../src/Queue';
 
 const noop = async () => {};
 
