@@ -1,6 +1,6 @@
 import { Application, Context } from 'probot';
 
-import { backportImpl, labelMergedPR } from './backport/utils';
+import { backportImpl, labelMergedPR } from './utils';
 import { labelToTargetBranch } from './utils/label-utils';
 import { PullRequest, TropConfig } from './Probot';
 import { CHECK_PREFIX } from './constants';

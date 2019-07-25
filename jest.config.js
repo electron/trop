@@ -2,13 +2,13 @@ process.env.SPEC_RUNNING = '1';
 
 module.exports = {
   roots: [
-    '<rootDir>/src'
+    '<rootDir>/spec'
   ],
   transform: {
     '^.+\\.tsx?$': 'ts-jest'
   },
   clearMocks: true,
-  testRegex: '(/__tests__/.*|(\\.|/)(test|spec))\\.tsx?$',
+  testRegex: '(/spec/.*|(\\.|/)(test|spec))\\.tsx?$',
   moduleFileExtensions: [
     'ts',
     'tsx',

@@ -1,12 +1,12 @@
 jest.mock('request');
 import { Application } from 'probot';
 
-import * as utils from '../utils';
-import { backportToBranch, backportToLabel } from '../../operations/backport-to-location';
-import { updateManualBackport } from '../../operations/update-manual-backport';
-import { ProbotHandler } from '../../index';
+import * as utils from '../src/utils';
+import { backportToBranch, backportToLabel } from '../src/operations/backport-to-location';
+import { updateManualBackport } from '../src/operations/update-manual-backport';
+import { ProbotHandler } from '../src/index';
 
-const trop: ProbotHandler = require('../../index');
+const trop: ProbotHandler = require('../src/index');
 
 // event fixtures
 const prClosedEvent = require('./fixtures/pull_request.closed.json');
@@ -17,8 +17,11 @@ const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backp
 const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json');
 const issueCommentBackportToMultipleCreatedEvent = require('./fixtures/issue_comment_backport_to_multiple.created.json');
 
-jest.mock('../../operations/update-manual-backport', () => ({ updateManualBackport: jest.fn() }));
-jest.mock('../../operations/backport-to-location', () => ({
+jest.mock('../src/operations/update-manual-backport', () => ({
+  updateManualBackport: jest.fn(),
+}));
+
+jest.mock('../src/operations/backport-to-location', () => ({
   backportToBranch: jest.fn(),
   backportToLabel: jest.fn(),
 }));

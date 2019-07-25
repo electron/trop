@@ -2,7 +2,7 @@ import { Application, Context } from 'probot';
 import { Label } from '../Probot';
 import { PRStatus, BackportPurpose } from '../enums';
 import * as labelUtils from '../utils/label-utils';
-import { backportImpl } from '../backport/utils';
+import { backportImpl } from '../utils';
 
 /*
 * Performs a backport to a specified label.

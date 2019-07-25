@@ -3,8 +3,8 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
-import { initRepo } from '../../operations/init-repo';
-import { setupRemotes } from '../../operations/setup-remotes';
+import { initRepo } from '../src/operations/init-repo';
+import { setupRemotes } from '../src/operations/setup-remotes';
 
 let dirObject: { dir?: string } | null = null;
 
