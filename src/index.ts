@@ -271,7 +271,7 @@ PR is no longer targeting this branch for a backport',
   // manually trigger backporting process on trigger comment phrase
   robot.on('issue_comment.created', async (context: Context) => {
     const payload = context.payload;
-    const config = await context.config<TropConfig>('config.yml');
+    const config = await context.config<TropConfig>('config.yml') as TropConfig;
     if (!config || !Array.isArray(config.authorizedUsers)) {
       robot.log('missing or invalid config', config);
       return;
