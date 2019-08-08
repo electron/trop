@@ -54,4 +54,8 @@ please check out #${pr.number}`;
 
   await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
   await labelUtils.addLabel(context, oldPRNumber, [labelToAdd]);
+
+  // Add labels for the backport and target branch to the manual backport if
+  // the maintainer forgot to do so themselves
+  await labelUtils.addLabel(context, pr.number, ['backport', pr.base.ref]);
 };
