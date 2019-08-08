@@ -36,7 +36,7 @@ export const updateManualBackport = async (
     );
 
     // We should only comment if there is not a previous existing comment
-    const commentBody = `A maintainer has manually backported this PR to "${pr.base.ref}", \
+    const commentBody = `@${pr.user.login} has manually backported this PR to "${pr.base.ref}", \
 please check out #${pr.number}`;
     const shouldComment = !existingComments.some(comment => comment.body === commentBody);
 
