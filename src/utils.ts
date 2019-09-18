@@ -64,24 +64,21 @@ export const backportImpl = async (robot: Application,
 
   const log = (...args: string[]) => robot.log(slug, ...args);
 
-  const pr = context.payload.pull_request as any as PullRequest;
-
   const getCheckRun = async () => {
-    const allChecks = await context.github.paginate(
-      context.github.checks.listForRef.endpoint.merge(
-        context.repo({ ref: pr.head.sha }),
-      ),
-    ) as any as GitHub.ChecksListForRefResponse;
+    const allChecks = await context.github.checks.listForRef(context.repo({
+      ref: context.payload.pull_request.head.sha,
+      per_page: 100,
+    }));
 
-    return allChecks.check_runs.find(
-      run => run.name === `${CHECK_PREFIX}${targetBranch}`,
-    );
+    return allChecks.data.check_runs.find((run: GitHub.ChecksListForRefResponseCheckRunsItem) => {
+      return run.name === `${CHECK_PREFIX}${targetBranch}`;
+    });
   };
 
   let createdDir: string | null = null;
 
   queue.enterQueue(
-    `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
+    `backport-${context.payload.pull_request.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log(`Executing ${bp} for "${slug}"`);
       if (purpose === BackportPurpose.Check) {
@@ -98,6 +95,7 @@ export const backportImpl = async (robot: Application,
       log('getting repo access token');
       const repoAccessToken = await getRepoToken(robot, context);
 
+      const pr = context.payload.pull_request as any as PullRequest;
       // Set up empty repo on master
       log('Setting up local repository');
       const { dir } = await initRepo({

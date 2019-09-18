@@ -1,7 +1,6 @@
 import * as labelUtils from '../utils/label-utils';
 import { PRChange, PRStatus } from '../enums';
 import { Context } from 'probot';
-import { IssuesListCommentsResponseItem } from '@octokit/rest';
 
 /*
 * Updates the labels on a backport's original PR as well as comments with links
@@ -28,16 +27,18 @@ export const updateManualBackport = async (
       labelToRemove = PRStatus.TARGET + pr.base.ref;
     }
 
-    // Fetch all existing comments across pages
-    const existingComments: IssuesListCommentsResponseItem[] = await context.github.paginate(
-      context.github.issues.listComments.endpoint.merge(
-        context.repo({ number: oldPRNumber }),
-      ),
-    );
-
     // We should only comment if there is not a previous existing comment
     const commentBody = `@${pr.user.login} has manually backported this PR to "${pr.base.ref}", \
 please check out #${pr.number}`;
+
+    // TODO(codebytere): Once probot updates to @octokit/rest@16 we can use .paginate to
+    // get all the comments properly, for now 100 should do
+    const { data: existingComments } = await context.github.issues.listComments(context.repo({
+      number: oldPRNumber,
+      per_page: 100,
+    }));
+
+    // We should only comment if there is not a previous existing comment
     const shouldComment = !existingComments.some(comment => comment.body === commentBody);
 
     if (shouldComment) {
