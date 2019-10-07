@@ -7,6 +7,7 @@ import * as simpleGit from 'simple-git/promise';
 const baseDir = path.resolve(os.tmpdir(), 'trop-working');
 
 export interface InitRepoOptions {
+  githubHost: string;
   slug: string;
   accessToken: string;
 }
@@ -17,7 +18,7 @@ export interface InitRepoOptions {
 * @param {InitRepoOptions} repo and payload for repo initialization
 * @returns {Object} - an object containing the repo initialization directory
 */
-export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
+export const initRepo = async ({ githubHost, slug, accessToken }: InitRepoOptions) => {
   await fs.mkdirp(path.resolve(baseDir, slug));
   const prefix = path.resolve(baseDir, slug, 'job-');
   const dir = await fs.mkdtemp(prefix);
@@ -30,7 +31,7 @@ export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
   const git = simpleGit(dir);
 
   await git.clone(
-    `https://x-access-token:${accessToken}@github.com/${slug}.git`,
+    `https://x-access-token:${accessToken}@${githubHost}/${slug}.git`,
     '.',
   );
 

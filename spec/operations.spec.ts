@@ -26,6 +26,7 @@ describe('runner', () => {
   describe('initRepo()', () => {
     it('should clone a github repository', async () => {
       const dir = saveDir(await initRepo({
+        githubHost: 'github.com',
         slug: 'electron/trop',
         accessToken: '',
       }));
@@ -35,6 +36,7 @@ describe('runner', () => {
 
     it('should fail if the github repository does not exist', async () => {
       await expect(initRepo({
+        githubHost: 'github.com',
         slug: 'electron/this-is-not-trop',
         accessToken: '',
       })).rejects.toBeTruthy();

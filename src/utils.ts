@@ -95,10 +95,14 @@ export const backportImpl = async (robot: Application,
       log('getting repo access token');
       const repoAccessToken = await getRepoToken(robot, context);
 
+      // use GHE_HOST
+      const githubHost = process.env.GHE_HOST || "github.com";
+      const githubAPIBaseUrl = process.env.GHE_HOST ? `https://${process.env.GHE_HOST}/api/v3` : "https://api.github.com";
       const pr = context.payload.pull_request as any as PullRequest;
       // Set up empty repo on master
       log('Setting up local repository');
       const { dir } = await initRepo({
+        githubHost,
         slug,
         accessToken: repoAccessToken,
       });
@@ -108,7 +112,7 @@ export const backportImpl = async (robot: Application,
       // Set up remotes
       log('setting up remotes');
       const targetRepoRemote =
-          `https://x-access-token:${repoAccessToken}@github.com/${slug}.git`;
+          `https://x-access-token:${repoAccessToken}@${githubHost}/${slug}.git`;
 
       await setupRemotes({
         dir,
@@ -151,7 +155,7 @@ export const backportImpl = async (robot: Application,
 
       for (const [i, commit] of commits.entries()) {
         q.push(async () => {
-          const patchUrl = `https://api.github.com/repos/${slug}/commits/${commit}`;
+          const patchUrl = `${githubAPIBaseUrl}/repos/${slug}/commits/${commit}`;
           const patchBody = await fetch(patchUrl, {
             headers: {
               Accept: 'application/vnd.github.VERSION.patch',
