@@ -234,6 +234,7 @@ PR is no longer targeting this branch for a backport',
   robot.on('pull_request.closed', async (context: Context) => {
     const pr = context.payload.pull_request;
     if (pr.merged) {
+      robot.log('Automatic backport merged.');
       const oldPRNumber = maybeGetManualBackportNumber(context);
       if (oldPRNumber) {
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
@@ -242,13 +243,15 @@ PR is no longer targeting this branch for a backport',
 
       // check that the closed PR is trop's own and act accordingly
       if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
-        robot.log('Automatic backport merged: deleting base branch.');
+        robot.log(`Labeling original PR for merged PR: #${pr.number}`);
+        await labelMergedPRs(context, pr as any);
+
+        robot.log(`Deleting base branch: ${pr.base.ref}`);
         try {
           await context.github.git.deleteRef(context.repo({ ref: pr.base.ref }));
         } catch (e) {
           robot.log('Failed to delete base branch: ', e);
         }
-        await labelMergedPRs(context, pr as any);
       } else {
         backportAllLabels(context, pr as any);
       }
