@@ -13,7 +13,7 @@ import { updateManualBackport } from './operations/update-manual-backport';
 const probotHandler = async (robot: Application) => {
   const labelMergedPRs = async (context: Context, pr: PullRequest) => {
     for (const label of pr.labels) {
-      const targetBranch = label.name.match(/(\d)-(\d)-x/);
+      const targetBranch = label.name.match(/(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))/);
       if (targetBranch && targetBranch[0]) {
         await labelMergedPR(context, pr, label.name);
       }
@@ -234,9 +234,10 @@ PR is no longer targeting this branch for a backport',
   robot.on('pull_request.closed', async (context: Context) => {
     const pr = context.payload.pull_request;
     if (pr.merged) {
-      robot.log('Automatic backport merged.');
+      robot.log(`Automatic backport merged for: #${pr.number}`);
       const oldPRNumber = maybeGetManualBackportNumber(context);
       if (oldPRNumber) {
+        robot.log(`Labeling original PR for merged PR: #${pr.number}`);
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
         await labelMergedPRs(context, pr as any);
       }
