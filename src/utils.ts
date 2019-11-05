@@ -32,6 +32,15 @@ export const labelMergedPR = async (context: Context, pr: PullRequest, targetBra
   }
 };
 
+const checkUserHasWriteAccess = async (context: Context, user: string) => {
+  const params = context.repo({ username: user });
+  const { data: userInfo } = await context.github.repos.getCollaboratorPermissionLevel(params);
+
+  // Possible values for the permission key: 'admin', 'write', 'read', 'none'.
+  // In order for the user's review to count, they must be at least 'write'.
+  return ['write', 'admin'].includes(userInfo.permission);
+};
+
 const createBackportComment = (pr: PullRequest) => {
   let body = `Backport of #${pr.number}\n\nSee that PR for details.`;
 
@@ -189,13 +198,22 @@ export const backportImpl = async (robot: Application,
 
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('Creating Pull Request');
-        const newPr = (await context.github.pulls.create(context.repo({
+        const { data: newPr } = (await context.github.pulls.create(context.repo({
           head: `${tempBranch}`,
           base: targetBranch,
           title: pr.title,
           body: createBackportComment(pr),
           maintainer_can_modify: false,
-        }))).data;
+        })));
+
+        // If user has sufficient permissions (i.e has write access)
+        // request their review on the automatically backported pull request
+        if (checkUserHasWriteAccess(context, pr.user.login)) {
+          await context.github.pulls.createReviewRequest(context.repo({
+            number: newPr.number,
+            reviewers: [pr.user.login],
+          }));
+        }
 
         log('Adding breadcrumb comment');
         await context.github.issues.createComment(context.repo({
