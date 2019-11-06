@@ -15,6 +15,7 @@ import { initRepo } from './operations/init-repo';
 import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
+import { getSupportedBranches } from './utils/branch-util';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
@@ -57,6 +58,18 @@ export const backportImpl = async (robot: Application,
                                    purpose: BackportPurpose,
                                    labelToRemove?: string,
                                    labelToAdd?: string) => {
+
+  const supported = await getSupportedBranches();
+
+  // Don't initiate backports to EOL branches
+  if (!supported.includes(targetBranch)) {
+    await context.github.issues.createComment(context.repo({
+      body: `${targetBranch} is no longer supported - no backport will be initiated.`,
+      number: context.payload.issue.number,
+    }));
+    return;
+  }
+
   const base: GitHub.PullsGetResponseBase = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
