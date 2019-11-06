@@ -208,7 +208,7 @@ export const backportImpl = async (robot: Application,
 
         // If user has sufficient permissions (i.e has write access)
         // request their review on the automatically backported pull request
-        if (checkUserHasWriteAccess(context, pr.user.login)) {
+        if (await checkUserHasWriteAccess(context, pr.user.login)) {
           await context.github.pulls.createReviewRequest(context.repo({
             number: newPr.number,
             reviewers: [pr.user.login],
