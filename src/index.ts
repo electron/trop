@@ -4,11 +4,12 @@ import { backportImpl, labelMergedPR } from './utils';
 import { labelToTargetBranch } from './utils/label-utils';
 import { PullRequest, TropConfig } from './Probot';
 import { CHECK_PREFIX } from './constants';
-import { getEnvVar } from './utils/env-utils';
+import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose } from './enums';
 import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
 import { backportToLabel, backportToBranch } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
+import { getSupportedBranches } from './utils/branch-util';
 
 const probotHandler = async (robot: Application) => {
   const labelMergedPRs = async (context: Context, pr: PullRequest) => {
@@ -340,9 +341,23 @@ PR is no longer targeting this branch for a backport',
             }));
             return true;
           }
+
+          // Optionally disallow backports to EOL branches
+          const noEOLSupport = getEnvVar('NO_EOL_SUPPORT', '');
+          if (noEOLSupport) {
+            const supported = await getSupportedBranches(context);
+            if (!supported.includes(branch)) {
+              await context.github.issues.createComment(context.repo({
+                body: `${branch} is no longer supported - no backport will be initiated.`,
+                number: payload.issue.number,
+              }));
+              return false;
+            }
+          }
+
           await context.github.issues.createComment(context.repo({
-            body: `The backport process for this PR has been manually initiated,
-sending your 1's and 0's to "${branch}" here we go! :D`,
+            body: `The backport process for this PR has been manually initiated -
+sending your commits to "${branch}"!`,
             number: payload.issue.number,
           }));
           context.payload.pull_request = context.payload.pull_request || pr;
