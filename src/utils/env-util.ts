@@ -3,12 +3,12 @@
  * its value if it does. Conditionally throws an error on failure.
  *
  * @param {string} envVar
- * @param {boolean} ignoreError - whether to throw an error if no environment var is found
- * @returns string - the value of the env var being checked
+ * @param {string} defaultValue - default value to use if no environment var is found
+ * @returns string - the value of the env var being checked, or the default value if one is passed
  */
-export function getEnvVar(envVar: string, ignoreError: boolean = false): string {
-  const value = process.env[envVar] || '';
-  if (!ignoreError && !value) {
+export function getEnvVar(envVar: string, defaultValue?: string): string {
+  const value = process.env[envVar] || defaultValue;
+  if (!value && value !== '') {
     throw new Error(`Missing environment variable ${envVar}`);
   }
   return value;

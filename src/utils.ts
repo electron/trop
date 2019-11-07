@@ -16,6 +16,7 @@ import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches } from './utils/branch-util';
+import { getEnvVar } from './utils/env-util';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
@@ -59,15 +60,17 @@ export const backportImpl = async (robot: Application,
                                    labelToRemove?: string,
                                    labelToAdd?: string) => {
 
-  const supported = await getSupportedBranches();
-
-  // Don't initiate backports to EOL branches
-  if (!supported.includes(targetBranch)) {
-    await context.github.issues.createComment(context.repo({
-      body: `${targetBranch} is no longer supported - no backport will be initiated.`,
-      number: context.payload.issue.number,
-    }));
-    return;
+  // Optionally disallow backports to EOL branches
+  const noEOLSupport = getEnvVar('NO_EOL_SUPPORT', '');
+  if (noEOLSupport) {
+    const supported = await getSupportedBranches(context);
+    if (!supported.includes(targetBranch)) {
+      await context.github.issues.createComment(context.repo({
+        body: `${targetBranch} is no longer supported - no backport will be initiated.`,
+        number: context.payload.issue.number,
+      }));
+      return;
+    }
   }
 
   const base: GitHub.PullsGetResponseBase = context.payload.pull_request.base;

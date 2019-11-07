@@ -342,15 +342,17 @@ PR is no longer targeting this branch for a backport',
             return true;
           }
 
-          const supported = await getSupportedBranches();
-
-          // Don't initiate backports to EOL branches
-          if (!supported.includes(branch)) {
-            await context.github.issues.createComment(context.repo({
-              body: `${branch} is no longer supported - no backport will be initiated.`,
-              number: payload.issue.number,
-            }));
-            return false;
+          // Optionally disallow backports to EOL branches
+          const noEOLSupport = getEnvVar('NO_EOL_SUPPORT', '');
+          if (noEOLSupport) {
+            const supported = await getSupportedBranches(context);
+            if (!supported.includes(branch)) {
+              await context.github.issues.createComment(context.repo({
+                body: `${branch} is no longer supported - no backport will be initiated.`,
+                number: payload.issue.number,
+              }));
+              return false;
+            }
           }
 
           await context.github.issues.createComment(context.repo({
