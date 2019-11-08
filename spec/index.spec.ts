@@ -41,6 +41,12 @@ describe('trop', () => {
           data: { content: Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - codebytere').toString('base64') },
         })),
         getBranch: jest.fn().mockReturnValue(Promise.resolve()),
+        listBranches: jest.fn().mockReturnValue(Promise.resolve({
+          data: [
+            { name: '8-x-y' },
+            { name: '7-1-x' },
+          ],
+        })),
       },
       git: {
         deleteRef: jest.fn().mockReturnValue(Promise.resolve()),
