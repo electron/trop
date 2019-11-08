@@ -33,7 +33,7 @@ export interface PullRequest {
   head: Ref;
   base: Ref;
   merged: boolean;
-  author: GitHubUser;
+  user: GitHubUser;
   number: number;
   title: string;
   body: string;
