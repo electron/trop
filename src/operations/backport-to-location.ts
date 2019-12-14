@@ -1,8 +1,8 @@
 import { Application, Context } from 'probot';
-import { Label } from '../Probot';
 import { PRStatus, BackportPurpose } from '../enums';
 import * as labelUtils from '../utils/label-utils';
 import { backportImpl } from '../utils';
+import { PullsGetResponseLabelsItem } from '@octokit/rest';
 
 /*
 * Performs a backport to a specified label.
@@ -12,7 +12,7 @@ import { backportImpl } from '../utils';
 export const backportToLabel = async (
   robot: Application,
   context: Context,
-  label: Label,
+  label: PullsGetResponseLabelsItem,
 ) => {
   if (!label.name.startsWith(PRStatus.TARGET)) {
     robot.log(`Label '${label.name}' does not begin with '${PRStatus.TARGET}'`);

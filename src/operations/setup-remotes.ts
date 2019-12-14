@@ -1,12 +1,5 @@
 import * as simpleGit from 'simple-git/promise';
-
-export interface RemotesOptions {
-  dir: string;
-  remotes: {
-    name: string,
-    value: string,
-  }[];
-}
+import { RemotesOptions } from '../interfaces';
 
 /*
 * Sets up remotes that trop will run backports with.

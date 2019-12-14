@@ -2,17 +2,17 @@ import { Application, Context } from 'probot';
 
 import { backportImpl, labelMergedPR } from './utils';
 import { labelToTargetBranch } from './utils/label-utils';
-import { PullRequest, TropConfig } from './Probot';
+import { TropConfig } from './interfaces';
 import { CHECK_PREFIX } from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose } from './enums';
-import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
+import { ChecksListForRefResponseCheckRunsItem, PullsGetResponse } from '@octokit/rest';
 import { backportToLabel, backportToBranch } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
 import { getSupportedBranches } from './utils/branch-util';
 
 const probotHandler = async (robot: Application) => {
-  const labelMergedPRs = async (context: Context, pr: PullRequest) => {
+  const labelMergedPRs = async (context: Context, pr: PullsGetResponse) => {
     for (const label of pr.labels) {
       const targetBranch = label.name.match(/(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))/);
       if (targetBranch && targetBranch[0]) {
@@ -21,14 +21,14 @@ const probotHandler = async (robot: Application) => {
     }
   };
 
-  const backportAllLabels = (context: Context, pr: PullRequest) => {
+  const backportAllLabels = (context: Context, pr: PullsGetResponse) => {
     for (const label of pr.labels) {
       context.payload.pull_request = context.payload.pull_request || pr;
       backportToLabel(robot, context, label);
     }
   };
 
-  const runCheck = async (context: Context, pr: PullRequest) => {
+  const runCheck = async (context: Context, pr: PullsGetResponse) => {
     const allChecks = await context.github.checks.listForRef(context.repo({
       ref: pr.head.sha,
       per_page: 100,
@@ -233,20 +233,20 @@ PR is no longer targeting this branch for a backport',
 
   // backport pull requests to labeled targets when PR is merged
   robot.on('pull_request.closed', async (context: Context) => {
-    const pr = context.payload.pull_request;
+    const pr: PullsGetResponse = context.payload.pull_request;
     if (pr.merged) {
       robot.log(`Automatic backport merged for: #${pr.number}`);
       const oldPRNumber = maybeGetManualBackportNumber(context);
       if (oldPRNumber) {
         robot.log(`Labeling original PR for merged PR: #${pr.number}`);
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
-        await labelMergedPRs(context, pr as any);
+        await labelMergedPRs(context, pr);
       }
 
       // check that the closed PR is trop's own and act accordingly
       if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
         robot.log(`Labeling original PR for merged PR: #${pr.number}`);
-        await labelMergedPRs(context, pr as any);
+        await labelMergedPRs(context, pr);
 
         robot.log(`Deleting base branch: ${pr.base.ref}`);
         try {
@@ -255,7 +255,7 @@ PR is no longer targeting this branch for a backport',
           robot.log('Failed to delete base branch: ', e);
         }
       } else {
-        backportAllLabels(context, pr as any);
+        backportAllLabels(context, pr);
       }
     }
   });
