@@ -1,5 +1,5 @@
 import { Context } from 'probot';
-import { Label } from '../Probot';
+import { PullsGetResponseLabelsItem } from '@octokit/rest';
 
 export const addLabel = async (context: Context, prNumber: number, labelsToAdd: string[]) => {
   return context.github.issues.addLabels(context.repo({
@@ -18,7 +18,7 @@ export const removeLabel = async (context: Context, prNumber: number, labelToRem
   }));
 };
 
-export const labelToTargetBranch = (label: Label, prefix: string) => {
+export const labelToTargetBranch = (label: PullsGetResponseLabelsItem, prefix: string) => {
   return label.name.replace(prefix, '');
 };
 

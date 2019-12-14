@@ -1,11 +1,16 @@
 import { Application, Context } from 'probot';
-import * as GitHub from '@octokit/rest';
+import {
+  PullsGetResponse,
+  ChecksListForRefResponseCheckRunsItem,
+  PullsGetResponseBase,
+  ChecksUpdateParams,
+  PullsListCommitsResponseItem,
+} from '@octokit/rest';
 import fetch from 'node-fetch';
 import * as fs from 'fs-extra';
 import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
-import { PullRequest } from './Probot';
 import queue from './Queue';
 import { CHECK_PREFIX } from './constants';
 import { PRStatus, BackportPurpose } from './enums';
@@ -21,7 +26,7 @@ import { getEnvVar } from './utils/env-util';
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
-export const labelMergedPR = async (context: Context, pr: PullRequest, targetBranch: String) => {
+export const labelMergedPR = async (context: Context, pr: PullsGetResponse, targetBranch: String) => {
   const prMatch = pr.body.match(/#[0-9]{1,7}/);
   if (prMatch && prMatch[0]) {
     const prNumber = parseInt(prMatch[0].substring(1), 10);
@@ -43,7 +48,7 @@ const checkUserHasWriteAccess = async (context: Context, user: string) => {
   return ['write', 'admin'].includes(userInfo.permission);
 };
 
-const createBackportComment = (pr: PullRequest) => {
+const createBackportComment = (pr: PullsGetResponse) => {
   let body = `Backport of #${pr.number}\n\nSee that PR for details.`;
 
   const onelineMatch = pr.body.match(/(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi);
@@ -82,7 +87,7 @@ export const backportImpl = async (robot: Application,
     }
   }
 
-  const base: GitHub.PullsGetResponseBase = context.payload.pull_request.base;
+  const base: PullsGetResponseBase = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
   robot.log(`Queuing ${bp} for "${slug}"`);
@@ -95,7 +100,7 @@ export const backportImpl = async (robot: Application,
       per_page: 100,
     }));
 
-    return allChecks.data.check_runs.find((run: GitHub.ChecksListForRefResponseCheckRunsItem) => {
+    return allChecks.data.check_runs.find((run: ChecksListForRefResponseCheckRunsItem) => {
       return run.name === `${CHECK_PREFIX}${targetBranch}`;
     });
   };
@@ -120,7 +125,7 @@ export const backportImpl = async (robot: Application,
       log('getting repo access token');
       const repoAccessToken = await getRepoToken(robot, context);
 
-      const pr = context.payload.pull_request as any as PullRequest;
+      const pr: PullsGetResponse = context.payload.pull_request;
       // Set up empty repo on master
       log('Setting up local repository');
       const { dir } = await initRepo({
@@ -147,7 +152,7 @@ export const backportImpl = async (robot: Application,
       log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
       const commits = (await context.github.pulls.listCommits(context.repo({
         number: pr.number,
-      }))).data.map((commit: GitHub.PullsListCommitsResponseItem) => commit.sha!);
+      }))).data.map((commit: PullsListCommitsResponseItem) => commit.sha!);
 
       // No commits == WTF
       if (commits.length === 0) {
@@ -321,7 +326,7 @@ export const backportImpl = async (robot: Application,
         const checkRun = await getCheckRun();
         if (checkRun) {
           const mdSep = '``````````````````````````````';
-          const updateOpts: GitHub.ChecksUpdateParams = context.repo({
+          const updateOpts: ChecksUpdateParams = context.repo({
             check_run_id: checkRun.id,
             name: checkRun.name,
             conclusion: 'neutral' as 'neutral',
