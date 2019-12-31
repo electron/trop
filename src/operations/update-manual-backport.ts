@@ -34,7 +34,7 @@ please check out #${pr.number}`;
     // TODO(codebytere): Once probot updates to @octokit/rest@16 we can use .paginate to
     // get all the comments properly, for now 100 should do
     const { data: existingComments } = await context.github.issues.listComments(context.repo({
-      number: oldPRNumber,
+      issue_number: oldPRNumber,
       per_page: 100,
     }));
 
@@ -44,7 +44,7 @@ please check out #${pr.number}`;
     if (shouldComment) {
       // Comment on the original PR with the manual backport link
       await context.github.issues.createComment(context.repo({
-        number: oldPRNumber,
+        issue_number: oldPRNumber,
         body: commentBody,
       }));
     }

@@ -166,7 +166,7 @@ PR is no longer targeting this branch for a backport',
           }
         } else {
           const oldPR = (await context.github.pulls.get(context.repo({
-            number: oldPRNumber,
+            pull_number: oldPRNumber,
           }))).data;
 
           // The target PR is only "good" if it was merged to master
@@ -281,7 +281,7 @@ PR is no longer targeting this branch for a backport',
 
     if (!config.authorizedUsers.includes(payload.comment.user.login)) {
       await context.github.issues.createComment(context.repo({
-        number: payload.issue.number,
+        issue_number: payload.issue.number,
         body: `@${payload.comment.user.login} is not authorized to run PR backports.`,
       }));
       return;
@@ -294,11 +294,11 @@ PR is no longer targeting this branch for a backport',
       command: /^run backport/,
       execute: async () => {
         const pr = (await context.github.pulls.get(
-          context.repo({ number: payload.issue.number }))
+          context.repo({ pull_number: payload.issue.number }))
         ).data;
         if (!pr.merged) {
           await context.github.issues.createComment(context.repo({
-            number: payload.issue.number,
+            issue_number: payload.issue.number,
             body: 'This PR has not been merged yet, and cannot be backported.',
           }));
           return false;
@@ -310,11 +310,11 @@ PR is no longer targeting this branch for a backport',
       command: /^run backport$/,
       execute: async () => {
         const pr = (await context.github.pulls.get(
-          context.repo({ number: payload.issue.number }))
+          context.repo({ pull_number: payload.issue.number }))
         ).data as any;
         await context.github.issues.createComment(context.repo({
           body: 'The backport process for this PR has been manually initiated, here we go! :D',
-          number: payload.issue.number,
+          issue_number: payload.issue.number,
         }));
         backportAllLabels(context, pr);
         return true;
@@ -329,7 +329,7 @@ PR is no longer targeting this branch for a backport',
 
           if (!(branch.trim())) continue;
           const pr = (await context.github.pulls.get(
-            context.repo({ number: payload.issue.number }))
+            context.repo({ pull_number: payload.issue.number }))
           ).data;
 
           try {
@@ -337,7 +337,7 @@ PR is no longer targeting this branch for a backport',
           } catch (err) {
             await context.github.issues.createComment(context.repo({
               body: `The branch you provided "${branch}" does not appear to exist :cry:`,
-              number: payload.issue.number,
+              issue_number: payload.issue.number,
             }));
             return true;
           }
@@ -349,7 +349,7 @@ PR is no longer targeting this branch for a backport',
             if (!supported.includes(branch)) {
               await context.github.issues.createComment(context.repo({
                 body: `${branch} is no longer supported - no backport will be initiated.`,
-                number: payload.issue.number,
+                issue_number: payload.issue.number,
               }));
               return false;
             }
@@ -358,7 +358,7 @@ PR is no longer targeting this branch for a backport',
           await context.github.issues.createComment(context.repo({
             body: `The backport process for this PR has been manually initiated -
 sending your commits to "${branch}"!`,
-            number: payload.issue.number,
+            issue_number: payload.issue.number,
           }));
           context.payload.pull_request = context.payload.pull_request || pr;
           backportToBranch(robot, context, branch);
