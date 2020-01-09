@@ -81,7 +81,7 @@ export const backportImpl = async (robot: Application,
     if (!supported.includes(targetBranch)) {
       await context.github.issues.createComment(context.repo({
         body: `${targetBranch} is no longer supported - no backport will be initiated.`,
-        number: context.payload.issue.number,
+        issue_number: context.payload.issue.number,
       }));
       return;
     }
@@ -151,7 +151,7 @@ export const backportImpl = async (robot: Application,
       // Get list of commits
       log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
       const commits = (await context.github.pulls.listCommits(context.repo({
-        number: pr.number,
+        pull_number: pr.number,
       }))).data.map((commit: PullsListCommitsResponseItem) => commit.sha!);
 
       // No commits == WTF
@@ -164,7 +164,7 @@ export const backportImpl = async (robot: Application,
       if (commits.length >= 240) {
         log(`Too many commits (${commits.length})...backport will not be performed.`);
         await context.github.issues.createComment(context.repo({
-          number: pr.number,
+          issue_number: pr.number,
           body: 'This PR has exceeded the automatic backport commit limit \
     and must be performed manually.',
         }));
@@ -231,14 +231,14 @@ export const backportImpl = async (robot: Application,
         // request their review on the automatically backported pull request
         if (await checkUserHasWriteAccess(context, pr.user.login)) {
           await context.github.pulls.createReviewRequest(context.repo({
-            number: newPr.number,
+            pull_number: newPr.number,
             reviewers: [pr.user.login],
           }));
         }
 
         log('Adding breadcrumb comment');
         await context.github.issues.createComment(context.repo({
-          number: pr.number,
+          issue_number: pr.number,
           body: `I have automatically backported this PR to "${targetBranch}", \
     please check out #${newPr.number}`,
         }));
@@ -310,7 +310,7 @@ export const backportImpl = async (robot: Application,
       const pr = context.payload.pull_request;
       if (purpose === BackportPurpose.ExecuteBackport) {
         await context.github.issues.createComment(context.repo({
-          number: pr.number,
+          issue_number: pr.number,
           body: `I was unable to backport this PR to "${targetBranch}" cleanly;
    you will need to perform this backport manually.`,
         }) as any);

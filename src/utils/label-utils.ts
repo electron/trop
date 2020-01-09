@@ -3,7 +3,7 @@ import { PullsGetResponseLabelsItem } from '@octokit/rest';
 
 export const addLabel = async (context: Context, prNumber: number, labelsToAdd: string[]) => {
   return context.github.issues.addLabels(context.repo({
-    number: prNumber,
+    issue_number: prNumber,
     labels: labelsToAdd,
   }));
 };
@@ -13,7 +13,7 @@ export const removeLabel = async (context: Context, prNumber: number, labelToRem
   if (!await labelExistsOnPR(context, prNumber, labelToRemove)) return;
 
   return context.github.issues.removeLabel(context.repo({
-    number: prNumber,
+    issue_number: prNumber,
     name: labelToRemove,
   }));
 };
@@ -24,7 +24,7 @@ export const labelToTargetBranch = (label: PullsGetResponseLabelsItem, prefix: s
 
 export const labelExistsOnPR = async (context: Context, prNumber: number, labelName: string) => {
   const labels = await context.github.issues.listLabelsOnIssue(context.repo({
-    number: prNumber,
+    issue_number: prNumber,
     per_page: 100,
     page: 1,
   }));
