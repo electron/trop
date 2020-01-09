@@ -1,15 +1,6 @@
 import * as fs from 'fs-extra';
 import * as simpleGit from 'simple-git/promise';
-
-export interface BackportOptions {
-  dir: string;
-  slug: string;
-  targetRemote: string;
-  targetBranch: string;
-  tempBranch: string;
-  patches: string[];
-  shouldPush: boolean;
-}
+import { BackportOptions } from '../interfaces';
 
 /*
 * Runs the git commands to apply backports in a series of cherry-picked commits.

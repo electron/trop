@@ -3,13 +3,9 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
+import { InitRepoOptions } from '../interfaces';
 
 const baseDir = path.resolve(os.tmpdir(), 'trop-working');
-
-export interface InitRepoOptions {
-  slug: string;
-  accessToken: string;
-}
 
 /*
 * Initializes the cloned repo trop will use to run backports

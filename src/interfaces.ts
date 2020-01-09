@@ -13,3 +13,18 @@ export interface RemotesOptions {
     value: string,
   }[];
 }
+
+export interface InitRepoOptions {
+  slug: string;
+  accessToken: string;
+}
+
+export interface BackportOptions {
+  dir: string;
+  slug: string;
+  targetRemote: string;
+  targetBranch: string;
+  tempBranch: string;
+  patches: string[];
+  shouldPush: boolean;
+}
