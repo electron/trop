@@ -2,14 +2,18 @@ import { NUM_SUPPORTED_VERSIONS } from '../constants';
 
 import { getEnvVar } from './env-util';
 import { Context } from 'probot';
+import { log } from './log-util';
+import { LogLevel } from '../enums';
 
 /**
- * Fetches an array of the currently supported branches for a repository
+ * Fetches an array of the currently supported branches for a repository.
  *
- * @returns string[] - an array of currently supported branches in x-y-z format
+ * @param {Context} context - the context of the event that was triggered
+ * @returns {Promise<string[]>} - an array of currently supported branches in x-y-z format
  */
-// Get array of currently supported branches
 export async function getSupportedBranches(context: Context): Promise<string[]> {
+  log('getSupportedBranches', 'Fetching supported branches for this repository', LogLevel.INFO);
+
   const SUPPORTED_BRANCH_ENV_PATTERN = getEnvVar('SUPPORTED_BRANCH_PATTERN', '^[0-9]+-([0-9]+-x|x-y)$');
   const SUPPORTED_BRANCH_PATTERN = new RegExp(SUPPORTED_BRANCH_ENV_PATTERN);
 

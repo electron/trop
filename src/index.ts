@@ -97,11 +97,11 @@ PR is no longer targeting this branch for a backport',
     let backportNumber: null | number = null;
 
     if (pr.user.login !== getEnvVar('BOT_USER_NAME')) {
-      // check if this PR is a manual backport of another PR
+      // Check if this PR is a manual backport of another PR.
       const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
       const match: Array<string> | null = pr.body.match(backportPattern);
       if (match) {
-        // This might be the first or second capture group depending on if it's a link or not
+        // This might be the first or second capture group depending on if it's a link or not.
         backportNumber = !!match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10);
       }
     }
@@ -122,13 +122,13 @@ PR is no longer targeting this branch for a backport',
     async (context: Context) => {
       const oldPRNumber = maybeGetManualBackportNumber(context);
 
-      // only check for manual backports when a new PR is opened or if the PR body is edited
+      // Only check for manual backports when a new PR is opened or if the PR body is edited.
       if (oldPRNumber && ['opened', 'edited'].includes(context.payload.action)) {
         await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
       }
 
       // Check if the PR is going to master, if it's not check if it's correctly
-      // tagged as a backport of a PR that has already been merged into master
+      // tagged as a backport of a PR that has already been merged into master.
       const pr = context.payload.pull_request;
       const { data: allChecks } = await context.github.checks.listForRef(context.repo({
         ref: pr.head.sha,
@@ -174,7 +174,7 @@ PR is no longer targeting this branch for a backport',
         let failureCause = '';
 
         if (!oldPRNumber) {
-          // Allow fast-track prefixes through this check
+          // Allow fast-track prefixes through this check.
           if (
             !FASTTRACK_PREFIXES.some(pre => pr.title.startsWith(pre)) &&
             !FASTTRACK_USERS.some(user => pr.user.login === user) &&
@@ -198,7 +198,7 @@ PR is no longer targeting this branch for a backport',
           }
         }
 
-        // No reason for failure === must be good
+        // No failureCause means that we must have succeeded.
         if (failureCause === '') {
           await context.github.checks.update(context.repo({
             check_run_id: checkRun.id,
@@ -252,7 +252,7 @@ PR is no longer targeting this branch for a backport',
   robot.on('pull_request.labeled', maybeRunCheck);
   robot.on('pull_request.unlabeled', maybeRunCheck);
 
-  // backport pull requests to labeled targets when PR is merged
+  // Backport pull requests to labeled targets when PR is merged.
   robot.on('pull_request.closed', async (context: Context) => {
     const pr: PullsGetResponse = context.payload.pull_request;
     if (pr.merged) {
@@ -264,7 +264,7 @@ PR is no longer targeting this branch for a backport',
         await labelMergedPRs(context, pr);
       }
 
-      // check that the closed PR is trop's own and act accordingly
+      // Check that the closed PR is trop's own and act accordingly.
       if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
         robot.log(`Labeling original PR for merged PR: #${pr.number}`);
         await labelMergedPRs(context, pr);
@@ -283,7 +283,7 @@ PR is no longer targeting this branch for a backport',
 
   const TROP_COMMAND_PREFIX = '/trop ';
 
-  // manually trigger backporting process on trigger comment phrase
+  // Manually trigger backporting process on trigger comment phrase.
   robot.on('issue_comment.created', async (context: Context) => {
     const payload = context.payload;
     const config = await context.config<TropConfig>('config.yml') as TropConfig;

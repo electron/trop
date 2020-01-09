@@ -1,15 +1,17 @@
 import * as labelUtils from '../utils/label-utils';
-import { PRChange, PRStatus } from '../enums';
+import { log } from '../utils/log-util';
+import { PRChange, PRStatus, LogLevel } from '../enums';
 import { Context } from 'probot';
 
-/*
-* Updates the labels on a backport's original PR as well as comments with links
-* to the backport if it's a newly opened PR
-*
-* @param {PRChange} The type of PR status change: either OPEN or CLOSE
-* @param {number} the number corresponding to the backport's original PR
-* @returns {Object} - an object containing the repo initialization directory
-*/
+/**
+ * Updates the labels on a backport's original PR as well as comments with links
+ * to the backport if it's a newly opened PR.
+ *
+ * @param {Context} context - the context of the event that was triggered
+ * @param {PRChange} type - the type of PR status change: either OPEN or CLOSE
+ * @param {number} oldPRNumber - the number corresponding to the backport's original PR
+ * @returns {Object} - an object containing the repo initialization directory
+ */
 export const updateManualBackport = async (
   context: Context,
   type: PRChange,
@@ -19,7 +21,11 @@ export const updateManualBackport = async (
   let labelToRemove;
   let labelToAdd;
 
+  log('updateManualBackport', `Updating backport of ${oldPRNumber} to ${pr.base.ref}`, LogLevel.INFO);
+
   if (type === PRChange.OPEN) {
+    log('updateManualBackport', `New manual backport opened at #${pr.number}`, LogLevel.INFO);
+
     labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
     labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
 
@@ -49,6 +55,8 @@ please check out #${pr.number}`;
       }));
     }
   } else {
+    log('updateManualBackport', `Backport of ${oldPRNumber} at #${pr.number} merged to ${pr.base.ref}`, LogLevel.INFO);
+
     labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
     labelToAdd = PRStatus.MERGED + pr.base.ref;
   }

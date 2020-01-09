@@ -4,21 +4,25 @@ import * as os from 'os';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 import { InitRepoOptions } from '../interfaces';
+import { LogLevel } from '../enums';
+import { log } from '../utils/log-util';
 
 const baseDir = path.resolve(os.tmpdir(), 'trop-working');
 
-/*
-* Initializes the cloned repo trop will use to run backports
-*
-* @param {InitRepoOptions} repo and payload for repo initialization
-* @returns {Object} - an object containing the repo initialization directory
-*/
+/**
+ * Initializes the cloned repo trop will use to run backports.
+ *
+ * @param {InitRepoOptions} options - repo and payload for repo initialization
+ * @returns {Object} - an object containing the repo initialization directory
+ */
 export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
+  log('initRepo', 'Setting up local repository', LogLevel.INFO);
+
   await fs.mkdirp(path.resolve(baseDir, slug));
   const prefix = path.resolve(baseDir, slug, 'job-');
   const dir = await fs.mkdtemp(prefix);
 
-  // Be super-duper sure that this directory is empty
+  // Ensure that this directory is empty.
   await fs.mkdirp(dir);
   await fs.remove(dir);
   await fs.mkdirp(dir);
@@ -30,7 +34,7 @@ export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
     '.',
   );
 
-  // Clean up just in case
+  // Clean up just in case.
   await git.reset('hard');
   const status = await git.status();
 
