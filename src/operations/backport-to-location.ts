@@ -17,16 +17,16 @@ export const backportToLabel = async (
   context: Context,
   label: PullsGetResponseLabelsItem,
 ) => {
-  log('backportToLabel', `Executing backport to branch from label ${label}`, LogLevel.INFO);
+  log('backportToLabel', LogLevel.INFO, `Executing backport to branch from label ${label}`);
 
   if (!label.name.startsWith(PRStatus.TARGET)) {
-    log('backportToLabel', `Label '${label.name}' does not begin with '${PRStatus.TARGET}'`, LogLevel.ERROR);
+    log('backportToLabel', LogLevel.ERROR, `Label '${label.name}' does not begin with '${PRStatus.TARGET}'`);
     return;
   }
 
   const targetBranch = labelUtils.labelToTargetBranch(label, PRStatus.TARGET);
   if (!targetBranch) {
-    log('backportToLabel', 'No target branch specified - aborting backport process', LogLevel.WARN);
+    log('backportToLabel', LogLevel.WARN, 'No target branch specified - aborting backport process');
     return;
   }
 
@@ -54,7 +54,7 @@ export const backportToBranch = async (
   context: Context,
   targetBranch: string,
 ) => {
-  log('backportToLabel', `Executing backport to branch '${targetBranch}'`, LogLevel.INFO);
+  log('backportToLabel', LogLevel.INFO, `Executing backport to branch '${targetBranch}'`);
 
   const labelToRemove = undefined;
   const labelToAdd = PRStatus.IN_FLIGHT + targetBranch;

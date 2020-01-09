@@ -1,8 +1,10 @@
 import { Context } from 'probot';
 import { PullsGetResponseLabelsItem } from '@octokit/rest';
+import { log } from './log-util';
+import { LogLevel } from '../enums';
 
 export const addLabel = async (context: Context, prNumber: number, labelsToAdd: string[]) => {
-  console.log(`addLabel: adding ${labelsToAdd} to PR #${prNumber}`);
+  log('addLabel', LogLevel.INFO, `Adding ${labelsToAdd} to PR #${prNumber}`);
 
   return context.github.issues.addLabels(context.repo({
     issue_number: prNumber,
@@ -11,7 +13,7 @@ export const addLabel = async (context: Context, prNumber: number, labelsToAdd: 
 };
 
 export const removeLabel = async (context: Context, prNumber: number, labelToRemove: string) => {
-  console.log(`removeLabel: removing ${labelToRemove} from PR #${prNumber}`);
+  log('removeLabel', LogLevel.INFO, `Removing ${labelToRemove} from PR #${prNumber}`);
 
   // If the issue does not have the label, don't try remove it
   if (!await labelExistsOnPR(context, prNumber, labelToRemove)) return;

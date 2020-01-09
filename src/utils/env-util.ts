@@ -10,11 +10,11 @@ import { LogLevel } from '../enums';
  * @returns {string} - the value of the env var being checked, or the default value if one is passed
  */
 export function getEnvVar(envVar: string, defaultValue?: string): string {
-  log('getEnvVar', `Fetching env var '${envVar}'`, LogLevel.INFO);
+  log('getEnvVar', LogLevel.INFO, `Fetching env var '${envVar}'`);
 
   const value = process.env[envVar] || defaultValue;
   if (!value && value !== '') {
-    log('getEnvVar', `Missing environment variable '${envVar}'`, LogLevel.INFO);
+    log('getEnvVar', LogLevel.ERROR, `Missing environment variable '${envVar}'`);
     throw new Error(`Missing environment variable '${envVar}'`);
   }
   return value;

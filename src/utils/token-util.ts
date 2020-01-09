@@ -10,7 +10,7 @@ import { LogLevel } from '../enums';
  * @returns {Promise<string>} - a string representing a GitHub App installation token
  */
 export const getRepoToken = async (robot: Application, context: Context): Promise<string> => {
-  log('getRepoToken', 'Creating GitHub App token', LogLevel.INFO);
+  log('getRepoToken', LogLevel.INFO, 'Creating GitHub App token');
 
   const hub = await robot.auth();
   const response = await hub.apps.createInstallationToken({

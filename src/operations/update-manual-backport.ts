@@ -21,10 +21,10 @@ export const updateManualBackport = async (
   let labelToRemove;
   let labelToAdd;
 
-  log('updateManualBackport', `Updating backport of ${oldPRNumber} to ${pr.base.ref}`, LogLevel.INFO);
+  log('updateManualBackport', LogLevel.INFO, `Updating backport of ${oldPRNumber} to ${pr.base.ref}`);
 
   if (type === PRChange.OPEN) {
-    log('updateManualBackport', `New manual backport opened at #${pr.number}`, LogLevel.INFO);
+    log('updateManualBackport', LogLevel.INFO, `New manual backport opened at #${pr.number}`);
 
     labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
     labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
@@ -55,7 +55,7 @@ please check out #${pr.number}`;
       }));
     }
   } else {
-    log('updateManualBackport', `Backport of ${oldPRNumber} at #${pr.number} merged to ${pr.base.ref}`, LogLevel.INFO);
+    log('updateManualBackport', LogLevel.INFO, `Backport of ${oldPRNumber} at #${pr.number} merged to ${pr.base.ref}`);
 
     labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
     labelToAdd = PRStatus.MERGED + pr.base.ref;

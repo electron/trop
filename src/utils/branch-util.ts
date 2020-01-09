@@ -12,7 +12,7 @@ import { LogLevel } from '../enums';
  * @returns {Promise<string[]>} - an array of currently supported branches in x-y-z format
  */
 export async function getSupportedBranches(context: Context): Promise<string[]> {
-  log('getSupportedBranches', 'Fetching supported branches for this repository', LogLevel.INFO);
+  log('getSupportedBranches', LogLevel.INFO, 'Fetching supported branches for this repository');
 
   const SUPPORTED_BRANCH_ENV_PATTERN = getEnvVar('SUPPORTED_BRANCH_PATTERN', '^[0-9]+-([0-9]+-x|x-y)$');
   const SUPPORTED_BRANCH_PATTERN = new RegExp(SUPPORTED_BRANCH_ENV_PATTERN);

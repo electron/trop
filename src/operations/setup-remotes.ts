@@ -12,7 +12,7 @@ import { LogLevel } from '../enums';
  * @returns {Object} - an object containing the repo initialization directory
  */
 export const setupRemotes = async (options: RemotesOptions) => {
-  log('setupRemotes', 'Setting up git remotes', LogLevel.INFO);
+  log('setupRemotes', LogLevel.INFO, 'Setting up git remotes');
 
   const git = simpleGit(options.dir);
 

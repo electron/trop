@@ -6,8 +6,8 @@ export enum PRChange {
 export enum LogLevel {
   LOG,
   INFO,
-  ERROR,
   WARN,
+  ERROR,
 }
 
 export enum BackportPurpose {

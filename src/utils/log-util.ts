@@ -3,11 +3,11 @@ import { LogLevel } from '../enums';
 /**
  * Logs information about different actions taking place to console.
  *
- * @param functionName - the name of the function where the logging is happening
- * @param message - the message to write to console
- * @param logLevel - the severity level of the log
+ * @param {string} functionName - the name of the function where the logging is happening
+ * @param {LogLevel }logLevel - the severity level of the log
+ * @param {any[]} message - the message to write to console
  */
-export const log = (functionName: string, message: string, logLevel: LogLevel = LogLevel.LOG) => {
+export const log = (functionName: string, logLevel: LogLevel, ...message: any[]) => {
   const output = `${functionName}: ${message}`;
 
   if (logLevel === LogLevel.INFO) {

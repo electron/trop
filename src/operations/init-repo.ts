@@ -16,7 +16,7 @@ const baseDir = path.resolve(os.tmpdir(), 'trop-working');
  * @returns {Object} - an object containing the repo initialization directory
  */
 export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
-  log('initRepo', 'Setting up local repository', LogLevel.INFO);
+  log('initRepo', LogLevel.INFO, 'Setting up local repository');
 
   await fs.mkdirp(path.resolve(baseDir, slug));
   const prefix = path.resolve(baseDir, slug, 'job-');

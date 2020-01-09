@@ -15,7 +15,7 @@ import { LogLevel } from '../enums';
  * @returns {Object} - an object containing the repo initialization directory
  */
 export const backportCommitsToBranch = async (options: BackportOptions) => {
-  log('backportCommitsToBranch', `Backporting ${options.patches.length} commits to ${options.targetBranch}`, LogLevel.INFO);
+  log('backportCommitsToBranch', LogLevel.INFO, `Backporting ${options.patches.length} commits to ${options.targetBranch}`);
 
   const git = simpleGit(options.dir);
 
