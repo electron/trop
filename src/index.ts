@@ -1,9 +1,9 @@
 import { Application, Context } from 'probot';
 
 import { backportImpl, labelMergedPR } from './utils';
-import { labelToTargetBranch } from './utils/label-utils';
+import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
 import { TropConfig } from './interfaces';
-import { CHECK_PREFIX } from './constants';
+import { CHECK_PREFIX, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose } from './enums';
 import { ChecksListForRefResponseCheckRunsItem, PullsGetResponse } from '@octokit/rest';
@@ -144,6 +144,25 @@ PR is no longer targeting this branch for a backport',
             status: 'queued' as 'queued',
             details_url: 'https://github.com/electron/trop',
           }))).data as any as ChecksListForRefResponseCheckRunsItem;
+        }
+
+        // If a branch is targeting something that isn't master it might not be a backport;
+        // allow for a label to skip backport validity check for these branches.
+        if (['labeled', 'unlabeled'].includes(context.payload.action)) {
+          if (await labelExistsOnPR(context, pr.number, SKIP_CHECK_LABEL)) {
+            await context.github.checks.update(context.repo({
+              check_run_id: checkRun.id,
+              name: checkRun.name,
+              conclusion: 'neutral' as 'neutral',
+              completed_at: (new Date()).toISOString(),
+              output: {
+                title: 'Backport Check Skipped',
+                summary: 'This PR is not a backport - skip backport validation check',
+              },
+            }));
+
+            return;
+          }
         }
 
         const FASTTRACK_PREFIXES = ['build:', 'ci:'];
