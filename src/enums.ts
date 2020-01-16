@@ -3,6 +3,13 @@ export enum PRChange {
   CLOSE,
 }
 
+export enum LogLevel {
+  LOG,
+  INFO,
+  WARN,
+  ERROR,
+}
+
 export enum BackportPurpose {
   ExecuteBackport,
   Check,

@@ -122,12 +122,11 @@ export const backportImpl = async (robot: Application,
         }
       }
 
-      log('getting repo access token');
       const repoAccessToken = await getRepoToken(robot, context);
 
       const pr: PullsGetResponse = context.payload.pull_request;
-      // Set up empty repo on master
-      log('Setting up local repository');
+
+      // Set up empty repo on master.
       const { dir } = await initRepo({
         slug,
         accessToken: repoAccessToken,
@@ -135,11 +134,7 @@ export const backportImpl = async (robot: Application,
       createdDir = dir;
       log(`Working directory cleaned: ${dir}`);
 
-      // Set up remotes
-      log('setting up remotes');
-      const targetRepoRemote =
-          `https://x-access-token:${repoAccessToken}@github.com/${slug}.git`;
-
+      const targetRepoRemote = `https://x-access-token:${repoAccessToken}@github.com/${slug}.git`;
       await setupRemotes({
         dir,
         remotes: [{
@@ -148,7 +143,7 @@ export const backportImpl = async (robot: Application,
         }],
       });
 
-      // Get list of commits
+      // Get list of commits.
       log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
       const commits = (await context.github.pulls.listCommits(context.repo({
         pull_number: pr.number,
@@ -156,11 +151,11 @@ export const backportImpl = async (robot: Application,
 
       // No commits == WTF
       if (commits.length === 0) {
-        log('Found no commits to backport, aborting');
+        log('Found no commits to backport - aborting backport process');
         return;
       }
 
-      // Over 240 commits is probably the limit from github so let's not bother
+      // Over 240 commits is probably the limit from GitHub so let's not bother.
       if (commits.length >= 240) {
         log(`Too many commits (${commits.length})...backport will not be performed.`);
         await context.github.issues.createComment(context.repo({
@@ -172,7 +167,7 @@ export const backportImpl = async (robot: Application,
         return;
       }
 
-      log(`Found ${commits.length} commits to backport, requesting details now.`);
+      log(`Found ${commits.length} commits to backport - requesting details now.`);
       const patches: string[] = (new Array(commits.length)).fill('');
       const q = makeQueue({
         concurrency: 5,
@@ -196,7 +191,7 @@ export const backportImpl = async (robot: Application,
       await new Promise(r => q.start(r));
       log('Got all commit info');
 
-      // Temp branch
+      // Create temporary branch name.
       const sanitizedTitle = pr.title
         .replace(/\*/g, 'x').toLowerCase()
         .replace(/[^a-z0-9_]+/g, '-');
@@ -215,7 +210,7 @@ export const backportImpl = async (robot: Application,
         shouldPush: purpose === BackportPurpose.ExecuteBackport,
       });
 
-      log('Cherry pick success, pushed up to target_repo');
+      log('Cherry pick success - pushed up to target_repo');
 
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('Creating Pull Request');
@@ -244,18 +239,16 @@ export const backportImpl = async (robot: Application,
         }));
 
         if (labelToRemove) {
-          log(`Removing label '${labelToRemove}'`);
           await labelUtils.removeLabel(context, pr.number, labelToRemove);
         }
 
         if (labelToAdd) {
-          log(`Adding label '${labelToAdd}'`);
           await labelUtils.addLabel(context, pr.number, [labelToAdd]);
         }
 
         await labelUtils.addLabel(context, newPr.number!, ['backport', `${targetBranch}`]);
 
-        log('Backport complete');
+        log('Backport process complete');
       }
 
       if (purpose === BackportPurpose.Check) {
@@ -341,7 +334,7 @@ export const backportImpl = async (robot: Application,
           try {
             await context.github.checks.update(updateOpts as any);
           } catch (err) {
-            // A github error occurred, let's try mark it as a failure without annotations
+            // A GitHub error occurred - try to mark it as a failure without annotations.
             updateOpts.output!.annotations = undefined;
             await context.github.checks.update(updateOpts as any);
           }
