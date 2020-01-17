@@ -41,6 +41,5 @@ and update the labels appropriately.
 5. You or a co-contributor resolves any conflicts and merges in the backport pull request `trop` created
 
 **Note**
-  - You can delete the original PR branch whenever you want, trop does not need the original branch to perform the backport.  Keep your repo's branchlist clean folks.
+  - You can delete the original PR branch whenever you want - trop does not need the original branch to perform the backport.
 
-That's all there is to it! Congratulations, you did it! :tada:
