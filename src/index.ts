@@ -260,7 +260,7 @@ PR is no longer targeting this branch for a backport',
       const oldPRNumber = maybeGetManualBackportNumber(context);
       if (oldPRNumber) {
         robot.log(`Labeling original PR for merged PR: #${pr.number}`);
-        await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
+        await updateManualBackport(context, PRChange.CLOSE, oldPRNumber);
         await labelMergedPRs(context, pr);
       }
 
