@@ -191,7 +191,7 @@ PR is no longer targeting this branch for a backport',
           // The current PR is only valid if the PR it is backporting
           // was merged to master or to a supported release branch.
           const supported = await getSupportedBranches(context);
-          if (['master', ...supported].includes(oldPR.base.ref)) {
+          if (!['master', ...supported].includes(oldPR.base.ref)) {
             failureCause = 'the PR that it is backporting was not targeting the master branch.';
           } else if (!oldPR.merged) {
             failureCause = 'the PR that is backporting has not been merged yet.';
