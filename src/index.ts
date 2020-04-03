@@ -213,7 +213,7 @@ PR is no longer targeting this branch for a backport',
           await context.github.checks.update(context.repo({
             check_run_id: checkRun.id,
             name: checkRun.name,
-            conclusion: 'failure' as 'failure',
+            conclusion: 'neutral' as 'neutral',
             completed_at: (new Date()).toISOString(),
             details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
             output: {
