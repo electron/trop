@@ -14,7 +14,7 @@ import { getSupportedBranches } from './utils/branch-util';
 const probotHandler = async (robot: Application) => {
   const labelMergedPRs = async (context: Context, pr: PullsGetResponse) => {
     for (const label of pr.labels) {
-      const targetBranch = label.name.match(/(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))/);
+      const targetBranch = label.name.match(/^(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))$/);
       if (targetBranch && targetBranch[0]) {
         await labelMergedPR(context, pr, label.name);
       }
