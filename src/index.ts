@@ -92,21 +92,21 @@ PR is no longer targeting this branch for a backport',
     }
   };
 
-  const maybeGetManualBackportNumber = (context: Context) => {
+  const maybeGetManualBackportNumbers = (context: Context) => {
     const pr = context.payload.pull_request;
-    let backportNumber: null | number = null;
+    const backportNumbers: number[] = [];
 
     if (pr.user.login !== getEnvVar('BOT_USER_NAME')) {
       // Check if this PR is a manual backport of another PR.
-      const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/im;
-      const match: Array<string> | null = pr.body.match(backportPattern);
-      if (match) {
+      const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/gim;
+      let match: RegExpExecArray | null;
+      while (match = backportPattern.exec(pr.body)) {
         // This might be the first or second capture group depending on if it's a link or not.
-        backportNumber = !!match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10);
+        backportNumbers.push(!!match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10));
       }
     }
 
-    return backportNumber;
+    return backportNumbers;
   };
 
   const VALID_BACKPORT_CHECK_NAME = 'Valid Backport';
@@ -120,11 +120,13 @@ PR is no longer targeting this branch for a backport',
       'pull_request.unlabeled',
     ],
     async (context: Context) => {
-      const oldPRNumber = maybeGetManualBackportNumber(context);
+      const oldPRNumbers = maybeGetManualBackportNumbers(context);
 
       // Only check for manual backports when a new PR is opened or if the PR body is edited.
-      if (oldPRNumber && ['opened', 'edited'].includes(context.payload.action)) {
-        await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
+      if (oldPRNumbers.length > 0 && ['opened', 'edited'].includes(context.payload.action)) {
+        for (let idx = 0; idx < oldPRNumbers.length; idx += 1) {
+          await updateManualBackport(context, PRChange.OPEN, oldPRNumbers[idx]);
+        }
       }
 
       // Check if the PR is going to master, if it's not check if it's correctly
@@ -169,47 +171,42 @@ PR is no longer targeting this branch for a backport',
           getEnvVar('COMMITTER_USER_NAME'),
         ];
         const FASTTRACK_LABELS: string[] = ['fast-track 🚅'];
-        let failureCause = '';
 
-        if (!oldPRNumber) {
+        let noBackportError = '';
+        const failureMap = new Map();
+
+        if (oldPRNumbers.length === 0) {
           // Allow fast-track prefixes through this check.
           if (
             !FASTTRACK_PREFIXES.some(pre => pr.title.startsWith(pre)) &&
             !FASTTRACK_USERS.some(user => pr.user.login === user) &&
             !FASTTRACK_LABELS.some(label => pr.labels.some((prLabel: any) => prLabel.name === label))
           ) {
-            failureCause = 'is missing a "Backport of #{N}" declaration.  \
+            noBackportError = 'is missing a "Backport of #{N}" declaration.  \
   Check out the trop documentation linked below for more information.';
           }
         } else {
-          const oldPR = (await context.github.pulls.get(context.repo({
-            pull_number: oldPRNumber,
-          }))).data;
-
-          // The current PR is only valid if the PR it is backporting
-          // was merged to master or to a supported release branch.
           const supported = await getSupportedBranches(context);
-          if (!['master', ...supported].includes(oldPR.base.ref)) {
-            failureCause = 'the PR that it is backporting was not targeting the master branch.';
-          } else if (!oldPR.merged) {
-            failureCause = 'the PR that is backporting has not been merged yet.';
+
+          for (let idx = 0; idx < oldPRNumbers.length; idx += 1) {
+            const oldPR = (await context.github.pulls.get(context.repo({
+              pull_number: oldPRNumbers[idx],
+            }))).data;
+
+            // The current PR is only valid if the PR it is backporting
+            // was merged to master or to a supported release branch.
+            if (!['master', ...supported].includes(oldPR.base.ref)) {
+              const cause = 'the PR that it is backporting was not targeting the master branch.';
+              failureMap.set(oldPRNumbers[idx], cause);
+            } else if (!oldPR.merged) {
+              const cause = 'the PR that is backporting has not been merged yet.';
+              failureMap.set(oldPRNumbers[idx], cause);
+            }
           }
         }
 
         // No failureCause means that we must have succeeded.
-        if (failureCause === '') {
-          await context.github.checks.update(context.repo({
-            check_run_id: checkRun.id,
-            name: checkRun.name,
-            conclusion: 'success' as 'success',
-            completed_at: (new Date()).toISOString(),
-            details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
-            output: {
-              title: 'Valid Backport',
-              summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into master`,
-            },
-          }));
-        } else {
+        if (noBackportError) {
           await context.github.checks.update(context.repo({
             check_run_id: checkRun.id,
             name: checkRun.name,
@@ -218,9 +215,38 @@ PR is no longer targeting this branch for a backport',
             details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
             output: {
               title: 'Invalid Backport',
-              summary: `This PR is targeting a branch that is not master but ${failureCause}`,
+              summary: `This PR is targeting a branch that is not master but ${noBackportError}`,
             },
           }));
+        }
+
+        for (let idx = 0; idx < oldPRNumbers.length; idx += 1) {
+          if (failureMap.has(oldPRNumbers[idx])) {
+            const failureCause = failureMap.get(oldPRNumbers[idx]);
+            await context.github.checks.update(context.repo({
+              check_run_id: checkRun.id,
+              name: checkRun.name,
+              conclusion: 'failure' as 'failure',
+              completed_at: (new Date()).toISOString(),
+              details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
+              output: {
+                title: 'Invalid Backport',
+                summary: `This PR is targeting a branch that is not master but ${failureCause}`,
+              },
+            }));
+          } else {
+            await context.github.checks.update(context.repo({
+              check_run_id: checkRun.id,
+              name: checkRun.name,
+              conclusion: 'success' as 'success',
+              completed_at: (new Date()).toISOString(),
+              details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
+              output: {
+                title: 'Valid Backport',
+                summary: `This PR is declared as backporting "#${oldPRNumbers[idx]}" which is a valid PR that has been merged into master`,
+              },
+            }));
+          }
         }
       } else if (checkRun) {
         // We are targeting master but for some reason have a check run???
@@ -255,10 +281,12 @@ PR is no longer targeting this branch for a backport',
     const pr: PullsGetResponse = context.payload.pull_request;
     if (pr.merged) {
       robot.log(`Automatic backport merged for: #${pr.number}`);
-      const oldPRNumber = maybeGetManualBackportNumber(context);
-      if (oldPRNumber) {
+      const oldPRNumbers = maybeGetManualBackportNumbers(context);
+      if (oldPRNumbers.length > 0) {
         robot.log(`Labeling original PR for merged PR: #${pr.number}`);
-        await updateManualBackport(context, PRChange.CLOSE, oldPRNumber);
+        for (let idx = 0; idx < oldPRNumbers.length; idx += 1) {
+          await updateManualBackport(context, PRChange.CLOSE, oldPRNumbers[idx]);
+        }
         await labelMergedPRs(context, pr);
       }
 
