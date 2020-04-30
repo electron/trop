@@ -12,7 +12,7 @@ import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
 import queue from './Queue';
-import { CHECK_PREFIX } from './constants';
+import { CHECK_PREFIX, BACKPORT_PATTERN } from './constants';
 import { PRStatus, BackportPurpose } from './enums';
 
 import * as labelUtils from './utils/label-utils';
@@ -27,10 +27,14 @@ const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
 export const labelMergedPR = async (context: Context, pr: PullsGetResponse, targetBranch: String) => {
-  const prMatch = pr.body.match(/#[0-9]{1,7}/);
-  if (prMatch && prMatch[0]) {
-    const prNumber = parseInt(prMatch[0].substring(1), 10);
+  const backportNumbers: number[] = [];
+  let match: RegExpExecArray | null;
+  while (match = BACKPORT_PATTERN.exec(pr.body)) {
+    // This might be the first or second capture group depending on if it's a link or not.
+    backportNumbers.push(!!match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10));
+  }
 
+  for (const prNumber of backportNumbers) {
     const labelToAdd = PRStatus.MERGED + targetBranch;
     const labelToRemove = PRStatus.IN_FLIGHT + targetBranch;
 

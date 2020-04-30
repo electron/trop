@@ -3,7 +3,7 @@ import { Application, Context } from 'probot';
 import { backportImpl, labelMergedPR } from './utils';
 import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
 import { TropConfig } from './interfaces';
-import { CHECK_PREFIX, SKIP_CHECK_LABEL } from './constants';
+import { CHECK_PREFIX, SKIP_CHECK_LABEL, BACKPORT_PATTERN } from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose } from './enums';
 import { ChecksListForRefResponseCheckRunsItem, PullsGetResponse } from '@octokit/rest';
@@ -98,9 +98,8 @@ PR is no longer targeting this branch for a backport',
 
     if (pr.user.login !== getEnvVar('BOT_USER_NAME')) {
       // Check if this PR is a manual backport of another PR.
-      const backportPattern = /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/gim;
       let match: RegExpExecArray | null;
-      while (match = backportPattern.exec(pr.body)) {
+      while (match = BACKPORT_PATTERN.exec(pr.body)) {
         // This might be the first or second capture group depending on if it's a link or not.
         backportNumbers.push(!!match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10));
       }
