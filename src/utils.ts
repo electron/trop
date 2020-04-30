@@ -12,7 +12,7 @@ import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
 import queue from './Queue';
-import { CHECK_PREFIX, BACKPORT_PATTERN } from './constants';
+import { CHECK_PREFIX } from './constants';
 import { PRStatus, BackportPurpose } from './enums';
 
 import * as labelUtils from './utils/label-utils';
@@ -20,7 +20,7 @@ import { initRepo } from './operations/init-repo';
 import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
-import { getSupportedBranches } from './utils/branch-util';
+import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { getEnvVar } from './utils/env-util';
 
 const makeQueue: IQueue = require('queue');
@@ -29,7 +29,8 @@ const { parse: parseDiff } = require('what-the-diff');
 export const labelMergedPR = async (context: Context, pr: PullsGetResponse, targetBranch: String) => {
   const backportNumbers: number[] = [];
   let match: RegExpExecArray | null;
-  while (match = BACKPORT_PATTERN.exec(pr.body)) {
+  const backportPattern = getBackportPattern();
+  while (match = backportPattern.exec(pr.body)) {
     // This might be the first or second capture group depending on if it's a link or not.
     backportNumbers.push(!!match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10));
   }
