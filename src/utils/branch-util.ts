@@ -30,3 +30,10 @@ export async function getSupportedBranches(context: Context): Promise<string[]> 
   const values = Object.values(filtered);
   return values.sort().slice(-NUM_SUPPORTED_VERSIONS);
 }
+
+/**
+ * @returns A scoped Regex matching the backport pattern present in PR bodies.
+ */
+export const getBackportPattern = () => {
+  return /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/gim;
+};

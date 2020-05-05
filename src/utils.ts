@@ -20,17 +20,22 @@ import { initRepo } from './operations/init-repo';
 import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
-import { getSupportedBranches } from './utils/branch-util';
+import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { getEnvVar } from './utils/env-util';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
 export const labelMergedPR = async (context: Context, pr: PullsGetResponse, targetBranch: String) => {
-  const prMatch = pr.body.match(/#[0-9]{1,7}/);
-  if (prMatch && prMatch[0]) {
-    const prNumber = parseInt(prMatch[0].substring(1), 10);
+  const backportNumbers: number[] = [];
+  let match: RegExpExecArray | null;
+  const backportPattern = getBackportPattern();
+  while (match = backportPattern.exec(pr.body)) {
+    // This might be the first or second capture group depending on if it's a link or not.
+    backportNumbers.push(match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10));
+  }
 
+  for (const prNumber of backportNumbers) {
     const labelToAdd = PRStatus.MERGED + targetBranch;
     const labelToRemove = PRStatus.IN_FLIGHT + targetBranch;
 
