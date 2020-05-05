@@ -32,7 +32,7 @@ export const labelMergedPR = async (context: Context, pr: PullsGetResponse, targ
   const backportPattern = getBackportPattern();
   while (match = backportPattern.exec(pr.body)) {
     // This might be the first or second capture group depending on if it's a link or not.
-    backportNumbers.push(!!match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10));
+    backportNumbers.push(match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10));
   }
 
   for (const prNumber of backportNumbers) {
