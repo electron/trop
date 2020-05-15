@@ -22,3 +22,9 @@ export enum PRStatus {
   IN_FLIGHT = 'in-flight/',
   NEEDS_MANUAL = 'needs-manual-bp/',
 }
+
+export enum CheckRunStatus {
+  NEUTRAL = 'neutral',
+  FAILURE = 'failure',
+  SUCCESS = 'success',
+}
