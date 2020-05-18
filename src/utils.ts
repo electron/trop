@@ -90,7 +90,7 @@ export const backportImpl = async (robot: Application,
   const noEOLSupport = getEnvVar('NO_EOL_SUPPORT', '');
   if (noEOLSupport) {
     const supported = await getSupportedBranches(context);
-    if (!supported.includes(targetBranch)) {
+    if (!['master', ...supported].includes(targetBranch)) {
       log('backportImpl', LogLevel.WARN, `${targetBranch} is no longer supported - no backport will be initiated.`);
       await context.github.issues.createComment(context.repo({
         body: `${targetBranch} is no longer supported - no backport will be initiated.`,
