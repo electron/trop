@@ -29,6 +29,8 @@ export const labelToTargetBranch = (label: PullsGetResponseLabelsItem, prefix: s
 };
 
 export const labelExistsOnPR = async (context: Context, prNumber: number, labelName: string) => {
+  log('labelExistsOnPR', LogLevel.INFO, `Checking if ${labelName} exists on #${prNumber}`);
+
   const labels = await context.github.issues.listLabelsOnIssue(context.repo({
     issue_number: prNumber,
     per_page: 100,

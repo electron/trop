@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events';
+import { log } from './utils/log-util';
+import { LogLevel } from './enums';
 
 export type Executor = () => Promise<void>;
 export type ErrorExecutor = (err: any) => Promise<void>;
@@ -19,7 +21,7 @@ export class ExecutionQueue extends EventEmitter {
 
     this.activeIdents.add(identifier);
     if (this.active >= this.maxActive) {
-      console.log('adding to queue', identifier);
+      log('enterQueue', LogLevel.INFO, `Adding ${identifier} to queue`);
       this.queue.push([identifier, fn, errorFn]);
     } else {
       this.run([identifier, fn, errorFn]);
@@ -41,6 +43,8 @@ export class ExecutionQueue extends EventEmitter {
   }
 
   private runNext = (lastIdent: string) => {
+    log('runNext', LogLevel.INFO, `Running queue item with identifier ${lastIdent}`);
+
     this.activeIdents.delete(lastIdent);
     this.active -= 1;
     if (this.queue.length > 0 && this.active < this.maxActive) {

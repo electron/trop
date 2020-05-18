@@ -116,17 +116,20 @@ const probotHandler = async (robot: Application) => {
     ],
     async (context: Context) => {
       const oldPRNumbers = maybeGetManualBackportNumbers(context);
+      robot.log(`Found ${oldPRNumbers.length} backport numbers for this PR`);
+
+      const pr = context.payload.pull_request;
 
       // Only check for manual backports when a new PR is opened or if the PR body is edited.
       if (oldPRNumbers.length > 0 && ['opened', 'edited'].includes(context.payload.action)) {
         for (const oldPRNumber of oldPRNumbers) {
+          robot.log(`Updating original backport at ${oldPRNumber} for ${pr.number}`);
           await updateManualBackport(context, PRChange.OPEN, oldPRNumber);
         }
       }
 
       // Check if the PR is going to master, if it's not check if it's correctly
       // tagged as a backport of a PR that has already been merged into master.
-      const pr = context.payload.pull_request;
       const { data: allChecks } = await context.github.checks.listForRef(context.repo({
         ref: pr.head.sha,
         per_page: 100,
@@ -135,6 +138,7 @@ const probotHandler = async (robot: Application) => {
 
       if (pr.base.ref !== 'master') {
         if (!checkRun) {
+          robot.log(`Queueing new check run for #${pr.number}`);
           checkRun = (await context.github.checks.create(context.repo({
             name: VALID_BACKPORT_CHECK_NAME,
             head_sha: pr.head.sha,
@@ -146,6 +150,7 @@ const probotHandler = async (robot: Application) => {
         // If a branch is targeting something that isn't master it might not be a backport;
         // allow for a label to skip backport validity check for these branches.
         if (await labelExistsOnPR(context, pr.number, SKIP_CHECK_LABEL)) {
+          robot.log(`#${pr.number} is labeled with ${SKIP_CHECK_LABEL} - skipping backport validation check`);
           await updateBackportValidityCheck(context, checkRun, {
             title: 'Backport Check Skipped',
             summary: 'This PR is not a backport - skip backport validation check',
@@ -166,11 +171,13 @@ const probotHandler = async (robot: Application) => {
         // There are several types of PRs which might not target master yet which are
         // inherently valid; e.g roller-bot PRs. Check for and allow those here.
         if (oldPRNumbers.length === 0) {
+          robot.log(`#${pr.number} does not have backport numbers - checking fast track status`);
           if (
             !FASTTRACK_PREFIXES.some(pre => pr.title.startsWith(pre)) &&
             !FASTTRACK_USERS.some(user => pr.user.login === user) &&
             !FASTTRACK_LABELS.some(label => pr.labels.some((prLabel: any) => prLabel.name === label))
           ) {
+            robot.log(`#${pr.number} is not a fast track PR - marking check run as failed`);
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Invalid Backport',
               summary: 'This PR is targeting a branch that is not master but is missing a "Backport of #{N}" declaration.  \
@@ -178,6 +185,7 @@ const probotHandler = async (robot: Application) => {
               conclusion: CheckRunStatus.FAILURE,
             });
           } else {
+            robot.log(`#${pr.number} is a fast track PR - marking check run as succeeded`);
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
               summary: 'This PR is targeting a branch that is not master but a designated fast-track backport which does  \
@@ -186,9 +194,11 @@ const probotHandler = async (robot: Application) => {
             });
           }
         } else {
+          robot.log(`#${pr.number} has backport numbers - checking their validity now`);
           const supported = await getSupportedBranches(context);
 
           for (const oldPRNumber of oldPRNumbers) {
+            robot.log(`Checking validity of #${oldPRNumber}`);
             const oldPR = (await context.github.pulls.get(context.repo({
               pull_number: oldPRNumber,
             }))).data;
@@ -199,7 +209,7 @@ const probotHandler = async (robot: Application) => {
               const cause = 'the PR that it is backporting was not targeting the master branch.';
               failureMap.set(oldPRNumber, cause);
             } else if (!oldPR.merged) {
-              const cause = 'the PR that is backporting has not been merged yet.';
+              const cause = 'the PR that this is backporting has not been merged yet.';
               failureMap.set(oldPRNumber, cause);
             }
           }
@@ -207,12 +217,14 @@ const probotHandler = async (robot: Application) => {
 
         for (const oldPRNumber of oldPRNumbers) {
           if (failureMap.has(oldPRNumber)) {
+            robot.log(`#${pr.number} is targeting a branch that is not master - ${failureMap.get(oldPRNumber)}`);
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Invalid Backport',
               summary: `This PR is targeting a branch that is not master but ${failureMap.get(oldPRNumber)}`,
               conclusion: CheckRunStatus.FAILURE,
             });
           } else {
+            robot.log(`#${pr.number} is a valid backpot of #${oldPRNumber}`);
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
               summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into master`,
@@ -223,6 +235,7 @@ const probotHandler = async (robot: Application) => {
       } else if (checkRun) {
         // If we're somehow targeting master and have a check run,
         // we mark this check as cancelled.
+        robot.log(`#${pr.number} is targeting 'master' and is not a backport - marking as cancelled`);
         await updateBackportValidityCheck(context, checkRun, {
           title: 'Cancelled',
           summary: 'This PR is targeting `master` and is not a backport',
@@ -268,6 +281,7 @@ const probotHandler = async (robot: Application) => {
           robot.log('Failed to delete base branch: ', e);
         }
       } else {
+        robot.log(`Backporting #${pr.number} to all branches specified by labels`);
         backportAllLabels(context, pr);
       }
     }
@@ -293,6 +307,7 @@ const probotHandler = async (robot: Application) => {
     if (!cmd.startsWith(TROP_COMMAND_PREFIX)) return;
 
     if (!config.authorizedUsers.includes(payload.comment.user.login)) {
+      robot.log(`@${payload.comment.user.login} is not authorized to run PR backports - stopping`);
       await context.github.issues.createComment(context.repo({
         issue_number: payload.issue.number,
         body: `@${payload.comment.user.login} is not authorized to run PR backports.`,
@@ -338,7 +353,7 @@ const probotHandler = async (robot: Application) => {
       execute: async (targetBranches: string) => {
         const branches = targetBranches.split(',');
         for (const branch of branches) {
-          robot.log(`backport-to ${branch}`);
+          robot.log(`Initiatating backport to ${branch} from 'backport-to' comment`);
 
           if (!(branch.trim())) continue;
           const pr = (await context.github.pulls.get(
@@ -360,6 +375,7 @@ const probotHandler = async (robot: Application) => {
           if (noEOLSupport) {
             const supported = await getSupportedBranches(context);
             if (!supported.includes(branch)) {
+              robot.log(`${branch} is no longer supported - no backport will be initiated`);
               await context.github.issues.createComment(context.repo({
                 body: `${branch} is no longer supported - no backport will be initiated.`,
                 issue_number: payload.issue.number,
@@ -368,6 +384,7 @@ const probotHandler = async (robot: Application) => {
             }
           }
 
+          robot.log(`Initiating manual backport process for #${payload.issue.number} to ${branch}`);
           await context.github.issues.createComment(context.repo({
             body: `The backport process for this PR has been manually initiated -
 sending your commits to "${branch}"!`,

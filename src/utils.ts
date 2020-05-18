@@ -13,7 +13,7 @@ import * as simpleGit from 'simple-git/promise';
 
 import queue from './Queue';
 import { CHECK_PREFIX } from './constants';
-import { PRStatus, BackportPurpose } from './enums';
+import { PRStatus, BackportPurpose, LogLevel } from './enums';
 
 import * as labelUtils from './utils/label-utils';
 import { initRepo } from './operations/init-repo';
@@ -22,11 +22,14 @@ import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { getEnvVar } from './utils/env-util';
+import { log } from './utils/log-util';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
 export const labelMergedPR = async (context: Context, pr: PullsGetResponse, targetBranch: String) => {
+  log('labelMergedPR', LogLevel.INFO, `Labeling original PRs for PR at #${pr.number}`);
+
   const backportNumbers: number[] = [];
   let match: RegExpExecArray | null;
   const backportPattern = getBackportPattern();
@@ -45,6 +48,8 @@ export const labelMergedPR = async (context: Context, pr: PullsGetResponse, targ
 };
 
 const checkUserHasWriteAccess = async (context: Context, user: string) => {
+  log('checkUserHasWriteAccess', LogLevel.INFO, `Checking whether ${user} has write access`);
+
   const params = context.repo({ username: user });
   const { data: userInfo } = await context.github.repos.getCollaboratorPermissionLevel(params);
 
@@ -54,6 +59,8 @@ const checkUserHasWriteAccess = async (context: Context, user: string) => {
 };
 
 const createBackportComment = (pr: PullsGetResponse) => {
+  log('createBackportComment', LogLevel.INFO, `Creating backport comment for #${pr.number}`);
+
   let body = `Backport of #${pr.number}\n\nSee that PR for details.`;
 
   const onelineMatch = pr.body.match(/(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi);
@@ -84,6 +91,7 @@ export const backportImpl = async (robot: Application,
   if (noEOLSupport) {
     const supported = await getSupportedBranches(context);
     if (!supported.includes(targetBranch)) {
+      log('backportImpl', LogLevel.WARN, `${targetBranch} is no longer supported - no backport will be initiated.`);
       await context.github.issues.createComment(context.repo({
         body: `${targetBranch} is no longer supported - no backport will be initiated.`,
         issue_number: context.payload.issue.number,
@@ -95,9 +103,7 @@ export const backportImpl = async (robot: Application,
   const base: PullsGetResponseBase = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
-  robot.log(`Queuing ${bp} for "${slug}"`);
-
-  const log = (...args: string[]) => robot.log(slug, ...args);
+  log('backportImpl', LogLevel.INFO, `Queuing ${bp} for "${slug}"`);
 
   const getCheckRun = async () => {
     const allChecks = await context.github.checks.listForRef(context.repo({
@@ -115,7 +121,7 @@ export const backportImpl = async (robot: Application,
   queue.enterQueue(
     `backport-${context.payload.pull_request.head.sha}-${targetBranch}-${purpose}`,
     async () => {
-      log(`Executing ${bp} for "${slug}"`);
+      log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
       if (purpose === BackportPurpose.Check) {
         const checkRun = await getCheckRun();
         if (checkRun) {
@@ -137,7 +143,7 @@ export const backportImpl = async (robot: Application,
         accessToken: repoAccessToken,
       });
       createdDir = dir;
-      log(`Working directory cleaned: ${dir}`);
+      log('backportImpl', LogLevel.INFO, `Working directory cleaned: ${dir}`);
 
       const targetRepoRemote = `https://x-access-token:${repoAccessToken}@github.com/${slug}.git`;
       await setupRemotes({
@@ -149,20 +155,20 @@ export const backportImpl = async (robot: Application,
       });
 
       // Get list of commits.
-      log(`Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
+      log('backportImpl', LogLevel.INFO, `Getting rev list from: ${pr.base.sha}..${pr.head.sha}`);
       const commits = (await context.github.pulls.listCommits(context.repo({
         pull_number: pr.number,
       }))).data.map((commit: PullsListCommitsResponseItem) => commit.sha!);
 
       // No commits == WTF
       if (commits.length === 0) {
-        log('Found no commits to backport - aborting backport process');
+        log('backportImpl', LogLevel.INFO, 'Found no commits to backport - aborting backport process');
         return;
       }
 
       // Over 240 commits is probably the limit from GitHub so let's not bother.
       if (commits.length >= 240) {
-        log(`Too many commits (${commits.length})...backport will not be performed.`);
+        log('backportImpl', LogLevel.ERROR, `Too many commits (${commits.length})...backport will not be performed.`);
         await context.github.issues.createComment(context.repo({
           issue_number: pr.number,
           body: 'This PR has exceeded the automatic backport commit limit \
@@ -172,7 +178,7 @@ export const backportImpl = async (robot: Application,
         return;
       }
 
-      log(`Found ${commits.length} commits to backport - requesting details now.`);
+      log('backportImpl', LogLevel.INFO, `Found ${commits.length} commits to backport - requesting details now.`);
       const patches: string[] = (new Array(commits.length)).fill('');
       const q = makeQueue({
         concurrency: 5,
@@ -189,12 +195,12 @@ export const backportImpl = async (robot: Application,
             },
           });
           patches[i] = await patchBody.text();
-          log(`Got patch (${i + 1}/${commits.length})`);
+          log('backportImpl', LogLevel.INFO, `Got patch (${i + 1}/${commits.length})`);
         });
       }
 
       await new Promise(r => q.start(r));
-      log('Got all commit info');
+      log('backportImpl', LogLevel.INFO, 'Got all commit info');
 
       // Create temporary branch name.
       const sanitizedTitle = pr.title
@@ -202,8 +208,8 @@ export const backportImpl = async (robot: Application,
         .replace(/[^a-z0-9_]+/g, '-');
       const tempBranch = `trop/${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
 
-      log(`Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
-      log('Will start backporting now');
+      log('backportImpl', LogLevel.INFO, `Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`);
+      log('backportImpl', LogLevel.INFO, 'Will start backporting now');
 
       await backportCommitsToBranch({
         dir,
@@ -215,10 +221,10 @@ export const backportImpl = async (robot: Application,
         shouldPush: purpose === BackportPurpose.ExecuteBackport,
       });
 
-      log('Cherry pick success - pushed up to target_repo');
+      log('backportImpl', LogLevel.INFO, 'Cherry pick success - pushed up to target_repo');
 
       if (purpose === BackportPurpose.ExecuteBackport) {
-        log('Creating Pull Request');
+        log('backportImpl', LogLevel.INFO, 'Creating Pull Request');
         const { data: newPr } = (await context.github.pulls.create(context.repo({
           head: `${tempBranch}`,
           base: targetBranch,
@@ -236,7 +242,7 @@ export const backportImpl = async (robot: Application,
           }));
         }
 
-        log('Adding breadcrumb comment');
+        log('backportImpl', LogLevel.INFO, 'Adding breadcrumb comment');
         await context.github.issues.createComment(context.repo({
           issue_number: pr.number,
           body: `I have automatically backported this PR to "${targetBranch}", \
@@ -253,7 +259,7 @@ export const backportImpl = async (robot: Application,
 
         await labelUtils.addLabel(context, newPr.number!, ['backport', `${targetBranch}`]);
 
-        log('Backport process complete');
+        log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
 
       if (purpose === BackportPurpose.Check) {
