@@ -5,11 +5,12 @@ import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
 import { TropConfig } from './interfaces';
 import { CHECK_PREFIX, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
-import { PRChange, PRStatus, BackportPurpose } from './enums';
+import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
 import { ChecksListForRefResponseCheckRunsItem, PullsGetResponse } from '@octokit/rest';
 import { backportToLabel, backportToBranch } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
+import { updateBackportValidityCheck } from './utils/checks-util';
 
 const probotHandler = async (robot: Application) => {
   const labelMergedPRs = async (context: Context, pr: PullsGetResponse) => {
@@ -69,18 +70,12 @@ const probotHandler = async (robot: Application) => {
       if (!pr.labels.find(
         label => label.name === `${PRStatus.TARGET}${checkRun.name.replace(CHECK_PREFIX, '')}`,
       )) {
-        context.github.checks.update(context.repo({
-          check_run_id: checkRun.id,
-          name: checkRun.name,
-          conclusion: 'neutral' as 'neutral',
-          completed_at: (new Date()).toISOString(),
-          output: {
-            title: 'Cancelled',
-            summary: 'This trop check was cancelled and can be ignored as this \
-PR is no longer targeting this branch for a backport',
-            annotations: [],
-          },
-        }));
+        await updateBackportValidityCheck(context, checkRun, {
+          title: 'Cancelled',
+          summary: 'This trop check was cancelled and can be ignored as this \
+          PR is no longer targeting this branch for a backport',
+          conclusion: CheckRunStatus.NEUTRAL,
+        });
       }
     }
   };
@@ -151,17 +146,11 @@ PR is no longer targeting this branch for a backport',
         // If a branch is targeting something that isn't master it might not be a backport;
         // allow for a label to skip backport validity check for these branches.
         if (await labelExistsOnPR(context, pr.number, SKIP_CHECK_LABEL)) {
-          await context.github.checks.update(context.repo({
-            check_run_id: checkRun.id,
-            name: checkRun.name,
-            conclusion: 'neutral' as 'neutral',
-            completed_at: (new Date()).toISOString(),
-            output: {
-              title: 'Backport Check Skipped',
-              summary: 'This PR is not a backport - skip backport validation check',
-            },
-          }));
-
+          await updateBackportValidityCheck(context, checkRun, {
+            title: 'Backport Check Skipped',
+            summary: 'This PR is not a backport - skip backport validation check',
+            conclusion: CheckRunStatus.NEUTRAL,
+          });
           return;
         }
 
@@ -172,18 +161,29 @@ PR is no longer targeting this branch for a backport',
         ];
         const FASTTRACK_LABELS: string[] = ['fast-track 🚅'];
 
-        let noBackportError = '';
         const failureMap = new Map();
 
+        // There are several types of PRs which might not target master yet which are
+        // inherently valid; e.g roller-bot PRs. Check for and allow those here.
         if (oldPRNumbers.length === 0) {
-          // Allow fast-track prefixes through this check.
           if (
             !FASTTRACK_PREFIXES.some(pre => pr.title.startsWith(pre)) &&
             !FASTTRACK_USERS.some(user => pr.user.login === user) &&
             !FASTTRACK_LABELS.some(label => pr.labels.some((prLabel: any) => prLabel.name === label))
           ) {
-            noBackportError = 'is missing a "Backport of #{N}" declaration.  \
-  Check out the trop documentation linked below for more information.';
+            await updateBackportValidityCheck(context, checkRun, {
+              title: 'Invalid Backport',
+              summary: 'This PR is targeting a branch that is not master but is missing a "Backport of #{N}" declaration.  \
+              Check out the trop documentation linked below for more information.',
+              conclusion: CheckRunStatus.FAILURE,
+            });
+          } else {
+            await updateBackportValidityCheck(context, checkRun, {
+              title: 'Valid Backport',
+              summary: 'This PR is targeting a branch that is not master but a designated fast-track backport which does  \
+              not require a manual backport number.',
+              conclusion: CheckRunStatus.SUCCESS,
+            });
           }
         } else {
           const supported = await getSupportedBranches(context);
@@ -205,67 +205,33 @@ PR is no longer targeting this branch for a backport',
           }
         }
 
-        // No failureCause means that we must have succeeded.
-        if (noBackportError) {
-          await context.github.checks.update(context.repo({
-            check_run_id: checkRun.id,
-            name: checkRun.name,
-            conclusion: 'failure' as 'failure',
-            completed_at: (new Date()).toISOString(),
-            details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
-            output: {
-              title: 'Invalid Backport',
-              summary: `This PR is targeting a branch that is not master but ${noBackportError}`,
-            },
-          }));
-        }
-
         for (const oldPRNumber of oldPRNumbers) {
           if (failureMap.has(oldPRNumber)) {
-            const failureCause = failureMap.get(oldPRNumber);
-            await context.github.checks.update(context.repo({
-              check_run_id: checkRun.id,
-              name: checkRun.name,
-              conclusion: 'failure' as 'failure',
-              completed_at: (new Date()).toISOString(),
-              details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
-              output: {
-                title: 'Invalid Backport',
-                summary: `This PR is targeting a branch that is not master but ${failureCause}`,
-              },
-            }));
+            await updateBackportValidityCheck(context, checkRun, {
+              title: 'Invalid Backport',
+              summary: `This PR is targeting a branch that is not master but ${failureMap.get(oldPRNumber)}`,
+              conclusion: CheckRunStatus.FAILURE,
+            });
           } else {
-            await context.github.checks.update(context.repo({
-              check_run_id: checkRun.id,
-              name: checkRun.name,
-              conclusion: 'success' as 'success',
-              completed_at: (new Date()).toISOString(),
-              details_url: 'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
-              output: {
-                title: 'Valid Backport',
-                summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into master`,
-              },
-            }));
+            await updateBackportValidityCheck(context, checkRun, {
+              title: 'Valid Backport',
+              summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into master`,
+              conclusion: CheckRunStatus.SUCCESS,
+            });
           }
         }
       } else if (checkRun) {
-        // We are targeting master but for some reason have a check run???
-        // Let's mark this check as cancelled
-        await context.github.checks.update(context.repo({
-          check_run_id: checkRun.id,
-          name: checkRun.name,
-          conclusion: 'neutral' as 'neutral',
-          completed_at: (new Date()).toISOString(),
-          output: {
-            title: 'Cancelled',
-            summary: 'This PR is targeting `master` and is not a backport',
-            annotations: [],
-          },
-        }));
+        // If we're somehow targeting master and have a check run,
+        // we mark this check as cancelled.
+        await updateBackportValidityCheck(context, checkRun, {
+          title: 'Cancelled',
+          summary: 'This PR is targeting `master` and is not a backport',
+          conclusion: CheckRunStatus.NEUTRAL,
+        });
       }
 
       // Only run the backportable checks on "opened" and "synchronize"
-      // an "edited" change can not impact backportability
+      // an "edited" change can not impact backportability.
       if (context.payload.action === 'edited' || context.payload.action === 'synchronize') {
         maybeRunCheck(context);
       }
