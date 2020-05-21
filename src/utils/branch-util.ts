@@ -14,7 +14,7 @@ import { LogLevel } from '../enums';
 export async function getSupportedBranches(context: Context): Promise<string[]> {
   log('getSupportedBranches', LogLevel.INFO, 'Fetching supported branches for this repository');
 
-  const SUPPORTED_BRANCH_ENV_PATTERN = getEnvVar('SUPPORTED_BRANCH_PATTERN', '^[0-9]+-([0-9]+-x|x-y)$');
+  const SUPPORTED_BRANCH_ENV_PATTERN = getEnvVar('SUPPORTED_BRANCH_PATTERN', '^(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))$');
   const SUPPORTED_BRANCH_PATTERN = new RegExp(SUPPORTED_BRANCH_ENV_PATTERN);
 
   const { data: branches } = await context.github.repos.listBranches(context.repo({
