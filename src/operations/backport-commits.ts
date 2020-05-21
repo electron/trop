@@ -15,14 +15,21 @@ import { LogLevel } from '../enums';
  * @returns {Object} - an object containing the repo initialization directory
  */
 export const backportCommitsToBranch = async (options: BackportOptions) => {
-  log('backportCommitsToBranch', LogLevel.INFO, `Backporting ${options.patches.length} commits to ${options.targetBranch}`);
+  log(
+    'backportCommitsToBranch',
+    LogLevel.INFO,
+    `Backporting ${options.patches.length} commits to ${options.targetBranch}`,
+  );
 
   const git = simpleGit(options.dir);
 
   // Create branch to cherry-pick the commits to.
   await git.checkout(`target_repo/${options.targetBranch}`);
   await git.pull('target_repo', options.targetBranch);
-  await git.checkoutBranch(options.tempBranch, `target_repo/${options.targetBranch}`);
+  await git.checkoutBranch(
+    options.tempBranch,
+    `target_repo/${options.targetBranch}`,
+  );
 
   // Cherry pick the commits to be backported.
   const patchPath = `${options.dir}.patch`;

@@ -14,7 +14,11 @@ export function getEnvVar(envVar: string, defaultValue?: string): string {
 
   const value = process.env[envVar] || defaultValue;
   if (!value && value !== '') {
-    log('getEnvVar', LogLevel.ERROR, `Missing environment variable '${envVar}'`);
+    log(
+      'getEnvVar',
+      LogLevel.ERROR,
+      `Missing environment variable '${envVar}'`,
+    );
     throw new Error(`Missing environment variable '${envVar}'`);
   }
   return value;

@@ -21,15 +21,25 @@ export const updateManualBackport = async (
   let labelToRemove;
   let labelToAdd;
 
-  log('updateManualBackport', LogLevel.INFO, `Updating backport of ${oldPRNumber} to ${pr.base.ref}`);
+  log(
+    'updateManualBackport',
+    LogLevel.INFO,
+    `Updating backport of ${oldPRNumber} to ${pr.base.ref}`,
+  );
 
   if (type === PRChange.OPEN) {
-    log('updateManualBackport', LogLevel.INFO, `New manual backport opened at #${pr.number}`);
+    log(
+      'updateManualBackport',
+      LogLevel.INFO,
+      `New manual backport opened at #${pr.number}`,
+    );
 
     labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
     labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
 
-    if (!await labelUtils.labelExistsOnPR(context, oldPRNumber, labelToRemove)) {
+    if (
+      !(await labelUtils.labelExistsOnPR(context, oldPRNumber, labelToRemove))
+    ) {
       labelToRemove = PRStatus.TARGET + pr.base.ref;
     }
 
@@ -39,23 +49,33 @@ please check out #${pr.number}`;
 
     // TODO(codebytere): Once probot updates to @octokit/rest@16 we can use .paginate to
     // get all the comments properly, for now 100 should do
-    const { data: existingComments } = await context.github.issues.listComments(context.repo({
-      issue_number: oldPRNumber,
-      per_page: 100,
-    }));
+    const { data: existingComments } = await context.github.issues.listComments(
+      context.repo({
+        issue_number: oldPRNumber,
+        per_page: 100,
+      }),
+    );
 
     // We should only comment if there is not a previous existing comment
-    const shouldComment = !existingComments.some(comment => comment.body === commentBody);
+    const shouldComment = !existingComments.some(
+      (comment) => comment.body === commentBody,
+    );
 
     if (shouldComment) {
       // Comment on the original PR with the manual backport link
-      await context.github.issues.createComment(context.repo({
-        issue_number: oldPRNumber,
-        body: commentBody,
-      }));
+      await context.github.issues.createComment(
+        context.repo({
+          issue_number: oldPRNumber,
+          body: commentBody,
+        }),
+      );
     }
   } else {
-    log('updateManualBackport', LogLevel.INFO, `Backport of ${oldPRNumber} at #${pr.number} merged to ${pr.base.ref}`);
+    log(
+      'updateManualBackport',
+      LogLevel.INFO,
+      `Backport of ${oldPRNumber} at #${pr.number} merged to ${pr.base.ref}`,
+    );
 
     labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
     labelToAdd = PRStatus.MERGED + pr.base.ref;
