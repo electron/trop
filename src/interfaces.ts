@@ -9,8 +9,8 @@ export interface TropConfig {
 export interface RemotesOptions {
   dir: string;
   remotes: {
-    name: string,
-    value: string,
+    name: string;
+    value: string;
   }[];
 }
 

@@ -7,7 +7,11 @@ import { LogLevel } from '../enums';
  * @param {LogLevel }logLevel - the severity level of the log
  * @param {any[]} message - the message to write to console
  */
-export const log = (functionName: string, logLevel: LogLevel, ...message: any[]) => {
+export const log = (
+  functionName: string,
+  logLevel: LogLevel,
+  ...message: any[]
+) => {
   const output = `${functionName}: ${message}`;
 
   if (logLevel === LogLevel.INFO) {

@@ -2,7 +2,10 @@ jest.mock('request');
 import { Application } from 'probot';
 
 import * as utils from '../src/utils';
-import { backportToBranch, backportToLabel } from '../src/operations/backport-to-location';
+import {
+  backportToBranch,
+  backportToLabel,
+} from '../src/operations/backport-to-location';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
 import { ProbotHandler } from '../src/index';
 
@@ -37,64 +40,76 @@ describe('trop', () => {
 
     github = {
       repos: {
-        getContents: jest.fn().mockReturnValue(Promise.resolve({
-          data: { content: Buffer.from('watchedProject:\n  name: Radar\nauthorizedUsers:\n  - codebytere').toString('base64') },
-        })),
+        getContents: jest.fn().mockReturnValue(
+          Promise.resolve({
+            data: {
+              content: Buffer.from(
+                'watchedProject:\n  name: Radar\nauthorizedUsers:\n  - codebytere',
+              ).toString('base64'),
+            },
+          }),
+        ),
         getBranch: jest.fn().mockReturnValue(Promise.resolve()),
-        listBranches: jest.fn().mockReturnValue(Promise.resolve({
-          data: [
-            { name: '8-x-y' },
-            { name: '7-1-x' },
-          ],
-        })),
+        listBranches: jest.fn().mockReturnValue(
+          Promise.resolve({
+            data: [{ name: '8-x-y' }, { name: '7-1-x' }],
+          }),
+        ),
       },
       git: {
         deleteRef: jest.fn().mockReturnValue(Promise.resolve()),
       },
       pulls: {
-        get: jest.fn().mockReturnValue(Promise.resolve({
-          data: {
-            merged: true,
-            base: {
-              repo: {
-                name: 'test',
-                owner: {
-                  login: 'codebytere',
+        get: jest.fn().mockReturnValue(
+          Promise.resolve({
+            data: {
+              merged: true,
+              base: {
+                repo: {
+                  name: 'test',
+                  owner: {
+                    login: 'codebytere',
+                  },
                 },
               },
-            },
-            head: {
-              sha: '6dcb09b5b57875f334f61aebed695e2e4193db5e',
-            },
-            labels: [
-              {
-                url: 'my_cool_url',
-                name: 'target/X-X-X',
-                color: 'fc2929',
+              head: {
+                sha: '6dcb09b5b57875f334f61aebed695e2e4193db5e',
               },
-            ],
-          },
-        })),
+              labels: [
+                {
+                  url: 'my_cool_url',
+                  name: 'target/X-X-X',
+                  color: 'fc2929',
+                },
+              ],
+            },
+          }),
+        ),
       },
       issues: {
         addLabels: jest.fn().mockReturnValue(Promise.resolve({})),
         removeLabel: jest.fn().mockReturnValue(Promise.resolve({})),
         createLabel: jest.fn().mockReturnValue(Promise.resolve({})),
         createComment: jest.fn().mockReturnValue(Promise.resolve({})),
-        listLabelsOnIssue: jest.fn().mockReturnValue(Promise.resolve({
-          data: [
-            {
-              id: 208045946,
-              url: 'https://api.github.com/repos/octocat/Hello-World/labels/bug',
-              name: 'bug',
-              description: 'Something isn\'t working',
-              color: 'f29513',
-            },
-          ],
-        })),
+        listLabelsOnIssue: jest.fn().mockReturnValue(
+          Promise.resolve({
+            data: [
+              {
+                id: 208045946,
+                url:
+                  'https://api.github.com/repos/octocat/Hello-World/labels/bug',
+                name: 'bug',
+                description: "Something isn't working",
+                color: 'f29513',
+              },
+            ],
+          }),
+        ),
       },
       checks: {
-        listForRef: jest.fn().mockReturnValue(Promise.resolve({ data: { check_runs: [] } })),
+        listForRef: jest
+          .fn()
+          .mockReturnValue(Promise.resolve({ data: { check_runs: [] } })),
       },
     };
 
@@ -119,7 +134,9 @@ describe('trop', () => {
     });
 
     it('does not trigger the backport on comment if the PR is not merged', async () => {
-      github.pulls.get = jest.fn().mockReturnValue(Promise.resolve({ data: { merged: false } }));
+      github.pulls.get = jest
+        .fn()
+        .mockReturnValue(Promise.resolve({ data: { merged: false } }));
 
       await robot.receive(issueCommentBackportCreatedEvent);
 
@@ -145,7 +162,9 @@ describe('trop', () => {
     });
 
     it('does not trigger the backport on comment to a targeted branch if the branch does not exist', async () => {
-      github.repos.getBranch = jest.fn().mockReturnValue(Promise.reject(new Error('404')));
+      github.repos.getBranch = jest
+        .fn()
+        .mockReturnValue(Promise.reject(new Error('404')));
       await robot.receive(issueCommentBackportToCreatedEvent);
 
       expect(github.pulls.get).toHaveBeenCalled();

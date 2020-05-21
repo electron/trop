@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "start": "probot run ./lib/index.js",
-    "lint": "tslint --project '.'",
+    "prettier:write": "prettier --write '**/*.ts'",
+    "lint": "prettier --check '**/*.ts'",
     "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/",
     "postinstall": "tsc"
   },
@@ -34,6 +35,7 @@
     "@types/node-fetch": "^2.5.4",
     "@types/sinon": "^5.0.5",
     "jest": "^23.6.0",
+    "prettier": "^2.0.5",
     "sinon": "^7.5.0",
     "smee-client": "^1.0.1",
     "ts-jest": "^23.10.4",

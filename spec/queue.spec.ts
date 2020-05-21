@@ -11,7 +11,11 @@ const waitForEvent = (emitter: EventEmitter, event: string) => {
   });
 };
 
-const delayedEvent = async (emitter: EventEmitter, event: string, fn: () => Promise<void>) => {
+const delayedEvent = async (
+  emitter: EventEmitter,
+  event: string,
+  fn: () => Promise<void>,
+) => {
   const waiter = waitForEvent(emitter, event);
   await fn();
   await waiter;
@@ -22,7 +26,12 @@ const fakeTask = (name: string) => {
     name,
     taskRunner: sinon.stub().returns(Promise.resolve()),
     errorHandler: sinon.stub().returns(Promise.resolve()),
-    args: () => [name, namedArgs.taskRunner, namedArgs.errorHandler] as [string, () => Promise<void>, () => Promise<void>],
+    args: () =>
+      [name, namedArgs.taskRunner, namedArgs.errorHandler] as [
+        string,
+        () => Promise<void>,
+        () => Promise<void>,
+      ],
   };
   return namedArgs;
 };
@@ -74,7 +83,7 @@ describe('ExecutionQueue', () => {
     expect(task2.taskRunner.callCount).toBe(1);
   });
 
-  it('should run the next task if the current task fails and it\'s error handler fails', async () => {
+  it("should run the next task if the current task fails and it's error handler fails", async () => {
     const q = new ExecutionQueue();
 
     const task = fakeTask('test');
