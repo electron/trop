@@ -32,7 +32,7 @@ jest.mock('../src/operations/backport-to-location', () => ({
 describe('trop', () => {
   let robot: Application;
   let github: any;
-  process.env = { BOT_USER_NAME: 'electron-bot' };
+  process.env = { BOT_USER_NAME: 'trop[bot]' };
 
   beforeEach(() => {
     robot = new Application();

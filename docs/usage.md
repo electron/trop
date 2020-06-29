@@ -43,3 +43,10 @@ and update the labels appropriately.
 **Note**
   - You can delete the original PR branch whenever you want - trop does not need the original branch to perform the backport.
 
+#### Environment Variables
+
+`trop` is configured by default to use variable specific to electron, so in order to get the best experience you should be sure to set the following:
+
+* `BOT_USER_NAME` - the username if your bot (e.g `trop[bot]`)
+* `SKIP_CHECK_LABEL` - see [skipping manual backports](docs/manual-backports.md)
+* `NUM_SUPPORTED_VERSIONS` - trop assumes numeric branch prefixes (e.g `8-x-y`, 9-x-y) and can automatically backport to the 4 most recent branches by default.
