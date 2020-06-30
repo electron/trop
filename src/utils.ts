@@ -12,7 +12,7 @@ import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
 import queue from './Queue';
-import { CHECK_PREFIX } from './constants';
+import { CHECK_PREFIX, BACKPORT_REQUESTED_LABEL } from './constants';
 import { PRStatus, BackportPurpose, LogLevel } from './enums';
 
 import * as labelUtils from './utils/label-utils';
@@ -55,6 +55,19 @@ export const labelMergedPR = async (
     await labelUtils.removeLabel(context, prNumber, labelToRemove);
     await labelUtils.addLabel(context, prNumber, [labelToAdd]);
   }
+};
+
+const isSemverMinorPR = (context: Context, pr: PullsGetResponse) => {
+  const SEMVER_MINOR_LABEL = 'semver-minor';
+
+  const hasLabel = labelUtils.labelExistsOnPR(
+    context,
+    pr.number,
+    SEMVER_MINOR_LABEL,
+  );
+  const hasPrefix = pr.title.startsWith('feat:');
+
+  return hasLabel || hasPrefix;
 };
 
 const checkUserHasWriteAccess = async (context: Context, user: string) => {
@@ -337,10 +350,13 @@ export const backportImpl = async (
           await labelUtils.addLabel(context, pr.number, [labelToAdd]);
         }
 
-        await labelUtils.addLabel(context, newPr.number!, [
-          'backport',
-          `${targetBranch}`,
-        ]);
+        const labelsToAdd = ['backport', `${targetBranch}`];
+
+        if (isSemverMinorPR(context, pr)) {
+          labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
+        }
+
+        await labelUtils.addLabel(context, newPr.number!, labelsToAdd);
 
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
