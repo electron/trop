@@ -57,12 +57,12 @@ export const labelMergedPR = async (
   }
 };
 
-const isSemverMinorPR = (context: Context, pr: PullsGetResponse) => {
+const isSemverMinorPR = async (context: Context, pr: PullsGetResponse) => {
   log('isSemverMinorPR', LogLevel.INFO, `Checking if #${pr.number} is semver-minor`);
   const SEMVER_MINOR_LABEL = 'semver-minor';
 
   const hasPrefix = pr.title.startsWith('feat:');
-  const hasLabel = labelUtils.labelExistsOnPR(
+  const hasLabel = await labelUtils.labelExistsOnPR(
     context,
     pr.number,
     SEMVER_MINOR_LABEL,
@@ -353,7 +353,7 @@ export const backportImpl = async (
 
         const labelsToAdd = ['backport', `${targetBranch}`];
 
-        if (isSemverMinorPR(context, pr)) {
+        if (await isSemverMinorPR(context, pr)) {
           log('backportImpl', LogLevel.INFO, `Determined that ${pr.number} is semver-minor`);
           labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
         }
