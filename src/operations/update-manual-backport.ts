@@ -70,7 +70,7 @@ please check out #${pr.number}`;
         }),
       );
     }
-  } else {
+  } else if (PRChange.MERGE) {
     log(
       'updateManualBackport',
       LogLevel.INFO,
@@ -79,10 +79,23 @@ please check out #${pr.number}`;
 
     labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
     labelToAdd = PRStatus.MERGED + pr.base.ref;
+  } else {
+    log(
+      'updateManualBackport',
+      LogLevel.INFO,
+      `Backport of ${oldPRNumber} at #${pr.number} to ${pr.base.ref} was closed`,
+    );
+
+    // If a backport is closed with unmerged commits, we just want
+    // to remove the old in-flight/<branch> label.
+    labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
   }
 
   await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
-  await labelUtils.addLabel(context, oldPRNumber, [labelToAdd]);
+
+  if (labelToAdd) {
+    await labelUtils.addLabel(context, oldPRNumber, [labelToAdd]);
+  }
 
   // Add labels for the backport and target branch to the manual backport if
   // the maintainer forgot to do so themselves

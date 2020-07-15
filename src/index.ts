@@ -323,13 +323,14 @@ const probotHandler = async (robot: Application) => {
   // Backport pull requests to labeled targets when PR is merged.
   robot.on('pull_request.closed', async (context: Context) => {
     const pr: PullsGetResponse = context.payload.pull_request;
+    const oldPRNumbers = maybeGetManualBackportNumbers(context);
     if (pr.merged) {
-      robot.log(`Automatic backport merged for: #${pr.number}`);
-      const oldPRNumbers = maybeGetManualBackportNumbers(context);
       if (oldPRNumbers.length > 0) {
+        robot.log(`Automatic backport merged for: #${pr.number}`);
+
         robot.log(`Labeling original PR for merged PR: #${pr.number}`);
         for (const oldPRNumber of oldPRNumbers) {
-          await updateManualBackport(context, PRChange.CLOSE, oldPRNumber);
+          await updateManualBackport(context, PRChange.MERGE, oldPRNumber);
         }
         await labelMergedPRs(context, pr);
       }
@@ -352,6 +353,18 @@ const probotHandler = async (robot: Application) => {
           `Backporting #${pr.number} to all branches specified by labels`,
         );
         backportAllLabels(context, pr);
+      }
+    } else {
+      if (oldPRNumbers.length > 0) {
+        robot.log(
+          `Automatic backport #${pr.number} closed with unmerged commits`,
+        );
+
+        robot.log(`Updating label on original PR for closed PR: #${pr.number}`);
+        for (const oldPRNumber of oldPRNumbers) {
+          await updateManualBackport(context, PRChange.CLOSE, oldPRNumber);
+        }
+        await labelMergedPRs(context, pr);
       }
     }
   });
