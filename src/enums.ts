@@ -1,5 +1,6 @@
 export enum PRChange {
   OPEN,
+  MERGE,
   CLOSE,
 }
 
