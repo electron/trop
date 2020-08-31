@@ -70,7 +70,7 @@ please check out #${pr.number}`;
         }),
       );
     }
-  } else if (PRChange.MERGE) {
+  } else if (type === PRChange.MERGE) {
     log(
       'updateManualBackport',
       LogLevel.INFO,
