@@ -340,13 +340,13 @@ const probotHandler = async (robot: Application) => {
         robot.log(`Labeling original PR for merged PR: #${pr.number}`);
         await labelMergedPRs(context, pr);
 
-        robot.log(`Deleting base branch: ${pr.base.ref}`);
+        robot.log(`Deleting base branch: ${pr.head.ref}`);
         try {
           await context.github.git.deleteRef(
-            context.repo({ ref: pr.base.ref }),
+            context.repo({ ref: `heads/${pr.head.ref}` }),
           );
         } catch (e) {
-          robot.log('Failed to delete base branch: ', e);
+          robot.log('Failed to delete backport branch: ', e);
         }
       } else {
         robot.log(

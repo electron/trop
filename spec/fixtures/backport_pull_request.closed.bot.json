@@ -9,7 +9,7 @@
       "user": {
         "login": "trop[bot]"
       },
-      "base": {
+      "head": {
         "ref": "123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg"
       },
       "body": "Backport of #14\n\nSee that PR for details.\n\n\r\nNotes: <!-- One-line Change Summary Here-->",

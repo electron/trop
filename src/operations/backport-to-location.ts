@@ -20,7 +20,7 @@ export const backportToLabel = async (
   log(
     'backportToLabel',
     LogLevel.INFO,
-    `Executing backport to branch from label ${label}`,
+    `Executing backport to branch from label ${label.name}`,
   );
 
   if (!label.name.startsWith(PRStatus.TARGET)) {
