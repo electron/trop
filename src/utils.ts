@@ -12,7 +12,11 @@ import { IQueue } from 'queue';
 import * as simpleGit from 'simple-git/promise';
 
 import queue from './Queue';
-import { CHECK_PREFIX, BACKPORT_REQUESTED_LABEL } from './constants';
+import {
+  CHECK_PREFIX,
+  BACKPORT_REQUESTED_LABEL,
+  DEFAULT_BACKPORT_REVIEW_TEAM,
+} from './constants';
 import { PRStatus, BackportPurpose, LogLevel } from './enums';
 
 import * as labelUtils from './utils/label-utils';
@@ -327,13 +331,21 @@ export const backportImpl = async (
           }),
         );
 
-        // If user has sufficient permissions (i.e has write access)
-        // request their review on the automatically backported pull request
-        if (await checkUserHasWriteAccess(context, pr.user.login)) {
+        const reviewers = [];
+        const hasWrite = await checkUserHasWriteAccess(context, pr.user.login);
+
+        // Optionally request a default review team for backports.
+        // If the PR author has write access, also request their review.
+        if (hasWrite) reviewers.push(pr.user.login);
+        if (DEFAULT_BACKPORT_REVIEW_TEAM) {
+          reviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
+        }
+
+        if (reviewers.length > 0) {
           await context.github.pulls.createReviewRequest(
             context.repo({
               pull_number: newPr.number,
-              reviewers: [pr.user.login],
+              reviewers,
             }),
           );
         }
