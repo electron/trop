@@ -9,8 +9,8 @@
   "scripts": {
     "build": "tsc",
     "start": "probot run ./lib/index.js",
-    "prettier:write": "prettier --write '**/*.ts'",
-    "lint": "prettier --check '**/*.ts'",
+    "prettier:write": "prettier --write **/*.ts",
+    "lint": "prettier --check **/*.ts",
     "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/",
     "postinstall": "tsc"
   },
@@ -34,7 +34,9 @@
     "@types/node": "^10.17.9",
     "@types/node-fetch": "^2.5.4",
     "@types/sinon": "^5.0.5",
+    "husky": "^4.3.0",
     "jest": "^23.6.0",
+    "lint-staged": "^10.4.2",
     "prettier": "^2.0.5",
     "sinon": "^7.5.0",
     "smee-client": "^1.0.1",
@@ -42,6 +44,16 @@
     "tslint": "^5.20.1",
     "tslint-config-airbnb": "^5.11.2",
     "typescript": "^3.7.3"
+  },
+  "lint-staged": {
+    "**/*.ts": [
+      "prettier --write **/*.ts"
+    ]
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
   },
   "engines": {
     "node": ">= 7.7.0",
