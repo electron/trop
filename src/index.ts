@@ -46,48 +46,19 @@ const probotHandler = async (robot: Application) => {
     pr: PullsGetResponse,
     change: PRChange,
   ) => {
-    const oldPRNumbers = maybeGetManualBackportNumbers(context);
-    if (change === PRChange.CLOSE) {
-      robot.log(
-        `Automatic backport #${pr.number} closed with unmerged commits`,
+    const closeType = change === PRChange.MERGE ? 'merged' : 'closed';
+    robot.log(
+      `Updating labels on original PR for ${closeType} PR: #${pr.number}`,
+    );
+    await labelClosedPRs(context, pr, change);
+
+    robot.log(`Deleting base branch: ${pr.head.ref}`);
+    try {
+      await context.github.git.deleteRef(
+        context.repo({ ref: `heads/${pr.head.ref}` }),
       );
-    }
-
-    if (oldPRNumbers.length > 0) {
-      if (change === PRChange.MERGE) {
-        robot.log(`Automatic backport merged for: #${pr.number}`);
-        robot.log(`Labeling original PR for merged PR: #${pr.number}`);
-      } else {
-        robot.log(`Updating label on original PR for closed PR: #${pr.number}`);
-      }
-      for (const oldPRNumber of oldPRNumbers) {
-        await updateManualBackport(context, change, oldPRNumber);
-      }
-      await labelClosedPRs(context, pr, change);
-    }
-
-    // Check that the closed PR is trop's own and act accordingly.
-    if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
-      if (change === PRChange.MERGE) {
-        robot.log(`Labeling original PR for merged PR: #${pr.number}`);
-      } else {
-        robot.log(`Updating labels for closed PR: #${pr.number}`);
-      }
-      await labelClosedPRs(context, pr, change);
-
-      robot.log(`Deleting head branch: ${pr.head.ref}`);
-      try {
-        await context.github.git.deleteRef(
-          context.repo({ ref: `heads/${pr.head.ref}` }),
-        );
-      } catch (e) {
-        robot.log('Failed to delete backport branch: ', e);
-      }
-    } else {
-      robot.log(
-        `Backporting #${pr.number} to all branches specified by labels`,
-      );
-      backportAllLabels(context, pr);
+    } catch (e) {
+      robot.log('Failed to delete backport branch: ', e);
     }
   };
 
@@ -377,10 +348,48 @@ const probotHandler = async (robot: Application) => {
   // Backport pull requests to labeled targets when PR is merged.
   robot.on('pull_request.closed', async (context: Context) => {
     const pr: PullsGetResponse = context.payload.pull_request;
+    const oldPRNumbers = maybeGetManualBackportNumbers(context);
     if (pr.merged) {
-      await handleTropBackportClosed(context, pr, PRChange.MERGE);
+      if (oldPRNumbers.length > 0) {
+        robot.log(`Automatic backport merged for: #${pr.number}`);
+        robot.log(`Labeling original PR for merged PR: #${pr.number}`);
+        for (const oldPRNumber of oldPRNumbers) {
+          await updateManualBackport(context, PRChange.MERGE, oldPRNumber);
+        }
+        await labelClosedPRs(context, pr, PRChange.MERGE);
+      }
+
+      // Check that the closed PR is trop's own and act accordingly.
+      if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
+        await handleTropBackportClosed(context, pr, PRChange.MERGE);
+      } else {
+        robot.log(
+          `Backporting #${pr.number} to all branches specified by labels`,
+        );
+        backportAllLabels(context, pr);
+      }
     } else {
-      await handleTropBackportClosed(context, pr, PRChange.CLOSE);
+      robot.log(
+        `Automatic backport #${pr.number} closed with unmerged commits`,
+      );
+
+      if (oldPRNumbers.length > 0) {
+        robot.log(`Updating label on original PR for closed PR: #${pr.number}`);
+        for (const oldPRNumber of oldPRNumbers) {
+          await updateManualBackport(context, PRChange.CLOSE, oldPRNumber);
+        }
+        await labelClosedPRs(context, pr, PRChange.CLOSE);
+      }
+
+      // Check that the closed PR is trop's own and act accordingly.
+      if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
+        await handleTropBackportClosed(context, pr, PRChange.CLOSE);
+      } else {
+        robot.log(
+          `Backporting #${pr.number} to all branches specified by labels`,
+        );
+        backportAllLabels(context, pr);
+      }
     }
   });
 
