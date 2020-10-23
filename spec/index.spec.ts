@@ -1,24 +1,32 @@
 jest.mock('request');
 import { Application } from 'probot';
 
-import * as utils from '../src/utils';
+import { labelClosedPR } from '../src/utils';
 import {
   backportToBranch,
   backportToLabel,
 } from '../src/operations/backport-to-location';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
 import { ProbotHandler } from '../src/index';
+import { PRChange } from '../src/enums';
 
 const trop: ProbotHandler = require('../src/index');
 
 // event fixtures
 const prClosedEvent = require('./fixtures/pull_request.closed.json');
-const backportPRClosedBotEvent = require('./fixtures/backport_pull_request.closed.bot.json');
-const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.json');
-const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json');
 const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json');
 const issueCommentBackportToMultipleCreatedEvent = require('./fixtures/issue_comment_backport_to_multiple.created.json');
+
+const backportPRMergedBotEvent = require('./fixtures/backport_pull_request.merged.bot.json');
+const backportPRClosedBotEvent = require('./fixtures/backport_pull_request.closed.bot.json');
+const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
+const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.json');
+const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
+
+jest.mock('../src/utils', () => ({
+  labelClosedPR: jest.fn(),
+}));
 
 jest.mock('../src/operations/update-manual-backport', () => ({
   updateManualBackport: jest.fn(),
@@ -91,7 +99,7 @@ describe('trop', () => {
                 url:
                   'https://api.github.com/repos/octocat/Hello-World/labels/bug',
                 name: 'bug',
-                description: "Something isn't working",
+                description: 'Something isn\'t working',
                 color: 'f29513',
               },
             ],
@@ -180,24 +188,148 @@ describe('trop', () => {
       expect(backportToLabel).toHaveBeenCalled();
     });
 
-    it('adds a label when a backport PR has been merged', async () => {
-      Object.defineProperty(utils, 'labelClosedPR', { value: jest.fn() });
+    it('updates labels on the original PR when a bot backport PR has been closed with unmerged commits', async () => {
       await robot.receive(backportPRClosedBotEvent);
 
-      expect(utils.labelClosedPR).toHaveBeenCalled();
+      const pr = {
+        body: `Backport of #14
+See that PR for details.
+Notes: <!-- One-line Change Summary Here-->`,
+        created_at: '2018-11-01T17:29:51Z',
+        head: {
+          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg'
+        },
+        labels: [
+          {
+            color: 'ededed',
+            name: '5-0-x'
+          },
+          {
+            name: 'backport',
+            color: 'ededed'
+          }
+        ],
+        merged: false,
+        merged_at: '2018-11-01T17:30:11Z',
+        state: 'closed',
+        title: 'mirror', 
+        user: {
+          login: 'trop[bot]'
+        }
+      }
+
+      expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
+      expect((labelClosedPR as any).mock.calls[0][2]).toBe('5-0-x');
+      expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.CLOSE);
     });
 
-    it('labels the original PR when a manual backport PR has been merged', async () => {
-      await robot.receive(backportPRClosedEvent);
+    it('updates labels on the original PR when a bot backport PR has been merged', async () => {
+      await robot.receive(backportPRMergedBotEvent);
 
-      expect(updateManualBackport).toHaveBeenCalled();
+      const pr = {
+        body: `Backport of #14
+See that PR for details.
+Notes: <!-- One-line Change Summary Here-->`,
+        created_at: '2018-11-01T17:29:51Z',
+        head: {
+          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg'
+        },
+        labels: [
+          {
+            color: 'ededed',
+            name: '4-0-x'
+          },
+          {
+            name: 'backport',
+            color: 'ededed'
+          }
+        ],
+        merged: true,
+        merged_at: '2018-11-01T17:30:11Z',
+        state: 'closed',
+        title: 'mirror', 
+        user: {
+          login: 'trop[bot]'
+        }
+      }
+
+      expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
+      expect((labelClosedPR as any).mock.calls[0][2]).toBe('4-0-x');
+      expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.MERGE);
     });
 
-    it('adds a label when a backport PR has been merged', async () => {
-      Object.defineProperty(utils, 'labelClosedPR', { value: jest.fn() });
+    it('updates labels on the original PR when a manual backport PR has been closed with unmerged commits', async () => {
       await robot.receive(backportPRClosedEvent);
 
+      const pr = {
+        body: `Backport of #14
+See that PR for details.
+Notes: <!-- One-line Change Summary Here-->`,
+        created_at: '2018-11-01T17:29:51Z',
+        head: {
+          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg'
+        },
+        labels: [
+          {
+            color: 'ededed',
+            name: '4-0-x'
+          },
+          {
+            name: 'backport',
+            color: 'ededed'
+          }
+        ],
+        merged: false,
+        merged_at: '2018-11-01T17:30:11Z',
+        state: 'closed',
+        title: 'mirror', 
+        user: {
+          login: 'codebytere'
+        }
+      }
+
       expect(updateManualBackport).toHaveBeenCalled();
+
+      expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
+      expect((labelClosedPR as any).mock.calls[0][2]).toBe('4-0-x');
+      expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.CLOSE);
+    });
+
+    it('updates labels on the original PR when a manual backport PR has been merged', async () => {
+      await robot.receive(backportPRMergedEvent);
+
+      const pr = {
+        body: `Backport of #14
+See that PR for details.
+Notes: <!-- One-line Change Summary Here-->`,
+        created_at: '2018-11-01T17:29:51Z',
+        head: {
+          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg'
+        },
+        labels: [
+          {
+            color: 'ededed',
+            name: '4-0-x'
+          },
+          {
+            name: 'backport',
+            color: 'ededed'
+          }
+        ],
+        merged: true,
+        merged_at: '2018-11-01T17:30:11Z',
+        state: 'closed',
+        title: 'mirror', 
+        user: {
+          login: 'codebytere'
+        }
+      }
+
+      expect(updateManualBackport).toHaveBeenCalled();
+
+      expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
+      expect((labelClosedPR as any).mock.calls[0][2]).toBe('4-0-x');
+      expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.MERGE);
     });
   });
 });
