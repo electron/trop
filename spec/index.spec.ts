@@ -181,10 +181,10 @@ describe('trop', () => {
     });
 
     it('adds a label when a backport PR has been merged', async () => {
-      Object.defineProperty(utils, 'labelMergedPR', { value: jest.fn() });
+      Object.defineProperty(utils, 'labelClosedPR', { value: jest.fn() });
       await robot.receive(backportPRClosedBotEvent);
 
-      expect(utils.labelMergedPR).toHaveBeenCalled();
+      expect(utils.labelClosedPR).toHaveBeenCalled();
     });
 
     it('labels the original PR when a manual backport PR has been merged', async () => {
@@ -194,7 +194,7 @@ describe('trop', () => {
     });
 
     it('adds a label when a backport PR has been merged', async () => {
-      Object.defineProperty(utils, 'labelMergedPR', { value: jest.fn() });
+      Object.defineProperty(utils, 'labelClosedPR', { value: jest.fn() });
       await robot.receive(backportPRClosedEvent);
 
       expect(updateManualBackport).toHaveBeenCalled();

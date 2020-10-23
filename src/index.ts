@@ -1,6 +1,6 @@
 import { Application, Context } from 'probot';
 
-import { backportImpl, labelMergedPR } from './utils';
+import { backportImpl, labelClosedPR } from './utils';
 import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
 import { TropConfig } from './interfaces';
 import { CHECK_PREFIX, SKIP_CHECK_LABEL } from './constants';
@@ -19,13 +19,17 @@ import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { updateBackportValidityCheck } from './utils/checks-util';
 
 const probotHandler = async (robot: Application) => {
-  const labelMergedPRs = async (context: Context, pr: PullsGetResponse) => {
+  const labelClosedPRs = async (
+    context: Context,
+    pr: PullsGetResponse,
+    change: PRChange,
+  ) => {
     for (const label of pr.labels) {
       const targetBranch = label.name.match(
         /^(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))$/,
       );
       if (targetBranch && targetBranch[0]) {
-        await labelMergedPR(context, pr, label.name);
+        await labelClosedPR(context, pr, label.name, change);
       }
     }
   };
@@ -34,6 +38,27 @@ const probotHandler = async (robot: Application) => {
     for (const label of pr.labels) {
       context.payload.pull_request = context.payload.pull_request || pr;
       backportToLabel(robot, context, label);
+    }
+  };
+
+  const handleTropBackportClosed = async (
+    context: Context,
+    pr: PullsGetResponse,
+    change: PRChange,
+  ) => {
+    const closeType = change === PRChange.MERGE ? 'merged' : 'closed';
+    robot.log(
+      `Updating labels on original PR for ${closeType} PR: #${pr.number}`,
+    );
+    await labelClosedPRs(context, pr, change);
+
+    robot.log(`Deleting base branch: ${pr.head.ref}`);
+    try {
+      await context.github.git.deleteRef(
+        context.repo({ ref: `heads/${pr.head.ref}` }),
+      );
+    } catch (e) {
+      robot.log('Failed to delete backport branch: ', e);
     }
   };
 
@@ -327,27 +352,16 @@ const probotHandler = async (robot: Application) => {
     if (pr.merged) {
       if (oldPRNumbers.length > 0) {
         robot.log(`Automatic backport merged for: #${pr.number}`);
-
         robot.log(`Labeling original PR for merged PR: #${pr.number}`);
         for (const oldPRNumber of oldPRNumbers) {
           await updateManualBackport(context, PRChange.MERGE, oldPRNumber);
         }
-        await labelMergedPRs(context, pr);
+        await labelClosedPRs(context, pr, PRChange.MERGE);
       }
 
       // Check that the closed PR is trop's own and act accordingly.
       if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
-        robot.log(`Labeling original PR for merged PR: #${pr.number}`);
-        await labelMergedPRs(context, pr);
-
-        robot.log(`Deleting base branch: ${pr.head.ref}`);
-        try {
-          await context.github.git.deleteRef(
-            context.repo({ ref: `heads/${pr.head.ref}` }),
-          );
-        } catch (e) {
-          robot.log('Failed to delete backport branch: ', e);
-        }
+        await handleTropBackportClosed(context, pr, PRChange.MERGE);
       } else {
         robot.log(
           `Backporting #${pr.number} to all branches specified by labels`,
@@ -355,16 +369,26 @@ const probotHandler = async (robot: Application) => {
         backportAllLabels(context, pr);
       }
     } else {
-      if (oldPRNumbers.length > 0) {
-        robot.log(
-          `Automatic backport #${pr.number} closed with unmerged commits`,
-        );
+      robot.log(
+        `Automatic backport #${pr.number} closed with unmerged commits`,
+      );
 
+      if (oldPRNumbers.length > 0) {
         robot.log(`Updating label on original PR for closed PR: #${pr.number}`);
         for (const oldPRNumber of oldPRNumbers) {
           await updateManualBackport(context, PRChange.CLOSE, oldPRNumber);
         }
-        await labelMergedPRs(context, pr);
+        await labelClosedPRs(context, pr, PRChange.CLOSE);
+      }
+
+      // Check that the closed PR is trop's own and act accordingly.
+      if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
+        await handleTropBackportClosed(context, pr, PRChange.CLOSE);
+      } else {
+        robot.log(
+          `Backporting #${pr.number} to all branches specified by labels`,
+        );
+        backportAllLabels(context, pr);
       }
     }
   });

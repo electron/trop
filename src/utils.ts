@@ -17,7 +17,7 @@ import {
   BACKPORT_REQUESTED_LABEL,
   DEFAULT_BACKPORT_REVIEW_TEAM,
 } from './constants';
-import { PRStatus, BackportPurpose, LogLevel } from './enums';
+import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
 import * as labelUtils from './utils/label-utils';
 import { initRepo } from './operations/init-repo';
@@ -31,13 +31,14 @@ import { log } from './utils/log-util';
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
-export const labelMergedPR = async (
+export const labelClosedPR = async (
   context: Context,
   pr: PullsGetResponse,
   targetBranch: String,
+  change: PRChange,
 ) => {
   log(
-    'labelMergedPR',
+    'labelClosedPR',
     LogLevel.INFO,
     `Labeling original PRs for PR at #${pr.number}`,
   );
@@ -53,11 +54,14 @@ export const labelMergedPR = async (
   }
 
   for (const prNumber of backportNumbers) {
-    const labelToAdd = PRStatus.MERGED + targetBranch;
     const labelToRemove = PRStatus.IN_FLIGHT + targetBranch;
 
+    if (change === PRChange.MERGE) {
+      const labelToAdd = PRStatus.MERGED + targetBranch;
+      await labelUtils.addLabel(context, prNumber, [labelToAdd]);
+    }
+
     await labelUtils.removeLabel(context, prNumber, labelToRemove);
-    await labelUtils.addLabel(context, prNumber, [labelToAdd]);
   }
 };
 
