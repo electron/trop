@@ -17,7 +17,7 @@
       "merged_at": "2018-11-01T17:30:11Z",
       "labels": [
         {
-          "name": "5-0-x",
+          "name": "4-0-x",
           "color": "ededed"
         },
         {
@@ -25,7 +25,7 @@
           "color": "ededed"
         }
       ],
-      "merged": false
+      "merged": true
     }
   }
 }

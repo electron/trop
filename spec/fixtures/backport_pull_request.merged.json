@@ -7,7 +7,7 @@
       "state": "closed",
       "title": "mirror",
       "user": {
-        "login": "trop[bot]"
+        "login": "codebytere"
       },
       "head": {
         "ref": "123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg"
@@ -17,15 +17,15 @@
       "merged_at": "2018-11-01T17:30:11Z",
       "labels": [
         {
-          "name": "5-0-x",
+          "name": "4-0-x",
           "color": "ededed"
-        },
+        }, 
         {
           "name": "backport",
           "color": "ededed"
         }
       ],
-      "merged": false
+      "merged": true
     }
   }
 }
