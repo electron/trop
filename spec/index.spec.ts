@@ -17,6 +17,7 @@ const prClosedEvent = require('./fixtures/pull_request.closed.json');
 const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backport.created.json');
 const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json');
 const issueCommentBackportToMultipleCreatedEvent = require('./fixtures/issue_comment_backport_to_multiple.created.json');
+const issueCommentBackportToMultipleCreatedSpacesEvent = require('./fixtures/issue_comment_backport_to_multiple_spaces.created.json');
 
 const backportPRMergedBotEvent = require('./fixtures/backport_pull_request.merged.bot.json');
 const backportPRClosedBotEvent = require('./fixtures/backport_pull_request.closed.bot.json');
@@ -159,6 +160,14 @@ describe('trop', () => {
       expect(github.pulls.get).toHaveBeenCalledTimes(3);
       expect(github.issues.createComment).toHaveBeenCalledTimes(2);
       expect(backportToBranch).toHaveBeenCalledTimes(2);
+    });
+
+    it('allows for multiple PRs to be triggered in the same comment with space-separated branches', async () => {
+      await robot.receive(issueCommentBackportToMultipleCreatedSpacesEvent);
+
+      expect(github.pulls.get).toHaveBeenCalledTimes(4);
+      expect(github.issues.createComment).toHaveBeenCalledTimes(3);
+      expect(backportToBranch).toHaveBeenCalledTimes(3);
     });
 
     it('does not trigger the backport on comment to a targeted branch if the branch does not exist', async () => {
