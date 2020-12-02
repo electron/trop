@@ -474,12 +474,12 @@ const probotHandler = async (robot: Application) => {
       },
       {
         name: 'backport to branch',
-        command: /^run backport-to ([^\s:]+)/,
+        command: /^run backport-to (([^,]*)(, ?([^,]*))*)/,
         execute: async (targetBranches: string) => {
-          const branches = targetBranches.split(',');
+          const branches = targetBranches.split(',').map((b) => b.trim());
           for (const branch of branches) {
             robot.log(
-              `Initiatating backport to ${branch} from 'backport-to' comment`,
+              `Initiating backport to ${branch} from 'backport-to' comment`,
             );
 
             if (!branch.trim()) continue;
