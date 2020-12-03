@@ -99,5 +99,14 @@ please check out #${pr.number}`;
 
   // Add labels for the backport and target branch to the manual backport if
   // the maintainer forgot to do so themselves
-  await labelUtils.addLabel(context, pr.number, ['backport', pr.base.ref]);
+  const extraLabels: string[] = [];
+  const semverLabel = pr.labels.find((l: any) => l.name.startsWith('semver/'));
+  if (semverLabel) {
+    extraLabels.push(semverLabel.name);
+  }
+  await labelUtils.addLabel(context, pr.number, [
+    'backport',
+    pr.base.ref,
+    ...extraLabels,
+  ]);
 };

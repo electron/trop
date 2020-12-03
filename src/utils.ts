@@ -382,6 +382,13 @@ export const backportImpl = async (
           labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
         }
 
+        const semverLabel = pr.labels.find((l: any) =>
+          l.name.startsWith('semver/'),
+        );
+        if (semverLabel) {
+          labelsToAdd.push(semverLabel.name);
+        }
+
         await labelUtils.addLabel(context, newPr.number!, labelsToAdd);
 
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
