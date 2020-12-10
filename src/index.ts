@@ -320,6 +320,41 @@ const probotHandler = async (robot: Application) => {
   robot.on('pull_request.labeled', maybeRunCheck);
   robot.on('pull_request.unlabeled', maybeRunCheck);
 
+  /* 
+    1) Get the PR body text
+    2) Check PR body text for the "Backport of" pattern
+    3) Pull down the PR associated with that pattern
+    4) Get body text of that PR (ie repeat 1-3)
+    5) Continue until no more backport is found; return last PR number
+  */
+  async function getOriginalBackportNumber(
+    pr: PullsGetResponse,
+    context: Context,
+  ) {
+    const backportPattern = getBackportPattern();
+    // Check if this PR is a manual backport of another PR.
+    let match: RegExpExecArray | null;
+    let backportNumber: null | number = null;
+    let oldestPR = pr;
+    while ((match = backportPattern.exec(oldestPR.body))) {
+      backportNumber = match[1]
+        ? parseInt(match[1], 10)
+        : parseInt(match[2], 10);
+      const { data: pullRequest } = await context.github.pulls.get({
+        owner: 'electron',
+        repo: 'electron',
+        pull_number: backportNumber,
+      });
+      if (backportPattern.test(pullRequest.body)) {
+        oldestPR = pullRequest;
+      } else {
+        return backportNumber;
+      }
+    }
+
+    return backportNumber;
+  }
+
   // Backport pull requests to labeled targets when PR is merged.
   robot.on('pull_request.closed', async (context: Context) => {
     const pr: PullsGetResponse = context.payload.pull_request;
