@@ -1,8 +1,7 @@
 import { Application, Context } from 'probot';
 
-import { backportImpl, labelClosedPR } from './utils';
+import { backportImpl, isAuthorizedUser, labelClosedPR } from './utils';
 import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
-import { TropConfig } from './interfaces';
 import { CHECK_PREFIX, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
@@ -397,31 +396,25 @@ const probotHandler = async (robot: Application) => {
 
   // Manually trigger backporting process on trigger comment phrase.
   robot.on('issue_comment.created', async (context: Context) => {
-    const payload = context.payload;
-    const config = (await context.config<TropConfig>(
-      'config.yml',
-    )) as TropConfig;
-    if (!config || !Array.isArray(config.authorizedUsers)) {
-      robot.log('missing or invalid config', config);
-      return;
-    }
+    const { issue, comment } = context.payload;
 
-    const isPullRequest = (issue: { number: number; html_url: string }) =>
-      issue.html_url.endsWith(`/pull/${issue.number}`);
+    const isPullRequest = (i: { number: number; html_url: string }) =>
+      i.html_url.endsWith(`/pull/${i.number}`);
 
-    if (!isPullRequest(payload.issue)) return;
+    if (!isPullRequest(issue)) return;
 
-    const cmd = payload.comment.body;
+    const cmd = comment.body;
     if (!cmd.startsWith(TROP_COMMAND_PREFIX)) return;
 
-    if (!config.authorizedUsers.includes(payload.comment.user.login)) {
+    // Allow all users with push access to handle backports.
+    if (!isAuthorizedUser(context, comment.user.login)) {
       robot.log(
-        `@${payload.comment.user.login} is not authorized to run PR backports - stopping`,
+        `@${comment.user.login} is not authorized to run PR backports - stopping`,
       );
       await context.github.issues.createComment(
         context.repo({
-          issue_number: payload.issue.number,
-          body: `@${payload.comment.user.login} is not authorized to run PR backports.`,
+          issue_number: issue.number,
+          body: `@${comment.user.login} is not authorized to run PR backports.`,
         }),
       );
       return;
@@ -436,13 +429,13 @@ const probotHandler = async (robot: Application) => {
         execute: async () => {
           const pr = (
             await context.github.pulls.get(
-              context.repo({ pull_number: payload.issue.number }),
+              context.repo({ pull_number: issue.number }),
             )
           ).data;
           if (!pr.merged) {
             await context.github.issues.createComment(
               context.repo({
-                issue_number: payload.issue.number,
+                issue_number: issue.number,
                 body:
                   'This PR has not been merged yet, and cannot be backported.',
               }),
@@ -458,14 +451,14 @@ const probotHandler = async (robot: Application) => {
         execute: async () => {
           const pr = (
             await context.github.pulls.get(
-              context.repo({ pull_number: payload.issue.number }),
+              context.repo({ pull_number: issue.number }),
             )
           ).data as any;
           await context.github.issues.createComment(
             context.repo({
               body:
                 'The backport process for this PR has been manually initiated, here we go! :D',
-              issue_number: payload.issue.number,
+              issue_number: issue.number,
             }),
           );
           backportAllLabels(context, pr);
@@ -485,7 +478,7 @@ const probotHandler = async (robot: Application) => {
             if (!branch.trim()) continue;
             const pr = (
               await context.github.pulls.get(
-                context.repo({ pull_number: payload.issue.number }),
+                context.repo({ pull_number: issue.number }),
               )
             ).data;
 
@@ -495,7 +488,7 @@ const probotHandler = async (robot: Application) => {
               await context.github.issues.createComment(
                 context.repo({
                   body: `The branch you provided "${branch}" does not appear to exist :cry:`,
-                  issue_number: payload.issue.number,
+                  issue_number: issue.number,
                 }),
               );
               return true;
@@ -512,7 +505,7 @@ const probotHandler = async (robot: Application) => {
                 await context.github.issues.createComment(
                   context.repo({
                     body: `${branch} is no longer supported - no backport will be initiated.`,
-                    issue_number: payload.issue.number,
+                    issue_number: issue.number,
                   }),
                 );
                 return false;
@@ -520,13 +513,13 @@ const probotHandler = async (robot: Application) => {
             }
 
             robot.log(
-              `Initiating manual backport process for #${payload.issue.number} to ${branch}`,
+              `Initiating manual backport process for #${issue.number} to ${branch}`,
             );
             await context.github.issues.createComment(
               context.repo({
                 body: `The backport process for this PR has been manually initiated -
 sending your commits to "${branch}"!`,
-                issue_number: payload.issue.number,
+                issue_number: issue.number,
               }),
             );
             context.payload.pull_request = context.payload.pull_request || pr;

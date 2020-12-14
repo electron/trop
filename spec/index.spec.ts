@@ -27,6 +27,7 @@ const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.j
 
 jest.mock('../src/utils', () => ({
   labelClosedPR: jest.fn(),
+  isAuthorizedUser: jest.fn().mockReturnValue(Promise.resolve([true])),
 }));
 
 jest.mock('../src/operations/update-manual-backport', () => ({
@@ -49,15 +50,6 @@ describe('trop', () => {
 
     github = {
       repos: {
-        getContents: jest.fn().mockReturnValue(
-          Promise.resolve({
-            data: {
-              content: Buffer.from(
-                'watchedProject:\n  name: Radar\nauthorizedUsers:\n  - codebytere',
-              ).toString('base64'),
-            },
-          }),
-        ),
         getBranch: jest.fn().mockReturnValue(Promise.resolve()),
         listBranches: jest.fn().mockReturnValue(
           Promise.resolve({
@@ -100,7 +92,7 @@ describe('trop', () => {
                 url:
                   'https://api.github.com/repos/octocat/Hello-World/labels/bug',
                 name: 'bug',
-                description: 'Something isn\'t working',
+                description: "Something isn't working",
                 color: 'f29513',
               },
             ],
@@ -115,14 +107,6 @@ describe('trop', () => {
     };
 
     robot.auth = () => Promise.resolve(github);
-  });
-
-  describe('config', () => {
-    it('fetches config', async () => {
-      await robot.receive(issueCommentBackportCreatedEvent);
-
-      expect(github.repos.getContents).toHaveBeenCalled();
-    });
   });
 
   describe('issue_comment.created event', () => {
@@ -206,26 +190,26 @@ See that PR for details.
 Notes: <!-- One-line Change Summary Here-->`,
         created_at: '2018-11-01T17:29:51Z',
         head: {
-          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg'
+          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg',
         },
         labels: [
           {
             color: 'ededed',
-            name: '5-0-x'
+            name: '5-0-x',
           },
           {
             name: 'backport',
-            color: 'ededed'
-          }
+            color: 'ededed',
+          },
         ],
         merged: false,
         merged_at: '2018-11-01T17:30:11Z',
         state: 'closed',
-        title: 'mirror', 
+        title: 'mirror',
         user: {
-          login: 'trop[bot]'
-        }
-      }
+          login: 'trop[bot]',
+        },
+      };
 
       expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
       expect((labelClosedPR as any).mock.calls[0][2]).toBe('5-0-x');
@@ -241,26 +225,26 @@ See that PR for details.
 Notes: <!-- One-line Change Summary Here-->`,
         created_at: '2018-11-01T17:29:51Z',
         head: {
-          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg'
+          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg',
         },
         labels: [
           {
             color: 'ededed',
-            name: '4-0-x'
+            name: '4-0-x',
           },
           {
             name: 'backport',
-            color: 'ededed'
-          }
+            color: 'ededed',
+          },
         ],
         merged: true,
         merged_at: '2018-11-01T17:30:11Z',
         state: 'closed',
-        title: 'mirror', 
+        title: 'mirror',
         user: {
-          login: 'trop[bot]'
-        }
-      }
+          login: 'trop[bot]',
+        },
+      };
 
       expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
       expect((labelClosedPR as any).mock.calls[0][2]).toBe('4-0-x');
@@ -276,26 +260,26 @@ See that PR for details.
 Notes: <!-- One-line Change Summary Here-->`,
         created_at: '2018-11-01T17:29:51Z',
         head: {
-          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg'
+          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg',
         },
         labels: [
           {
             color: 'ededed',
-            name: '4-0-x'
+            name: '4-0-x',
           },
           {
             name: 'backport',
-            color: 'ededed'
-          }
+            color: 'ededed',
+          },
         ],
         merged: false,
         merged_at: '2018-11-01T17:30:11Z',
         state: 'closed',
-        title: 'mirror', 
+        title: 'mirror',
         user: {
-          login: 'codebytere'
-        }
-      }
+          login: 'codebytere',
+        },
+      };
 
       expect(updateManualBackport).toHaveBeenCalled();
 
@@ -313,26 +297,26 @@ See that PR for details.
 Notes: <!-- One-line Change Summary Here-->`,
         created_at: '2018-11-01T17:29:51Z',
         head: {
-          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg'
+          ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg',
         },
         labels: [
           {
             color: 'ededed',
-            name: '4-0-x'
+            name: '4-0-x',
           },
           {
             name: 'backport',
-            color: 'ededed'
-          }
+            color: 'ededed',
+          },
         ],
         merged: true,
         merged_at: '2018-11-01T17:30:11Z',
         state: 'closed',
-        title: 'mirror', 
+        title: 'mirror',
         user: {
-          login: 'codebytere'
-        }
-      }
+          login: 'codebytere',
+        },
+      };
 
       expect(updateManualBackport).toHaveBeenCalled();
 

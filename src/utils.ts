@@ -65,6 +65,16 @@ export const labelClosedPR = async (
   }
 };
 
+export const isAuthorizedUser = async (context: Context, username: string) => {
+  const { data } = await context.github.repos.getCollaboratorPermissionLevel(
+    context.repo({
+      username,
+    }),
+  );
+
+  return ['admin', 'write'].includes(data.permission);
+};
+
 const isSemverMinorPR = async (context: Context, pr: PullsGetResponse) => {
   log(
     'isSemverMinorPR',
