@@ -18,7 +18,7 @@ import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { updateBackportValidityCheck } from './utils/checks-util';
 
 const probotHandler = async (robot: Application) => {
-  const labelClosedPRs = async (
+  const handleClosedPRLabels = async (
     context: Context,
     pr: PullsGetResponse,
     change: PRChange,
@@ -49,7 +49,7 @@ const probotHandler = async (robot: Application) => {
     robot.log(
       `Updating labels on original PR for ${closeType} PR: #${pr.number}`,
     );
-    await labelClosedPRs(context, pr, change);
+    await handleClosedPRLabels(context, pr, change);
 
     robot.log(`Deleting base branch: ${pr.head.ref}`);
     try {
@@ -355,7 +355,7 @@ const probotHandler = async (robot: Application) => {
         for (const oldPRNumber of oldPRNumbers) {
           await updateManualBackport(context, PRChange.MERGE, oldPRNumber);
         }
-        await labelClosedPRs(context, pr, PRChange.MERGE);
+        await handleClosedPRLabels(context, pr, PRChange.MERGE);
       }
 
       // Check that the closed PR is trop's own and act accordingly.
@@ -377,17 +377,14 @@ const probotHandler = async (robot: Application) => {
         for (const oldPRNumber of oldPRNumbers) {
           await updateManualBackport(context, PRChange.CLOSE, oldPRNumber);
         }
-        await labelClosedPRs(context, pr, PRChange.CLOSE);
       }
 
-      // Check that the closed PR is trop's own and act accordingly.
       if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
+        // If the closed PR is trop's own, remove labels
+        // from the original PR and delete the base branch.
         await handleTropBackportClosed(context, pr, PRChange.CLOSE);
       } else {
-        robot.log(
-          `Backporting #${pr.number} to all branches specified by labels`,
-        );
-        backportAllLabels(context, pr);
+        await handleClosedPRLabels(context, pr, PRChange.CLOSE);
       }
     }
   });
