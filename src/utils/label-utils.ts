@@ -3,7 +3,7 @@ import { PullsGetResponseLabelsItem } from '@octokit/rest';
 import { log } from './log-util';
 import { LogLevel } from '../enums';
 
-export const addLabel = async (
+export const addLabels = async (
   context: Context,
   prNumber: number,
   labelsToAdd: string[],

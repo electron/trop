@@ -2,6 +2,7 @@ import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { Context } from 'probot';
+import { SEMVER_PREFIX } from '../constants';
 
 /**
  * Updates the labels on a backport's original PR as well as comments with links
@@ -19,7 +20,7 @@ export const updateManualBackport = async (
 ) => {
   const pr = context.payload.pull_request;
   let labelToRemove;
-  let labelToAdd;
+  const labelsToAdd = [pr.base.ref];
 
   log(
     'updateManualBackport',
@@ -34,13 +35,30 @@ export const updateManualBackport = async (
       `New manual backport opened at #${pr.number}`,
     );
 
-    labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
+    labelsToAdd.push(PRStatus.IN_FLIGHT + pr.base.ref);
     labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
 
-    if (
-      !(await labelUtils.labelExistsOnPR(context, oldPRNumber, labelToRemove))
-    ) {
+    const removeLabelExists = await labelUtils.labelExistsOnPR(
+      context,
+      oldPRNumber,
+      labelToRemove,
+    );
+    if (!removeLabelExists) {
       labelToRemove = PRStatus.TARGET + pr.base.ref;
+    }
+
+    // Propagate semver label from the original PR if the maintainer didn't add it.
+    const { data: oldPR } = await context.github.pulls.get(
+      context.repo({ pull_number: oldPRNumber }),
+    );
+    const semverLabel = oldPR.labels.find((l: any) =>
+      l.name.startsWith(SEMVER_PREFIX),
+    );
+    if (
+      semverLabel &&
+      !labelUtils.labelExistsOnPR(context, pr.number, semverLabel.name)
+    ) {
+      labelsToAdd.push(semverLabel.name);
     }
 
     // We should only comment if there is not a previous existing comment
@@ -78,7 +96,7 @@ please check out #${pr.number}`;
     );
 
     labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
-    labelToAdd = PRStatus.MERGED + pr.base.ref;
+    labelsToAdd.push(PRStatus.MERGED + pr.base.ref);
   } else {
     log(
       'updateManualBackport',
@@ -92,21 +110,5 @@ please check out #${pr.number}`;
   }
 
   await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
-
-  if (labelToAdd) {
-    await labelUtils.addLabel(context, oldPRNumber, [labelToAdd]);
-  }
-
-  // Add labels for the backport and target branch to the manual backport if
-  // the maintainer forgot to do so themselves
-  const extraLabels: string[] = [];
-  const semverLabel = pr.labels.find((l: any) => l.name.startsWith('semver/'));
-  if (semverLabel) {
-    extraLabels.push(semverLabel.name);
-  }
-  await labelUtils.addLabel(context, pr.number, [
-    'backport',
-    pr.base.ref,
-    ...extraLabels,
-  ]);
+  await labelUtils.addLabels(context, pr.number, labelsToAdd);
 };

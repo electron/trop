@@ -16,6 +16,8 @@ import {
   CHECK_PREFIX,
   BACKPORT_REQUESTED_LABEL,
   DEFAULT_BACKPORT_REVIEW_TEAM,
+  BACKPORT_LABEL,
+  SEMVER_PREFIX,
 } from './constants';
 import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
@@ -65,7 +67,7 @@ export const labelClosedPR = async (
 
     if (change === PRChange.MERGE) {
       const labelToAdd = PRStatus.MERGED + targetBranch;
-      await labelUtils.addLabel(context, prNumber, [labelToAdd]);
+      await labelUtils.addLabels(context, prNumber, [labelToAdd]);
     }
 
     await labelUtils.removeLabel(context, prNumber, labelToRemove);
@@ -384,11 +386,11 @@ export const backportImpl = async (
           await labelUtils.removeLabel(context, pr.number, labelToRemove);
         }
 
-        if (labelToAdd) {
-          await labelUtils.addLabel(context, pr.number, [labelToAdd]);
-        }
-
-        const labelsToAdd = ['backport', `${targetBranch}`];
+        const labelsToAdd = [
+          BACKPORT_LABEL,
+          `${targetBranch}`,
+          ...(labelToAdd ? [labelToAdd] : []),
+        ];
 
         if (await isSemverMinorPR(context, pr)) {
           log(
@@ -400,13 +402,13 @@ export const backportImpl = async (
         }
 
         const semverLabel = pr.labels.find((l: any) =>
-          l.name.startsWith('semver/'),
+          l.name.startsWith(SEMVER_PREFIX),
         );
         if (semverLabel) {
           labelsToAdd.push(semverLabel.name);
         }
 
-        await labelUtils.addLabel(context, newPr.number!, labelsToAdd);
+        await labelUtils.addLabels(context, newPr.number!, labelsToAdd);
 
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
@@ -486,7 +488,7 @@ export const backportImpl = async (
         await labelUtils.removeLabel(context, pr.number, labelToRemove);
 
         const labelToAdd = PRStatus.NEEDS_MANUAL + targetBranch;
-        await labelUtils.addLabel(context, pr.number, [labelToAdd]);
+        await labelUtils.addLabels(context, pr.number, [labelToAdd]);
       }
 
       if (purpose === BackportPurpose.Check) {

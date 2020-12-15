@@ -269,13 +269,11 @@ const probotHandler = async (robot: Application) => {
 
           for (const oldPRNumber of oldPRNumbers) {
             robot.log(`Checking validity of #${oldPRNumber}`);
-            const oldPR = (
-              await context.github.pulls.get(
-                context.repo({
-                  pull_number: oldPRNumber,
-                }),
-              )
-            ).data;
+            const { data: oldPR } = await context.github.pulls.get(
+              context.repo({
+                pull_number: oldPRNumber,
+              }),
+            );
 
             // The current PR is only valid if the PR it is backporting
             // was merged to master or to a supported release branch.
