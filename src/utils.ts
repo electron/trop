@@ -84,7 +84,10 @@ export const isAuthorizedUser = async (context: Context, username: string) => {
   return ['admin', 'write'].includes(data.permission);
 };
 
-const isSemverMinorPR = async (context: Context, pr: PullsGetResponse) => {
+export const isSemverMinorPR = async (
+  context: Context,
+  pr: PullsGetResponse,
+) => {
   log(
     'isSemverMinorPR',
     LogLevel.INFO,

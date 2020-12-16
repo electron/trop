@@ -2,7 +2,8 @@ import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { Context } from 'probot';
-import { SEMVER_PREFIX } from '../constants';
+import { BACKPORT_REQUESTED_LABEL, SEMVER_PREFIX } from '../constants';
+import { isSemverMinorPR } from '../utils';
 
 /**
  * Updates the labels on a backport's original PR as well as comments with links
@@ -59,6 +60,15 @@ export const updateManualBackport = async (
       !labelUtils.labelExistsOnPR(context, pr.number, semverLabel.name)
     ) {
       labelsToAdd.push(semverLabel.name);
+    }
+
+    if (await isSemverMinorPR(context, pr)) {
+      log(
+        'updateManualBackport',
+        LogLevel.INFO,
+        `Determined that ${pr.number} is semver-minor`,
+      );
+      labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
     }
 
     // We should only comment if there is not a previous existing comment
