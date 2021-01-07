@@ -389,11 +389,11 @@ export const backportImpl = async (
           await labelUtils.removeLabel(context, pr.number, labelToRemove);
         }
 
-        const labelsToAdd = [
-          BACKPORT_LABEL,
-          `${targetBranch}`,
-          ...(labelToAdd ? [labelToAdd] : []),
-        ];
+        if (labelToAdd) {
+          await labelUtils.addLabels(context, pr.number!, [labelToAdd]);
+        }
+
+        const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];
 
         if (await isSemverMinorPR(context, pr)) {
           log(
