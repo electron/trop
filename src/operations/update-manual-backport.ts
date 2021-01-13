@@ -20,8 +20,12 @@ export const updateManualBackport = async (
   oldPRNumber: number,
 ) => {
   const pr = context.payload.pull_request;
+
+  const newPRLabelsToAdd = [pr.base.ref];
+
+  // Changed labels on the original PR.
+  let labelToAdd;
   let labelToRemove;
-  const labelsToAdd = [pr.base.ref];
 
   log(
     'updateManualBackport',
@@ -36,7 +40,7 @@ export const updateManualBackport = async (
       `New manual backport opened at #${pr.number}`,
     );
 
-    labelsToAdd.push(PRStatus.IN_FLIGHT + pr.base.ref);
+    labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
     labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
 
     const removeLabelExists = await labelUtils.labelExistsOnPR(
@@ -55,11 +59,14 @@ export const updateManualBackport = async (
     const semverLabel = oldPR.labels.find((l: any) =>
       l.name.startsWith(SEMVER_PREFIX),
     );
-    if (
-      semverLabel &&
-      !labelUtils.labelExistsOnPR(context, pr.number, semverLabel.name)
-    ) {
-      labelsToAdd.push(semverLabel.name);
+
+    if (semverLabel) {
+      const exists = await labelUtils.labelExistsOnPR(
+        context,
+        pr.number,
+        semverLabel.name,
+      );
+      if (!exists) newPRLabelsToAdd.push(semverLabel.name);
     }
 
     if (await isSemverMinorPR(context, pr)) {
@@ -68,7 +75,7 @@ export const updateManualBackport = async (
         LogLevel.INFO,
         `Determined that ${pr.number} is semver-minor`,
       );
-      labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
+      newPRLabelsToAdd.push(BACKPORT_REQUESTED_LABEL);
     }
 
     // We should only comment if there is not a previous existing comment
@@ -106,7 +113,9 @@ please check out #${pr.number}`;
     );
 
     labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
-    labelsToAdd.push(PRStatus.MERGED + pr.base.ref);
+
+    // The old PR should now show that the backport PR has been merged to this branch.
+    labelToAdd = PRStatus.MERGED + pr.base.ref;
   } else {
     log(
       'updateManualBackport',
@@ -119,6 +128,12 @@ please check out #${pr.number}`;
     labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
   }
 
+  // Add labels to the new manual backport PR.
+  await labelUtils.addLabels(context, pr.number, newPRLabelsToAdd);
+
+  // Update labels on the original PR.
   await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
-  await labelUtils.addLabels(context, pr.number, labelsToAdd);
+  if (labelToAdd) {
+    await labelUtils.addLabels(context, pr.number, [labelToAdd]);
+  }
 };
