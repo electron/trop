@@ -60,5 +60,5 @@ export async function getSupportedBranches(
  * @returns A scoped Regex matching the backport pattern present in PR bodies.
  */
 export const getBackportPattern = () => {
-  return /(?:^|\n)(?:manual |manually )?backport.*(?:#(\d+)|\/pull\/(\d+))/gim;
+  return /(?:^|\n)(?:manual |manually )?backport (of )?(?:#(\d+)|\/pull\/(\d+))/gim;
 };
