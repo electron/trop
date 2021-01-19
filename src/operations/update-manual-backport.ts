@@ -134,6 +134,6 @@ please check out #${pr.number}`;
   // Update labels on the original PR.
   await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
   if (labelToAdd) {
-    await labelUtils.addLabels(context, pr.number, [labelToAdd]);
+    await labelUtils.addLabels(context, oldPRNumber, [labelToAdd]);
   }
 };
