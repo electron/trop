@@ -1,7 +1,7 @@
 jest.mock('request');
 import { Application } from 'probot';
 
-import { labelClosedPR } from '../src/utils';
+import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
 import {
   backportToBranch,
   backportToLabel,
@@ -28,6 +28,7 @@ const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.j
 jest.mock('../src/utils', () => ({
   labelClosedPR: jest.fn(),
   isAuthorizedUser: jest.fn().mockReturnValue(Promise.resolve([true])),
+  getPRNumbersFromPRBody: jest.fn().mockReturnValue([12345]),
 }));
 
 jest.mock('../src/operations/update-manual-backport', () => ({

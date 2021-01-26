@@ -1,6 +1,11 @@
 import { Application, Context } from 'probot';
 
-import { backportImpl, isAuthorizedUser, labelClosedPR } from './utils';
+import {
+  backportImpl,
+  getPRNumbersFromPRBody,
+  isAuthorizedUser,
+  labelClosedPR,
+} from './utils';
 import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
 import { CHECK_PREFIX, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
@@ -127,25 +132,6 @@ const probotHandler = async (robot: Application) => {
     }
   };
 
-  const maybeGetManualBackportNumbers = (context: Context) => {
-    const pr = context.payload.pull_request;
-    const backportNumbers: number[] = [];
-
-    if (pr.user.login !== getEnvVar('BOT_USER_NAME')) {
-      const backportPattern = getBackportPattern();
-      // Check if this PR is a manual backport of another PR.
-      let match: RegExpExecArray | null;
-      while ((match = backportPattern.exec(pr.body))) {
-        // This might be the first or second capture group depending on if it's a link or not.
-        backportNumbers.push(
-          match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10),
-        );
-      }
-    }
-
-    return backportNumbers;
-  };
-
   const VALID_BACKPORT_CHECK_NAME = 'Valid Backport';
 
   robot.on(
@@ -157,10 +143,10 @@ const probotHandler = async (robot: Application) => {
       'pull_request.unlabeled',
     ],
     async (context: Context) => {
-      const oldPRNumbers = maybeGetManualBackportNumbers(context);
-      robot.log(`Found ${oldPRNumbers.length} backport numbers for this PR`);
-
       const pr = context.payload.pull_request;
+      const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
+
+      robot.log(`Found ${oldPRNumbers.length} backport numbers for this PR`);
 
       // Only check for manual backports when a new PR is opened or if the PR body is edited.
       if (
@@ -345,7 +331,7 @@ const probotHandler = async (robot: Application) => {
   // Backport pull requests to labeled targets when PR is merged.
   robot.on('pull_request.closed', async (context: Context) => {
     const pr: PullsGetResponse = context.payload.pull_request;
-    const oldPRNumbers = maybeGetManualBackportNumbers(context);
+    const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
     if (pr.merged) {
       if (oldPRNumbers.length > 0) {
         robot.log(`Automatic backport merged for: #${pr.number}`);

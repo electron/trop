@@ -45,16 +45,6 @@ export const labelClosedPR = async (
     `Labeling original PRs for PR at #${pr.number}`,
   );
 
-  const backportNumbers: number[] = [];
-  let match: RegExpExecArray | null;
-  const backportPattern = getBackportPattern();
-  while ((match = backportPattern.exec(pr.body))) {
-    // This might be the first or second capture group depending on if it's a link or not.
-    backportNumbers.push(
-      match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10),
-    );
-  }
-
   if (change === PRChange.CLOSE) {
     const targetLabel = PRStatus.TARGET + targetBranch;
     if (labelUtils.labelExistsOnPR(context, pr.number, targetLabel)) {
@@ -62,6 +52,7 @@ export const labelClosedPR = async (
     }
   }
 
+  const backportNumbers = getPRNumbersFromPRBody(pr);
   for (const prNumber of backportNumbers) {
     const labelToRemove = PRStatus.IN_FLIGHT + targetBranch;
 
@@ -82,6 +73,69 @@ export const isAuthorizedUser = async (context: Context, username: string) => {
   );
 
   return ['admin', 'write'].includes(data.permission);
+};
+
+export const getPRNumbersFromPRBody = (
+  pr: PullsGetResponse,
+  checkNotBot = false,
+) => {
+  const backportNumbers: number[] = [];
+
+  const isBot = pr.user.login !== getEnvVar('BOT_USER_NAME');
+  if (checkNotBot && isBot) return backportNumbers;
+
+  let match: RegExpExecArray | null;
+  const backportPattern = getBackportPattern();
+  while ((match = backportPattern.exec(pr.body))) {
+    // This might be the first or second capture group depending on if it's a link or not.
+    backportNumbers.push(
+      match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10),
+    );
+  }
+
+  return backportNumbers;
+};
+
+/**
+ *
+ * It can be the case that someone marks a PR for backporting via label or comment
+ * which it *itself* a backport.
+ *
+ * In this case, we should ensure that the PR being passed is the original backport.
+ * If it isn't, we should traverse via "Backport of #12345" links in each nested
+ * backport until we arrive at the backport which is the original to ensure
+ * optimal bookkeeping.
+ *
+ * TODO(codebytere): support multi-backports.
+ *
+ * @param context Context
+ * @param pr Pull Request
+ */
+const getOriginalBackportNumber = async (
+  context: Context,
+  pr: PullsGetResponse,
+) => {
+  let originalPR = pr;
+  let match: RegExpExecArray | null;
+
+  const backportPattern = getBackportPattern();
+  while ((match = backportPattern.exec(originalPR.body))) {
+    // This might be the first or second capture group depending on if it's a link or not.
+    const oldPRNumber = match[1]
+      ? parseInt(match[1], 10)
+      : parseInt(match[2], 10);
+
+    // Fetch the PR body this PR is marked as backporting.
+    const { data: pullRequest } = await context.github.pulls.get({
+      owner: 'electron',
+      repo: 'electron',
+      pull_number: oldPRNumber,
+    });
+
+    originalPR = pullRequest;
+  }
+
+  return originalPR.number;
 };
 
 export const isSemverMinorPR = async (
@@ -122,14 +176,19 @@ const checkUserHasWriteAccess = async (context: Context, user: string) => {
   return ['write', 'admin'].includes(userInfo.permission);
 };
 
-const createBackportComment = (pr: PullsGetResponse) => {
+const createBackportComment = async (
+  context: Context,
+  pr: PullsGetResponse,
+) => {
+  const prNumber = await getOriginalBackportNumber(context, pr);
+
   log(
     'createBackportComment',
     LogLevel.INFO,
-    `Creating backport comment for #${pr.number}`,
+    `Creating backport comment for #${prNumber}`,
   );
 
-  let body = `Backport of #${pr.number}\n\nSee that PR for details.`;
+  let body = `Backport of #${prNumber}\n\nSee that PR for details.`;
 
   const onelineMatch = pr.body.match(
     /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi,
@@ -347,12 +406,13 @@ export const backportImpl = async (
 
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('backportImpl', LogLevel.INFO, 'Creating Pull Request');
+
         const { data: newPr } = await context.github.pulls.create(
           context.repo({
             head: `${tempBranch}`,
             base: targetBranch,
             title: pr.title,
-            body: createBackportComment(pr),
+            body: await createBackportComment(context, pr),
             maintainer_can_modify: false,
           }),
         );
