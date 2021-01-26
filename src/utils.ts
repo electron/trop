@@ -45,16 +45,6 @@ export const labelClosedPR = async (
     `Labeling original PRs for PR at #${pr.number}`,
   );
 
-  const backportNumbers: number[] = [];
-  let match: RegExpExecArray | null;
-  const backportPattern = getBackportPattern();
-  while ((match = backportPattern.exec(pr.body))) {
-    // This might be the first or second capture group depending on if it's a link or not.
-    backportNumbers.push(
-      match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10),
-    );
-  }
-
   if (change === PRChange.CLOSE) {
     const targetLabel = PRStatus.TARGET + targetBranch;
     if (labelUtils.labelExistsOnPR(context, pr.number, targetLabel)) {
@@ -62,6 +52,7 @@ export const labelClosedPR = async (
     }
   }
 
+  const backportNumbers = getPRNumbersFromPRBody(pr);
   for (const prNumber of backportNumbers) {
     const labelToRemove = PRStatus.IN_FLIGHT + targetBranch;
 
@@ -82,6 +73,27 @@ export const isAuthorizedUser = async (context: Context, username: string) => {
   );
 
   return ['admin', 'write'].includes(data.permission);
+};
+
+export const getPRNumbersFromPRBody = (
+  pr: PullsGetResponse,
+  checkNotBot = false,
+) => {
+  const backportNumbers: number[] = [];
+
+  const isBot = pr.user.login !== getEnvVar('BOT_USER_NAME');
+  if (checkNotBot && isBot) return backportNumbers;
+
+  let match: RegExpExecArray | null;
+  const backportPattern = getBackportPattern();
+  while ((match = backportPattern.exec(pr.body))) {
+    // This might be the first or second capture group depending on if it's a link or not.
+    backportNumbers.push(
+      match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10),
+    );
+  }
+
+  return backportNumbers;
 };
 
 /**
@@ -395,13 +407,12 @@ export const backportImpl = async (
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('backportImpl', LogLevel.INFO, 'Creating Pull Request');
 
-        const comment = await createBackportComment(context, pr);
         const { data: newPr } = await context.github.pulls.create(
           context.repo({
             head: `${tempBranch}`,
             base: targetBranch,
             title: pr.title,
-            body: comment,
+            body: await createBackportComment(context, pr),
             maintainer_can_modify: false,
           }),
         );
