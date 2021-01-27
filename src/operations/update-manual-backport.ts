@@ -2,7 +2,12 @@ import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { Context } from 'probot';
-import { BACKPORT_REQUESTED_LABEL, SEMVER_PREFIX } from '../constants';
+import {
+  BACKPORT_LABEL,
+  BACKPORT_REQUESTED_LABEL,
+  SEMVER_PREFIX,
+  SKIP_CHECK_LABEL,
+} from '../constants';
 import { isSemverMinorPR } from '../utils';
 
 /**
@@ -50,6 +55,15 @@ export const updateManualBackport = async (
     );
     if (!removeLabelExists) {
       labelToRemove = PRStatus.TARGET + pr.base.ref;
+    }
+
+    const skipCheckLabelExists = await labelUtils.labelExistsOnPR(
+      context,
+      pr.number,
+      SKIP_CHECK_LABEL,
+    );
+    if (!skipCheckLabelExists) {
+      newPRLabelsToAdd.push(BACKPORT_LABEL);
     }
 
     // Propagate semver label from the original PR if the maintainer didn't add it.
