@@ -81,7 +81,7 @@ export const getPRNumbersFromPRBody = (
 ) => {
   const backportNumbers: number[] = [];
 
-  const isBot = pr.user.login !== getEnvVar('BOT_USER_NAME');
+  const isBot = pr.user.login === getEnvVar('BOT_USER_NAME');
   if (checkNotBot && isBot) return backportNumbers;
 
   let match: RegExpExecArray | null;
