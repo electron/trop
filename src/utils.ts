@@ -311,7 +311,7 @@ export const backportImpl = async (
             pull_number: pr.number,
           }),
         )
-      ).data.map((commit: PullsListCommitsResponseItem) => commit.sha!);
+      ).data.map((commit: PullsListCommitsResponseItem) => commit.sha);
 
       // No commits == WTF
       if (commits.length === 0) {
@@ -449,8 +449,16 @@ export const backportImpl = async (
           await labelUtils.removeLabel(context, pr.number, labelToRemove);
         }
 
+        // TODO(codebytere): getOriginalBackportNumber doesn't support multi-backports yet,
+        // so only try if the backport is a single backport.
+        const backportNumbers = getPRNumbersFromPRBody(pr);
+        const originalPRNumber =
+          backportNumbers.length === 1
+            ? await getOriginalBackportNumber(context, pr)
+            : pr.number;
+
         if (labelToAdd) {
-          await labelUtils.addLabels(context, pr.number!, [labelToAdd]);
+          await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
         }
 
         const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];
@@ -471,7 +479,7 @@ export const backportImpl = async (
           labelsToAdd.push(semverLabel.name);
         }
 
-        await labelUtils.addLabels(context, newPr.number!, labelsToAdd);
+        await labelUtils.addLabels(context, newPr.number, labelsToAdd);
 
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
@@ -551,7 +559,13 @@ export const backportImpl = async (
         await labelUtils.removeLabel(context, pr.number, labelToRemove);
 
         const labelToAdd = PRStatus.NEEDS_MANUAL + targetBranch;
-        await labelUtils.addLabels(context, pr.number, [labelToAdd]);
+        const originalBackportNumber = await getOriginalBackportNumber(
+          context,
+          pr,
+        );
+        await labelUtils.addLabels(context, originalBackportNumber, [
+          labelToAdd,
+        ]);
       }
 
       if (purpose === BackportPurpose.Check) {
