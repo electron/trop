@@ -436,7 +436,11 @@ export const backportImpl = async (
           );
         }
 
-        log('backportImpl', LogLevel.INFO, 'Adding breadcrumb comment');
+        log(
+          'backportImpl',
+          LogLevel.INFO,
+          `Adding breadcrumb comment to ${pr.number}`,
+        );
         await context.github.issues.createComment(
           context.repo({
             issue_number: pr.number,
