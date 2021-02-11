@@ -299,80 +299,20 @@ export const backportImpl = async (
         ],
       });
 
-      // Get list of commits.
-      log(
-        'backportImpl',
-        LogLevel.INFO,
-        `Getting rev list from: ${pr.base.sha}..${pr.head.sha}`,
-      );
-      const commits = (
-        await context.github.pulls.listCommits(
-          context.repo({
-            pull_number: pr.number,
-          }),
-        )
-      ).data.map((commit: PullsListCommitsResponseItem) => commit.sha);
+      // Fetch the merged squash commit.
+      log('backportImpl', LogLevel.INFO, `Fetching squash commit details`);
 
-      // No commits == WTF
-      if (commits.length === 0) {
-        log(
-          'backportImpl',
-          LogLevel.INFO,
-          'Found no commits to backport - aborting backport process',
-        );
-        return;
-      }
-
-      // Over 240 commits is probably the limit from GitHub so let's not bother.
-      if (commits.length >= 240) {
-        log(
-          'backportImpl',
-          LogLevel.ERROR,
-          `Too many commits (${commits.length})...backport will not be performed.`,
-        );
-        await context.github.issues.createComment(
-          context.repo({
-            issue_number: pr.number,
-            body:
-              'This PR has exceeded the automatic backport commit limit \
-    and must be performed manually.',
-          }),
-        );
-
-        return;
-      }
-
-      log(
-        'backportImpl',
-        LogLevel.INFO,
-        `Found ${commits.length} commits to backport - requesting details now.`,
-      );
-      const patches: string[] = new Array(commits.length).fill('');
-      const q = makeQueue({
-        concurrency: 5,
+      const patchUrl = `https://api.github.com/repos/${slug}/commits/${pr.merge_commit_sha}`;
+      const patchBody = await fetch(patchUrl, {
+        headers: {
+          Accept: 'application/vnd.github.VERSION.patch',
+          Authorization: `token ${repoAccessToken}`,
+        },
       });
-      q.stop();
 
-      for (const [i, commit] of commits.entries()) {
-        q.push(async () => {
-          const patchUrl = `https://api.github.com/repos/${slug}/commits/${commit}`;
-          const patchBody = await fetch(patchUrl, {
-            headers: {
-              Accept: 'application/vnd.github.VERSION.patch',
-              Authorization: `token ${repoAccessToken}`,
-            },
-          });
-          patches[i] = await patchBody.text();
-          log(
-            'backportImpl',
-            LogLevel.INFO,
-            `Got patch (${i + 1}/${commits.length})`,
-          );
-        });
-      }
+      const patch = await patchBody.text();
 
-      await new Promise((r) => q.start(r));
-      log('backportImpl', LogLevel.INFO, 'Got all commit info');
+      log('backportImpl', LogLevel.INFO, 'Got squash commit details');
 
       // Create temporary branch name.
       const sanitizedTitle = pr.title
@@ -393,7 +333,7 @@ export const backportImpl = async (
         slug,
         targetBranch,
         tempBranch,
-        patches,
+        patch,
         targetRemote: 'target_repo',
         shouldPush: purpose === BackportPurpose.ExecuteBackport,
       });

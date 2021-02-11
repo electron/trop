@@ -17,6 +17,6 @@ export interface BackportOptions {
   targetRemote: string;
   targetBranch: string;
   tempBranch: string;
-  patches: string[];
+  patch: string;
   shouldPush: boolean;
 }
