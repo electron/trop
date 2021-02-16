@@ -438,7 +438,7 @@ const probotHandler = async (robot: Application) => {
           await context.github.issues.createComment(
             context.repo({
               body:
-                'The backport process for this PR has been manually initiated, here we go! :D',
+                'The backport process for this PR has been manually initiated - here we go! :D',
               issue_number: issue.number,
             }),
           );
@@ -453,7 +453,7 @@ const probotHandler = async (robot: Application) => {
           const branches = targetBranches.split(',').map((b) => b.trim());
           for (const branch of branches) {
             robot.log(
-              `Initiating backport to ${branch} from 'backport-to' comment`,
+              `Initiating backport to \`${branch}\` from 'backport-to' comment`,
             );
 
             if (!branch.trim()) continue;
@@ -468,7 +468,7 @@ const probotHandler = async (robot: Application) => {
             } catch (err) {
               await context.github.issues.createComment(
                 context.repo({
-                  body: `The branch you provided "${branch}" does not appear to exist :cry:`,
+                  body: `The branch you provided \`${branch}\` does not appear to exist.`,
                   issue_number: issue.number,
                 }),
               );
@@ -485,7 +485,7 @@ const probotHandler = async (robot: Application) => {
                 );
                 await context.github.issues.createComment(
                   context.repo({
-                    body: `${branch} is no longer supported - no backport will be initiated.`,
+                    body: `\`${branch}\` is no longer supported - no backport will be initiated.`,
                     issue_number: issue.number,
                   }),
                 );
@@ -498,8 +498,7 @@ const probotHandler = async (robot: Application) => {
             );
             await context.github.issues.createComment(
               context.repo({
-                body: `The backport process for this PR has been manually initiated -
-sending your commits to "${branch}"!`,
+                body: `The backport process for this PR has been manually initiated - sending your PR to \`${branch}\`!`,
                 issue_number: issue.number,
               }),
             );
