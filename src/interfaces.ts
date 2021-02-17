@@ -1,3 +1,7 @@
+import { PullsGetResponse } from '@octokit/rest';
+import { Context } from 'probot';
+import { BackportPurpose } from './enums';
+
 export interface RemotesOptions {
   dir: string;
   remotes: {
@@ -17,6 +21,17 @@ export interface BackportOptions {
   targetRemote: string;
   targetBranch: string;
   tempBranch: string;
-  patch: string;
+  patches: string[];
   shouldPush: boolean;
+}
+
+export interface TryBackportOptions {
+  context?: Context;
+  repoAccessToken: string;
+  purpose: BackportPurpose;
+  pr: PullsGetResponse;
+  dir: string;
+  slug: string;
+  targetBranch: string;
+  tempBranch: string;
 }

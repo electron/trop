@@ -18,7 +18,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
   log(
     'backportCommitsToBranch',
     LogLevel.INFO,
-    `Backporting squash commit to ${options.targetBranch}`,
+    `Backporting ${options.patches.length} commits to ${options.targetBranch}`,
   );
 
   const git = simpleGit(options.dir);
@@ -37,21 +37,27 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       LogLevel.ERROR,
       `Failed to checkout new backport branch`,
     );
+
+    return false;
   }
 
   // Cherry pick the commits to be backported.
   const patchPath = `${options.dir}.patch`;
 
-  try {
-    await fs.writeFile(patchPath, options.patch, 'utf8');
-    await git.raw(['am', '-3', patchPath]);
-    await fs.remove(patchPath);
-  } catch (error) {
-    log(
-      'backportCommitsToBranch',
-      LogLevel.ERROR,
-      `Failed to apply patches to ${options.targetBranch}`,
-    );
+  for (const patch of options.patches) {
+    try {
+      await fs.writeFile(patchPath, patch, 'utf8');
+      await git.raw(['am', '-3', patchPath]);
+      await fs.remove(patchPath);
+    } catch (error) {
+      log(
+        'backportCommitsToBranch',
+        LogLevel.ERROR,
+        `Failed to apply patch to ${options.targetBranch}`,
+      );
+
+      return false;
+    }
   }
 
   // Push the commit to the target branch on the remote.
@@ -60,5 +66,6 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       '--set-upstream': true,
     });
   }
+
   return { dir: options.dir };
 };

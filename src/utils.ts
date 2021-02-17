@@ -29,6 +29,7 @@ import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
+import { TryBackportOptions } from './interfaces';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
@@ -63,6 +64,148 @@ export const labelClosedPR = async (
 
     await labelUtils.removeLabel(context, prNumber, labelToRemove);
   }
+};
+
+const tryBackportAllCommits = async (opts: TryBackportOptions) => {
+  log(
+    'backportImpl',
+    LogLevel.INFO,
+    `Getting rev list from: ${opts.pr.base.sha}..${opts.pr.head.sha}`,
+  );
+
+  const commits = (
+    await opts.context!.github.pulls.listCommits(
+      opts.context!.repo({ pull_number: opts.pr.number }),
+    )
+  ).data.map((commit: PullsListCommitsResponseItem) => commit.sha);
+
+  if (commits.length === 0) {
+    log(
+      'backportImpl',
+      LogLevel.INFO,
+      'Found no commits to backport - aborting backport process',
+    );
+    return false;
+  }
+
+  // Over 240 commits is probably the limit from GitHub so let's not bother.
+  if (commits.length >= 240) {
+    log(
+      'backportImpl',
+      LogLevel.ERROR,
+      `Too many commits (${commits.length})...backport will not be performed.`,
+    );
+    await opts.context!.github.issues.createComment(
+      opts.context!.repo({
+        issue_number: opts.pr.number,
+        body:
+          'This PR has exceeded the automatic backport commit limit \
+and must be performed manually.',
+      }),
+    );
+
+    return false;
+  }
+
+  log(
+    'backportImpl',
+    LogLevel.INFO,
+    `Found ${commits.length} commits to backport - requesting details now.`,
+  );
+
+  const patches: string[] = new Array(commits.length).fill('');
+  const q = makeQueue({ concurrency: 5 });
+  q.stop();
+
+  for (const [i, commit] of commits.entries()) {
+    q.push(async () => {
+      const patchUrl = `https://api.github.com/repos/${opts.slug}/commits/${commit}`;
+      const patchBody = await fetch(patchUrl, {
+        headers: {
+          Accept: 'application/vnd.github.VERSION.patch',
+          Authorization: `token ${opts.repoAccessToken}`,
+        },
+      });
+      patches[i] = await patchBody.text();
+      log(
+        'backportImpl',
+        LogLevel.INFO,
+        `Got patch (${i + 1}/${commits.length})`,
+      );
+    });
+  }
+
+  await new Promise((r) => q.start(r));
+  log('backportImpl', LogLevel.INFO, 'Got all commit info');
+
+  log(
+    'backportImpl',
+    LogLevel.INFO,
+    `Checking out target: "target_repo/${opts.targetBranch}" to temp: "${opts.tempBranch}"`,
+  );
+
+  const success = await backportCommitsToBranch({
+    dir: opts.dir,
+    slug: opts.slug,
+    targetBranch: opts.targetBranch,
+    tempBranch: opts.targetBranch,
+    patches,
+    targetRemote: 'target_repo',
+    shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
+  });
+
+  if (success) {
+    log(
+      'backportImpl',
+      LogLevel.INFO,
+      'Cherry pick success - pushed up to target_repo',
+    );
+  }
+
+  return success;
+};
+
+const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
+  // Fetch the merged squash commit.
+  log('backportImpl', LogLevel.INFO, `Fetching squash commit details`);
+
+  const patchUrl = `https://api.github.com/repos/${opts.slug}/commits/${opts.pr.merge_commit_sha}`;
+  const patchBody = await fetch(patchUrl, {
+    headers: {
+      Accept: 'application/vnd.github.VERSION.patch',
+      Authorization: `token ${opts.repoAccessToken}`,
+    },
+  });
+
+  const patch = await patchBody.text();
+
+  log('backportImpl', LogLevel.INFO, 'Got squash commit details');
+
+  log(
+    'backportImpl',
+    LogLevel.INFO,
+    `Checking out target: "target_repo/${opts.targetBranch}" to temp: "${opts.tempBranch}"`,
+  );
+
+  const success = await backportCommitsToBranch({
+    dir: opts.dir,
+    slug: opts.slug,
+    targetBranch: opts.targetBranch,
+    tempBranch: opts.tempBranch,
+    patches: [patch],
+    targetRemote: 'target_repo',
+    shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
+  });
+
+  if (success) {
+    log(
+      'backportImpl',
+      LogLevel.INFO,
+      'Cherry pick success - pushed up to target_repo',
+    );
+  }
+
+  return success;
 };
 
 export const isAuthorizedUser = async (context: Context, username: string) => {
@@ -299,21 +442,6 @@ export const backportImpl = async (
         ],
       });
 
-      // Fetch the merged squash commit.
-      log('backportImpl', LogLevel.INFO, `Fetching squash commit details`);
-
-      const patchUrl = `https://api.github.com/repos/${slug}/commits/${pr.merge_commit_sha}`;
-      const patchBody = await fetch(patchUrl, {
-        headers: {
-          Accept: 'application/vnd.github.VERSION.patch',
-          Authorization: `token ${repoAccessToken}`,
-        },
-      });
-
-      const patch = await patchBody.text();
-
-      log('backportImpl', LogLevel.INFO, 'Got squash commit details');
-
       // Create temporary branch name.
       const sanitizedTitle = pr.title
         .replace(/\*/g, 'x')
@@ -321,28 +449,40 @@ export const backportImpl = async (
         .replace(/[^a-z0-9_]+/g, '-');
       const tempBranch = `trop/${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
 
-      log(
-        'backportImpl',
-        LogLevel.INFO,
-        `Checking out target: "target_repo/${targetBranch}" to temp: "${tempBranch}"`,
-      );
-      log('backportImpl', LogLevel.INFO, 'Will start backporting now');
-
-      await backportCommitsToBranch({
+      // First try to backport all commits in the original PR.
+      let success = await tryBackportAllCommits({
+        context,
+        repoAccessToken,
+        purpose,
+        pr,
         dir,
         slug,
         targetBranch,
         tempBranch,
-        patch,
-        targetRemote: 'target_repo',
-        shouldPush: purpose === BackportPurpose.ExecuteBackport,
       });
 
-      log(
-        'backportImpl',
-        LogLevel.INFO,
-        'Cherry pick success - pushed up to target_repo',
-      );
+      // If that fails, try to backport the squash commit.
+      if (!success) {
+        success = await tryBackportSquashCommit({
+          repoAccessToken,
+          purpose,
+          pr,
+          dir,
+          slug,
+          targetBranch,
+          tempBranch,
+        });
+      }
+
+      // Bail if neither succeeded.
+      if (!success) {
+        log(
+          'backportImpl',
+          LogLevel.ERROR,
+          `Cherry picking commits to branch failed`,
+        );
+        return;
+      }
 
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('backportImpl', LogLevel.INFO, 'Creating Pull Request');
