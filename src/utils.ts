@@ -135,7 +135,7 @@ and must be performed manually.',
     });
   }
 
-  await new Promise((r) => q.start(r));
+  await new Promise((resolve, reject) => q.start(err ? reject(err) : resolve()));
   log('backportImpl', LogLevel.INFO, 'Got all commit info');
 
   log(
