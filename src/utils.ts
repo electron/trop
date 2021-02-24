@@ -135,7 +135,9 @@ and must be performed manually.',
     });
   }
 
-  await new Promise((resolve, reject) => q.start(err ? reject(err) : resolve()));
+  await new Promise<void>((resolve, reject) =>
+    q.start((err) => (err ? reject(err) : resolve())),
+  );
   log('backportImpl', LogLevel.INFO, 'Got all commit info');
 
   log(
@@ -168,6 +170,11 @@ and must be performed manually.',
 const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
   // Fetch the merged squash commit.
   log('backportImpl', LogLevel.INFO, `Fetching squash commit details`);
+
+  if (!opts.pr.merged) {
+    log('backportImpl', LogLevel.INFO, `PR was not squash merged - aborting`);
+    return false;
+  }
 
   const patchUrl = `https://api.github.com/repos/${opts.slug}/commits/${opts.pr.merge_commit_sha}`;
   const patchBody = await fetch(patchUrl, {
