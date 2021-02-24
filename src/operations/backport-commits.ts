@@ -24,19 +24,40 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
   const git = simpleGit(options.dir);
 
   // Create branch to cherry-pick the commits to.
-  await git.checkout(`target_repo/${options.targetBranch}`);
-  await git.pull('target_repo', options.targetBranch);
-  await git.checkoutBranch(
-    options.tempBranch,
-    `target_repo/${options.targetBranch}`,
-  );
+  try {
+    await git.checkout(`target_repo/${options.targetBranch}`);
+    await git.pull('target_repo', options.targetBranch);
+    await git.checkoutBranch(
+      options.tempBranch,
+      `target_repo/${options.targetBranch}`,
+    );
+  } catch (error) {
+    log(
+      'backportCommitsToBranch',
+      LogLevel.ERROR,
+      `Failed to checkout new backport branch`,
+    );
+
+    return false;
+  }
 
   // Cherry pick the commits to be backported.
   const patchPath = `${options.dir}.patch`;
+
   for (const patch of options.patches) {
-    await fs.writeFile(patchPath, patch, 'utf8');
-    await git.raw(['am', '-3', patchPath]);
-    await fs.remove(patchPath);
+    try {
+      await fs.writeFile(patchPath, patch, 'utf8');
+      await git.raw(['am', '-3', patchPath]);
+      await fs.remove(patchPath);
+    } catch (error) {
+      log(
+        'backportCommitsToBranch',
+        LogLevel.ERROR,
+        `Failed to apply patch to ${options.targetBranch}`,
+      );
+
+      return false;
+    }
   }
 
   // Push the commit to the target branch on the remote.
@@ -45,5 +66,6 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       '--set-upstream': true,
     });
   }
+
   return { dir: options.dir };
 };
