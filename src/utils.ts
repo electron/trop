@@ -481,14 +481,13 @@ export const backportImpl = async (
         });
       }
 
-      // Bail if neither succeeded.
+      // Note if neither succeeded.
       if (!success) {
         log(
           'backportImpl',
           LogLevel.ERROR,
           `Cherry picking commits to branch failed`,
         );
-        return;
       }
 
       if (purpose === BackportPurpose.ExecuteBackport) {
