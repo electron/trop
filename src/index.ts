@@ -7,7 +7,7 @@ import {
   labelClosedPR,
 } from './utils';
 import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
-import { CHECK_PREFIX, SKIP_CHECK_LABEL } from './constants';
+import { CHECK_PREFIX, NO_BACKPORT_LABEL, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
 import {
@@ -20,7 +20,12 @@ import {
 } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
-import { updateBackportValidityCheck } from './utils/checks-util';
+import {
+  getBackportInformationCheck,
+  queueBackportInformationCheck,
+  updateBackportInformationCheck,
+  updateBackportValidityCheck,
+} from './utils/checks-util';
 
 const probotHandler = async (robot: Application) => {
   const handleClosedPRLabels = async (
@@ -130,6 +135,73 @@ const probotHandler = async (robot: Application) => {
     if (!payload.pull_request.merged) {
       await runCheck(context, payload.pull_request as any);
     }
+  };
+
+  /**
+   * Checks that a PR done to `master` contains the required
+   * backport information, i.e.: at least a `no-backport` or
+   * a `target/XYZ` labels.
+   *
+   * @param context
+   * @returns
+   */
+  const backportInformationCheck = async (context: Context) => {
+    const pr: PullsGetResponse = context.payload.pull_request;
+
+    if (pr.base.ref !== 'master') {
+      return;
+    }
+
+    let backportCheck = await getBackportInformationCheck(context);
+
+    if (!backportCheck) {
+      await queueBackportInformationCheck(context);
+      backportCheck = await getBackportInformationCheck(context);
+    }
+
+    const labels = pr.labels;
+    const targets = [];
+    let noBackport = false;
+
+    for (const label of labels) {
+      const name = label.name;
+
+      if (name.startsWith(PRStatus.TARGET)) {
+        targets.push(name);
+      }
+
+      if (name === NO_BACKPORT_LABEL) {
+        noBackport = true;
+      }
+    }
+
+    if (targets.length > 0 && noBackport) {
+      await updateBackportInformationCheck(context, backportCheck, {
+        title: 'Conflicting Backport Information',
+        summary:
+          'The PR has a "no-backport" and at least one "target/x-y-z" labels. Impossible to determine backport action.',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+
+      return;
+    }
+
+    if (targets.length === 0 && !noBackport) {
+      await updateBackportInformationCheck(context, backportCheck, {
+        title: 'Missing Backport Information',
+        summary:
+          'This PR is missing the required backport information. It should have a "no-backport" or a "target/x-y-z" label.',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+
+      return;
+    }
+
+    await updateBackportInformationCheck(context, backportCheck, {
+      title: 'Backport Information Provided',
+      summary: 'This PR contains the required  backport information.',
+      conclusion: CheckRunStatus.SUCCESS,
+    });
   };
 
   const VALID_BACKPORT_CHECK_NAME = 'Valid Backport';
@@ -327,6 +399,18 @@ const probotHandler = async (robot: Application) => {
   robot.on('pull_request.reopened', maybeRunCheck);
   robot.on('pull_request.labeled', maybeRunCheck);
   robot.on('pull_request.unlabeled', maybeRunCheck);
+
+  robot.on(
+    [
+      'pull_request.opened',
+      'pull_request.reopened',
+      'pull_request.edited',
+      'pull_request.synchronize',
+      'pull_request.labeled',
+      'pull_request.unlabeled',
+    ],
+    backportInformationCheck,
+  );
 
   // Backport pull requests to labeled targets when PR is merged.
   robot.on('pull_request.closed', async (context: Context) => {
