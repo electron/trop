@@ -1,5 +1,5 @@
 import { Context } from 'probot';
-import { PullsGetResponseLabelsItem } from '@octokit/rest';
+import { Octokit } from '@octokit/rest';
 import { log } from './log-util';
 import { LogLevel } from '../enums';
 
@@ -41,7 +41,7 @@ export const removeLabel = async (
 };
 
 export const labelToTargetBranch = (
-  label: PullsGetResponseLabelsItem,
+  label: Octokit.PullsGetResponseLabelsItem,
   prefix: string,
 ) => {
   return label.name.replace(prefix, '');

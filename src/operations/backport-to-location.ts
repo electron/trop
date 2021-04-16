@@ -3,7 +3,7 @@ import { PRStatus, BackportPurpose, LogLevel } from '../enums';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 import { backportImpl } from '../utils';
-import { PullsGetResponseLabelsItem } from '@octokit/rest';
+import { Octokit } from '@octokit/rest';
 
 /**
  * Performs a backport to a specified label representing a branch.
@@ -15,7 +15,7 @@ import { PullsGetResponseLabelsItem } from '@octokit/rest';
 export const backportToLabel = async (
   robot: Application,
   context: Context,
-  label: PullsGetResponseLabelsItem,
+  label: Octokit.PullsGetResponseLabelsItem,
 ) => {
   log(
     'backportToLabel',

@@ -1,4 +1,4 @@
-import { PullsGetResponse } from '@octokit/rest';
+import { Octokit } from '@octokit/rest';
 import { Context } from 'probot';
 import { BackportPurpose } from './enums';
 
@@ -29,7 +29,7 @@ export interface TryBackportOptions {
   context?: Context;
   repoAccessToken: string;
   purpose: BackportPurpose;
-  pr: PullsGetResponse;
+  pr: Octokit.PullsGetResponse;
   dir: string;
   slug: string;
   targetBranch: string;

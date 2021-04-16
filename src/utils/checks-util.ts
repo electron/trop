@@ -1,10 +1,10 @@
 import { Context } from 'probot';
 import { CheckRunStatus } from '../enums';
-import { ChecksListForRefResponseCheckRunsItem } from '@octokit/rest';
+import { Octokit } from '@octokit/rest';
 
 export async function updateBackportValidityCheck(
   context: Context,
-  checkRun: ChecksListForRefResponseCheckRunsItem,
+  checkRun: Octokit.ChecksListForRefResponseCheckRunsItem,
   statusItems: {
     conclusion: CheckRunStatus;
     title: string;
