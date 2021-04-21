@@ -1,14 +1,11 @@
 import { Context } from 'probot';
 import { CheckRunStatus } from '../enums';
-import {
-  ChecksListForRefResponseCheckRunsItem,
-  PullsGetResponse,
-} from '@octokit/rest';
+import { Octokit } from '@octokit/rest';
 import { BACKPORT_INFORMATION_CHECK } from '../constants';
 
 export async function updateBackportValidityCheck(
   context: Context,
-  checkRun: ChecksListForRefResponseCheckRunsItem,
+  checkRun: Octokit.ChecksListForRefResponseCheckRunsItem,
   statusItems: {
     conclusion: CheckRunStatus;
     title: string;
@@ -32,7 +29,7 @@ export async function updateBackportValidityCheck(
 }
 
 export async function getBackportInformationCheck(context: Context) {
-  const pr: PullsGetResponse = context.payload.pull_request;
+  const pr: Octokit.PullsGetResponse = context.payload.pull_request;
   const allChecks = await context.github.checks.listForRef(
     context.repo({
       ref: pr.head.sha,
@@ -49,7 +46,7 @@ export async function getBackportInformationCheck(context: Context) {
 
 export async function updateBackportInformationCheck(
   context: Context,
-  backportCheck: ChecksListForRefResponseCheckRunsItem,
+  backportCheck: Octokit.ChecksListForRefResponseCheckRunsItem,
   statusItems: {
     conclusion: CheckRunStatus;
     title: string;
@@ -72,7 +69,7 @@ export async function updateBackportInformationCheck(
 }
 
 export async function queueBackportInformationCheck(context: Context) {
-  const pr: PullsGetResponse = context.payload.pull_request;
+  const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
   await context.github.checks.create(
     context.repo({

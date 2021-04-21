@@ -1,11 +1,5 @@
 import { Application, Context } from 'probot';
-import {
-  PullsGetResponse,
-  ChecksListForRefResponseCheckRunsItem,
-  PullsGetResponseBase,
-  ChecksUpdateParams,
-  PullsListCommitsResponseItem,
-} from '@octokit/rest';
+import { Octokit } from '@octokit/rest';
 import fetch from 'node-fetch';
 import * as fs from 'fs-extra';
 import { IQueue } from 'queue';
@@ -36,7 +30,7 @@ const { parse: parseDiff } = require('what-the-diff');
 
 export const labelClosedPR = async (
   context: Context,
-  pr: PullsGetResponse,
+  pr: Octokit.PullsGetResponse,
   targetBranch: String,
   change: PRChange,
 ) => {
@@ -77,7 +71,7 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
     await opts.context!.github.pulls.listCommits(
       opts.context!.repo({ pull_number: opts.pr.number }),
     )
-  ).data.map((commit: PullsListCommitsResponseItem) => commit.sha);
+  ).data.map((commit: Octokit.PullsListCommitsResponseItem) => commit.sha);
 
   if (commits.length === 0) {
     log(
@@ -226,7 +220,7 @@ export const isAuthorizedUser = async (context: Context, username: string) => {
 };
 
 export const getPRNumbersFromPRBody = (
-  pr: PullsGetResponse,
+  pr: Octokit.PullsGetResponse,
   checkNotBot = false,
 ) => {
   const backportNumbers: number[] = [];
@@ -263,7 +257,7 @@ export const getPRNumbersFromPRBody = (
  */
 const getOriginalBackportNumber = async (
   context: Context,
-  pr: PullsGetResponse,
+  pr: Octokit.PullsGetResponse,
 ) => {
   let originalPR = pr;
   let match: RegExpExecArray | null;
@@ -290,7 +284,7 @@ const getOriginalBackportNumber = async (
 
 export const isSemverMinorPR = async (
   context: Context,
-  pr: PullsGetResponse,
+  pr: Octokit.PullsGetResponse,
 ) => {
   log(
     'isSemverMinorPR',
@@ -328,7 +322,7 @@ const checkUserHasWriteAccess = async (context: Context, user: string) => {
 
 const createBackportComment = async (
   context: Context,
-  pr: PullsGetResponse,
+  pr: Octokit.PullsGetResponse,
 ) => {
   const prNumber = await getOriginalBackportNumber(context, pr);
 
@@ -387,7 +381,7 @@ export const backportImpl = async (
     }
   }
 
-  const base: PullsGetResponseBase = context.payload.pull_request.base;
+  const base: Octokit.PullsGetResponseBase = context.payload.pull_request.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
   const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
   log('backportImpl', LogLevel.INFO, `Queuing ${bp} for "${slug}"`);
@@ -401,7 +395,7 @@ export const backportImpl = async (
     );
 
     return allChecks.data.check_runs.find(
-      (run: ChecksListForRefResponseCheckRunsItem) => {
+      (run: Octokit.ChecksListForRefResponseCheckRunsItem) => {
         return run.name === `${CHECK_PREFIX}${targetBranch}`;
       },
     );
@@ -428,7 +422,7 @@ export const backportImpl = async (
 
       const repoAccessToken = await getRepoToken(robot, context);
 
-      const pr: PullsGetResponse = context.payload.pull_request;
+      const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
       // Set up empty repo on master.
       const { dir } = await initRepo({
@@ -662,7 +656,7 @@ export const backportImpl = async (
         const checkRun = await getCheckRun();
         if (checkRun) {
           const mdSep = '``````````````````````````````';
-          const updateOpts: ChecksUpdateParams = context.repo({
+          const updateOpts: Octokit.ChecksUpdateParams = context.repo({
             check_run_id: checkRun.id,
             name: checkRun.name,
             conclusion: 'neutral' as 'neutral',
