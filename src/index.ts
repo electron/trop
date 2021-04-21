@@ -10,10 +10,7 @@ import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
 import { CHECK_PREFIX, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
-import {
-  ChecksListForRefResponseCheckRunsItem,
-  PullsGetResponse,
-} from '@octokit/rest';
+import { Octokit } from '@octokit/rest';
 import {
   backportToLabel,
   backportToBranch,
@@ -25,7 +22,7 @@ import { updateBackportValidityCheck } from './utils/checks-util';
 const probotHandler = async (robot: Application) => {
   const handleClosedPRLabels = async (
     context: Context,
-    pr: PullsGetResponse,
+    pr: Octokit.PullsGetResponse,
     change: PRChange,
   ) => {
     for (const label of pr.labels) {
@@ -38,7 +35,10 @@ const probotHandler = async (robot: Application) => {
     }
   };
 
-  const backportAllLabels = (context: Context, pr: PullsGetResponse) => {
+  const backportAllLabels = (
+    context: Context,
+    pr: Octokit.PullsGetResponse,
+  ) => {
     for (const label of pr.labels) {
       context.payload.pull_request = context.payload.pull_request || pr;
       backportToLabel(robot, context, label);
@@ -47,7 +47,7 @@ const probotHandler = async (robot: Application) => {
 
   const handleTropBackportClosed = async (
     context: Context,
-    pr: PullsGetResponse,
+    pr: Octokit.PullsGetResponse,
     change: PRChange,
   ) => {
     const closeType = change === PRChange.MERGE ? 'merged' : 'closed';
@@ -66,7 +66,7 @@ const probotHandler = async (robot: Application) => {
     }
   };
 
-  const runCheck = async (context: Context, pr: PullsGetResponse) => {
+  const runCheck = async (context: Context, pr: Octokit.PullsGetResponse) => {
     const allChecks = await context.github.checks.listForRef(
       context.repo({
         ref: pr.head.sha,
@@ -176,16 +176,16 @@ const probotHandler = async (robot: Application) => {
       if (pr.base.ref !== 'master') {
         if (!checkRun) {
           robot.log(`Queueing new check run for #${pr.number}`);
-          checkRun = ((
-            await context.github.checks.create(
-              context.repo({
-                name: VALID_BACKPORT_CHECK_NAME,
-                head_sha: pr.head.sha,
-                status: 'queued' as 'queued',
-                details_url: 'https://github.com/electron/trop',
-              }),
-            )
-          ).data as any) as ChecksListForRefResponseCheckRunsItem;
+          const response = await context.github.checks.create(
+            context.repo({
+              name: VALID_BACKPORT_CHECK_NAME,
+              head_sha: pr.head.sha,
+              status: 'queued' as 'queued',
+              details_url: 'https://github.com/electron/trop',
+            }),
+          );
+
+          checkRun = (response.data as any) as Octokit.ChecksListForRefResponseCheckRunsItem;
         }
 
         // If a branch is targeting something that isn't master it might not be a backport;
@@ -330,7 +330,7 @@ const probotHandler = async (robot: Application) => {
 
   // Backport pull requests to labeled targets when PR is merged.
   robot.on('pull_request.closed', async (context: Context) => {
-    const pr: PullsGetResponse = context.payload.pull_request;
+    const pr: Octokit.PullsGetResponse = context.payload.pull_request;
     const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
     if (pr.merged) {
       if (oldPRNumbers.length > 0) {
