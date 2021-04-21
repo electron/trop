@@ -242,7 +242,7 @@ describe('trop', () => {
       expect(updatePayload).toMatchObject({
         title: 'Conflicting Backport Information',
         summary:
-          'The PR has a "no-backport" and at least one "target/x-y-z" labels. Impossible to determine backport action.',
+          'The PR has a "no-backport" and at least one "target/x-y-z" label. Impossible to determine backport action.',
         conclusion: CheckRunStatus.FAILURE,
       });
     });

@@ -114,8 +114,8 @@ const probotHandler = async (robot: Application) => {
     for (const checkRun of checkRuns) {
       if (
         !pr.labels.find(
-          (label) =>
-            label.name ===
+          (prLabel: any) =>
+            prLabel.name ===
             `${PRStatus.TARGET}${checkRun.name.replace(CHECK_PREFIX, '')}`,
         )
       ) {
@@ -146,7 +146,7 @@ const probotHandler = async (robot: Application) => {
    * @returns
    */
   const backportInformationCheck = async (context: Context) => {
-    const pr: PullsGetResponse = context.payload.pull_request;
+    const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
     if (pr.base.ref !== 'master') {
       return;
@@ -159,34 +159,28 @@ const probotHandler = async (robot: Application) => {
       backportCheck = await getBackportInformationCheck(context);
     }
 
-    const labels = pr.labels;
-    const targets = [];
-    let noBackport = false;
+    const isNoBackport = pr.labels.some(
+      (prLabel: any) => prLabel.name === NO_BACKPORT_LABEL,
+    );
+    const hasTarget = pr.labels.some(
+      (prLabel: any) =>
+        prLabel.name.startsWith(PRStatus.TARGET) ||
+        prLabel.name.startsWith(PRStatus.IN_FLIGHT) ||
+        prLabel.name.startsWith(PRStatus.MERGED),
+    );
 
-    for (const label of labels) {
-      const name = label.name;
-
-      if (name.startsWith(PRStatus.TARGET)) {
-        targets.push(name);
-      }
-
-      if (name === NO_BACKPORT_LABEL) {
-        noBackport = true;
-      }
-    }
-
-    if (targets.length > 0 && noBackport) {
+    if (hasTarget && isNoBackport) {
       await updateBackportInformationCheck(context, backportCheck, {
         title: 'Conflicting Backport Information',
         summary:
-          'The PR has a "no-backport" and at least one "target/x-y-z" labels. Impossible to determine backport action.',
+          'The PR has a "no-backport" and at least one "target/x-y-z" label. Impossible to determine backport action.',
         conclusion: CheckRunStatus.FAILURE,
       });
 
       return;
     }
 
-    if (targets.length === 0 && !noBackport) {
+    if (!hasTarget && !isNoBackport) {
       await updateBackportInformationCheck(context, backportCheck, {
         title: 'Missing Backport Information',
         summary:
@@ -404,8 +398,6 @@ const probotHandler = async (robot: Application) => {
     [
       'pull_request.opened',
       'pull_request.reopened',
-      'pull_request.edited',
-      'pull_request.synchronize',
       'pull_request.labeled',
       'pull_request.unlabeled',
     ],
