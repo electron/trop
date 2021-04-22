@@ -67,9 +67,12 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
     `Getting rev list from: ${opts.pr.base.sha}..${opts.pr.head.sha}`,
   );
 
+  const { context } = opts;
+  if (!context) return;
+
   const commits = (
-    await opts.context!.github.pulls.listCommits(
-      opts.context!.repo({ pull_number: opts.pr.number }),
+    await context.github.pulls.listCommits(
+      context.repo({ pull_number: opts.pr.number }),
     )
   ).data.map((commit: Octokit.PullsListCommitsResponseItem) => commit.sha);
 
@@ -89,8 +92,8 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
       LogLevel.ERROR,
       `Too many commits (${commits.length})...backport will not be performed.`,
     );
-    await opts.context!.github.issues.createComment(
-      opts.context!.repo({
+    await context.github.issues.createComment(
+      context.repo({
         issue_number: opts.pr.number,
         body:
           'This PR has exceeded the automatic backport commit limit \
@@ -475,13 +478,16 @@ export const backportImpl = async (
         });
       }
 
-      // Note if neither succeeded.
+      // Throw if neither succeeded - if we don't we
+      // never enter the ErrorExecutor and the check hangs.
       if (!success) {
         log(
           'backportImpl',
           LogLevel.ERROR,
           `Cherry picking commits to branch failed`,
         );
+
+        throw new Error(`Cherry picking commit(s) to branch failed`);
       }
 
       if (purpose === BackportPurpose.ExecuteBackport) {
@@ -529,10 +535,6 @@ export const backportImpl = async (
           }),
         );
 
-        if (labelToRemove) {
-          await labelUtils.removeLabel(context, pr.number, labelToRemove);
-        }
-
         // TODO(codebytere): getOriginalBackportNumber doesn't support multi-backports yet,
         // so only try if the backport is a single backport.
         const backportNumbers = getPRNumbersFromPRBody(pr);
@@ -540,6 +542,14 @@ export const backportImpl = async (
           backportNumbers.length === 1
             ? await getOriginalBackportNumber(context, pr)
             : pr.number;
+
+        if (labelToRemove) {
+          await labelUtils.removeLabel(
+            context,
+            originalPRNumber,
+            labelToRemove,
+          );
+        }
 
         if (labelToAdd) {
           await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
