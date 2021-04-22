@@ -529,10 +529,6 @@ export const backportImpl = async (
           }),
         );
 
-        if (labelToRemove) {
-          await labelUtils.removeLabel(context, pr.number, labelToRemove);
-        }
-
         // TODO(codebytere): getOriginalBackportNumber doesn't support multi-backports yet,
         // so only try if the backport is a single backport.
         const backportNumbers = getPRNumbersFromPRBody(pr);
@@ -540,6 +536,14 @@ export const backportImpl = async (
           backportNumbers.length === 1
             ? await getOriginalBackportNumber(context, pr)
             : pr.number;
+
+        if (labelToRemove) {
+          await labelUtils.removeLabel(
+            context,
+            originalPRNumber,
+            labelToRemove,
+          );
+        }
 
         if (labelToAdd) {
           await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
