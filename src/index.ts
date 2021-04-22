@@ -114,7 +114,7 @@ const probotHandler = async (robot: Application) => {
     for (const checkRun of checkRuns) {
       if (
         !pr.labels.find(
-          (prLabel: any) =>
+          (prLabel) =>
             prLabel.name ===
             `${PRStatus.TARGET}${checkRun.name.replace(CHECK_PREFIX, '')}`,
         )
@@ -156,14 +156,14 @@ const probotHandler = async (robot: Application) => {
 
     if (!backportCheck) {
       await queueBackportInformationCheck(context);
-      backportCheck = await getBackportInformationCheck(context);
+      backportCheck = (await getBackportInformationCheck(context))!;
     }
 
     const isNoBackport = pr.labels.some(
-      (prLabel: any) => prLabel.name === NO_BACKPORT_LABEL,
+      (prLabel) => prLabel.name === NO_BACKPORT_LABEL,
     );
     const hasTarget = pr.labels.some(
-      (prLabel: any) =>
+      (prLabel) =>
         prLabel.name.startsWith(PRStatus.TARGET) ||
         prLabel.name.startsWith(PRStatus.IN_FLIGHT) ||
         prLabel.name.startsWith(PRStatus.MERGED),

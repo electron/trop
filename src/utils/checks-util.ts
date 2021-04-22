@@ -39,9 +39,9 @@ export async function getBackportInformationCheck(context: Context) {
 
   const backportCheck = allChecks.data.check_runs.filter((run) =>
     run.name.startsWith(BACKPORT_INFORMATION_CHECK),
-  )[0];
+  );
 
-  return backportCheck;
+  return backportCheck.length > 0 ? backportCheck[0] : null;
 }
 
 export async function updateBackportInformationCheck(
