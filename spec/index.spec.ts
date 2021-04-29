@@ -1,4 +1,8 @@
 jest.mock('request');
+
+import { promises as fs } from 'fs';
+import { posix as path } from 'path';
+
 import { Application } from 'probot';
 
 import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
@@ -8,7 +12,9 @@ import {
 } from '../src/operations/backport-to-location';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
 import { ProbotHandler } from '../src/index';
-import { PRChange } from '../src/enums';
+import { CheckRunStatus, PRChange } from '../src/enums';
+
+import * as checkUtils from '../src/utils/checks-util';
 
 const trop: ProbotHandler = require('../src/index');
 
@@ -25,6 +31,22 @@ const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.j
 const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.json');
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 
+const newPROpenedEventPath = path.join(
+  __dirname,
+  'fixtures',
+  'pull_request.opened.json',
+);
+
+const noBackportLabel = {
+  name: 'no-backport',
+  color: '000',
+};
+
+const targetLabel = {
+  name: 'target/12-x-y',
+  color: 'fff',
+};
+
 jest.mock('../src/utils', () => ({
   labelClosedPR: jest.fn(),
   isAuthorizedUser: jest.fn().mockReturnValue(Promise.resolve([true])),
@@ -40,15 +62,19 @@ jest.mock('../src/operations/backport-to-location', () => ({
   backportToLabel: jest.fn(),
 }));
 
+jest.mock('../src/utils/checks-util', () => ({
+  updateBackportValidityCheck: jest.fn(),
+  getBackportInformationCheck: jest.fn().mockReturnValue(Promise.resolve()),
+  updateBackportInformationCheck: jest.fn().mockReturnValue(Promise.resolve()),
+  queueBackportInformationCheck: jest.fn().mockReturnValue(Promise.resolve()),
+}));
+
 describe('trop', () => {
   let robot: Application;
   let github: any;
   process.env = { BOT_USER_NAME: 'trop[bot]' };
 
   beforeEach(() => {
-    robot = new Application();
-    robot.load(trop);
-
     github = {
       repos: {
         getBranch: jest.fn().mockReturnValue(Promise.resolve()),
@@ -104,10 +130,13 @@ describe('trop', () => {
         listForRef: jest
           .fn()
           .mockReturnValue(Promise.resolve({ data: { check_runs: [] } })),
+        create: jest.fn().mockReturnValue(Promise.resolve({ data: jest.fn() })),
       },
     };
 
+    robot = new Application();
     robot.auth = () => Promise.resolve(github);
+    robot.load(trop);
   });
 
   describe('issue_comment.created event', () => {
@@ -172,6 +201,96 @@ describe('trop', () => {
       await robot.receive(backportPROpenedEvent);
 
       expect(updateManualBackport).toHaveBeenCalled();
+    });
+
+    it('fails the check if there is no backport information for a new PR', async () => {
+      const event = JSON.parse(
+        (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
+      );
+
+      event.payload.pull_request.labels = [];
+
+      await robot.receive(event);
+
+      const updatePayload = (checkUtils.updateBackportInformationCheck as jest.Mock)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Missing Backport Information',
+        summary:
+          'This PR is missing the required backport information. It should have a "no-backport" or a "target/x-y-z" label.',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+    });
+
+    it('fails the check if there is conflicting backport information in a new PR', async () => {
+      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
+        Promise.resolve([]),
+      );
+
+      const event = JSON.parse(
+        (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
+      );
+
+      event.payload.pull_request.labels = [noBackportLabel, targetLabel];
+
+      await robot.receive(event);
+
+      const updatePayload = (checkUtils.updateBackportInformationCheck as jest.Mock)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Conflicting Backport Information',
+        summary:
+          'The PR has a "no-backport" and at least one "target/x-y-z" label. Impossible to determine backport action.',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+    });
+
+    it('passes the check if there is a "no-backport" label and no "target/" label in a new PR', async () => {
+      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
+        Promise.resolve([]),
+      );
+
+      const event = JSON.parse(
+        (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
+      );
+
+      event.payload.pull_request.labels = [noBackportLabel];
+
+      await robot.receive(event);
+
+      const updatePayload = (checkUtils.updateBackportInformationCheck as jest.Mock)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Information Provided',
+        summary: 'This PR contains the required  backport information.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+
+    it('passes the check if there is no "no-backport" label and a "target/" label in a new PR', async () => {
+      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
+        Promise.resolve([]),
+      );
+
+      const event = JSON.parse(
+        (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
+      );
+
+      event.payload.pull_request.labels = [targetLabel];
+
+      await robot.receive(event);
+
+      const updatePayload = (checkUtils.updateBackportInformationCheck as jest.Mock)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Information Provided',
+        summary: 'This PR contains the required  backport information.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
     });
   });
 

@@ -1,0 +1,36 @@
+{
+  "name": "pull_request",
+  "payload": {
+    "action": "opened",
+    "number": 7,
+    "pull_request": {
+      "url": "my_cool_url",
+      "title": "CHANGE README",
+      "merged": true,
+      "user": {
+        "login": "codebytere"
+      },
+      "body": "New cool stuff",
+      "labels": [],
+      "head": {
+        "sha": "ABC"
+      },
+      "base": {
+        "ref": "master"
+      }
+    },
+    "label": {
+      "name": "todo",
+      "color": "8cb728"
+    },
+    "repository": {
+      "name": "probot-test",
+      "owner": {
+        "login": "codebytere"
+      }
+    },
+    "installation": {
+      "id": 103619
+    }
+  }
+}
