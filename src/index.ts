@@ -6,7 +6,11 @@ import {
   isAuthorizedUser,
   labelClosedPR,
 } from './utils';
-import { labelToTargetBranch, labelExistsOnPR } from './utils/label-utils';
+import {
+  labelToTargetBranch,
+  labelExistsOnPR,
+  removeLabel,
+} from './utils/label-utils';
 import { CHECK_PREFIX, NO_BACKPORT_LABEL, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
@@ -16,7 +20,7 @@ import {
   backportToBranch,
 } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
-import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
+import { getSupportedBranches } from './utils/branch-util';
 import {
   getBackportInformationCheck,
   queueBackportInformationCheck,
@@ -209,16 +213,13 @@ const probotHandler = async (robot: Application) => {
       'pull_request.unlabeled',
     ],
     async (context: Context) => {
-      const pr = context.payload.pull_request;
+      const { pull_request: pr, label, action } = context.payload;
       const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
 
       robot.log(`Found ${oldPRNumbers.length} backport numbers for this PR`);
 
       // Only check for manual backports when a new PR is opened or if the PR body is edited.
-      if (
-        oldPRNumbers.length > 0 &&
-        ['opened', 'edited'].includes(context.payload.action)
-      ) {
+      if (oldPRNumbers.length > 0 && ['opened', 'edited'].includes(action)) {
         for (const oldPRNumber of oldPRNumbers) {
           robot.log(
             `Updating original backport at ${oldPRNumber} for ${pr.number}`,
@@ -252,6 +253,25 @@ const probotHandler = async (robot: Application) => {
           );
 
           checkRun = (response.data as any) as Octokit.ChecksListForRefResponseCheckRunsItem;
+        }
+
+        // Ensure that we aren't including our own base branch in the backport process.
+        if (action === 'labeled') {
+          if (
+            Object.values(PRStatus).some((status) =>
+              label.name.startsWith(status),
+            )
+          ) {
+            const targetBranch = label.name.match(
+              /^(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))$/,
+            );
+            if (targetBranch?.[0] && targetBranch?.[0] === pr.base.ref) {
+              robot.log(
+                `#${pr.number} is trying to backport to itself - this is not allowed`,
+              );
+              await removeLabel(context, pr.number, label.name);
+            }
+          }
         }
 
         // If a branch is targeting something that isn't master it might not be a backport;
@@ -381,10 +401,7 @@ const probotHandler = async (robot: Application) => {
 
       // Only run the backportable checks on "opened" and "synchronize"
       // an "edited" change can not impact backportability.
-      if (
-        context.payload.action === 'edited' ||
-        context.payload.action === 'synchronize'
-      ) {
+      if (['edited', 'synchronize'].includes(action)) {
         maybeRunCheck(context);
       }
     },
