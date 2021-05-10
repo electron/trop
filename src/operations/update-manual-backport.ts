@@ -79,7 +79,7 @@ export const updateManualBackport = async (
       // Check to see if the PR for some reason has a semver label already.
       // It might be the case that the opener updated the linked backport
       // and so we might need to update the semver type.
-      const newPRSemverLabel = originalPR.labels.find((l: any) =>
+      const newPRSemverLabel = pr.labels.find((l: any) =>
         l.name.startsWith(SEMVER_PREFIX),
       );
 
