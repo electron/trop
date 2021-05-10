@@ -66,21 +66,29 @@ export const updateManualBackport = async (
       newPRLabelsToAdd.push(BACKPORT_LABEL);
     }
 
-    // Propagate semver label from the original PR if the maintainer didn't add it.
-    const { data: oldPR } = await context.github.pulls.get(
+    const { data: originalPR } = await context.github.pulls.get(
       context.repo({ pull_number: oldPRNumber }),
     );
-    const semverLabel = oldPR.labels.find((l: any) =>
+
+    // Propagate semver label from the original PR if the maintainer didn't add it.
+    const originalPRSemverLabel = originalPR.labels.find((l: any) =>
       l.name.startsWith(SEMVER_PREFIX),
     );
 
-    if (semverLabel) {
-      const exists = await labelUtils.labelExistsOnPR(
-        context,
-        pr.number,
-        semverLabel.name,
+    if (originalPRSemverLabel) {
+      // Check to see if the PR for some reason has a semver label already.
+      // It might be the case that the opener updated the linked backport
+      // and so we might need to update the semver type.
+      const newPRSemverLabel = pr.labels.find((l: any) =>
+        l.name.startsWith(SEMVER_PREFIX),
       );
-      if (!exists) newPRLabelsToAdd.push(semverLabel.name);
+
+      // Remove the existing semver label.
+      if (newPRSemverLabel) {
+        await labelUtils.removeLabel(context, pr.number, newPRSemverLabel.name);
+      }
+
+      newPRLabelsToAdd.push(originalPRSemverLabel.name);
     }
 
     if (await isSemverMinorPR(context, pr)) {
