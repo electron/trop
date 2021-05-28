@@ -16,7 +16,10 @@
         "sha": "ABC"
       },
       "base": {
-        "ref": "master"
+        "ref": "main",
+        "repo": {
+          "default_branch": "main"
+        }
       }
     },
     "label": {
