@@ -152,7 +152,6 @@ const probotHandler = async (robot: Application) => {
   const backportInformationCheck = async (context: Context) => {
     const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
-    // TODO(main-migration): Simplify once branch rename is complete.
     if (pr.base.ref !== pr.base.repo.default_branch) {
       return;
     }
@@ -241,8 +240,7 @@ const probotHandler = async (robot: Application) => {
         (run) => run.name === VALID_BACKPORT_CHECK_NAME,
       );
 
-      // TODO(main-migration): Simplify once branch rename is complete.
-      if (pr.base.ref !== 'master' && pr.base.ref !== 'main') {
+      if (pr.base.ref !== pr.base.repo.default_branch) {
         if (!checkRun) {
           robot.log(`Queueing new check run for #${pr.number}`);
           const response = await context.github.checks.create(
@@ -318,9 +316,7 @@ const probotHandler = async (robot: Application) => {
             );
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Invalid Backport',
-              summary:
-                'This PR is targeting a branch that is not main but is missing a "Backport of #{N}" declaration.  \
-              Check out the trop documentation linked below for more information.',
+              summary: `This PR is targeting a branch that is not ${pr.base.repo.default_branch} but is missing a "Backport of #{N}" declaration.  Check out the trop documentation linked below for more information.`,
               conclusion: CheckRunStatus.FAILURE,
             });
           } else {
@@ -329,9 +325,7 @@ const probotHandler = async (robot: Application) => {
             );
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
-              summary:
-                'This PR is targeting a branch that is not main but a designated fast-track backport which does  \
-              not require a manual backport number.',
+              summary: `This PR is targeting a branch that is not ${pr.base.repo.default_branch} but a designated fast-track backport which does not require a manual backport number.`,
               conclusion: CheckRunStatus.SUCCESS,
             });
           }
@@ -351,10 +345,13 @@ const probotHandler = async (robot: Application) => {
 
             // The current PR is only valid if the PR it is backporting
             // was merged to main or to a supported release branch.
-            // TODO(main-migration): Simplify once branch rename is complete.
-            if (!['master', 'main', ...supported].includes(oldPR.base.ref)) {
+            if (
+              ![pr.base.repo.default_branch, ...supported].includes(
+                oldPR.base.ref,
+              )
+            ) {
               const cause =
-                'the PR that it is backporting was not targeting the main branch.';
+                'the PR that it is backporting was not targeting the default branch.';
               failureMap.set(oldPRNumber, cause);
             } else if (!oldPR.merged) {
               const cause =
@@ -367,24 +364,22 @@ const probotHandler = async (robot: Application) => {
         for (const oldPRNumber of oldPRNumbers) {
           if (failureMap.has(oldPRNumber)) {
             robot.log(
-              `#${
-                pr.number
-              } is targeting a branch that is not main - ${failureMap.get(
-                oldPRNumber,
-              )}`,
+              `#${pr.number} is targeting a branch that is not ${
+                pr.base.repo.default_branch
+              } - ${failureMap.get(oldPRNumber)}`,
             );
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Invalid Backport',
-              summary: `This PR is targeting a branch that is not main but ${failureMap.get(
-                oldPRNumber,
-              )}`,
+              summary: `This PR is targeting a branch that is not ${
+                pr.base.repo.default_branch
+              } but ${failureMap.get(oldPRNumber)}`,
               conclusion: CheckRunStatus.FAILURE,
             });
           } else {
             robot.log(`#${pr.number} is a valid backpot of #${oldPRNumber}`);
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
-              summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into main`,
+              summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into ${pr.base.repo.default_branch}`,
               conclusion: CheckRunStatus.SUCCESS,
             });
           }
@@ -393,11 +388,11 @@ const probotHandler = async (robot: Application) => {
         // If we're somehow targeting main and have a check run,
         // we mark this check as cancelled.
         robot.log(
-          `#${pr.number} is targeting 'main' and is not a backport - marking as cancelled`,
+          `#${pr.number} is targeting '${pr.base.repo.default_branch}' and is not a backport - marking as cancelled`,
         );
         await updateBackportValidityCheck(context, checkRun, {
           title: 'Cancelled',
-          summary: 'This PR is targeting `main` and is not a backport',
+          summary: `This PR is targeting '${pr.base.repo.default_branch}' and is not a backport`,
           conclusion: CheckRunStatus.NEUTRAL,
         });
       }
