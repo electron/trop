@@ -153,7 +153,7 @@ const probotHandler = async (robot: Application) => {
     const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
     // TODO(main-migration): Simplify once branch rename is complete.
-    if (pr.base.ref !== 'master' && pr.base.ref !== 'main') {
+    if (pr.base.ref !== pr.base.repo.default_branch) {
       return;
     }
 
