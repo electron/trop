@@ -142,7 +142,7 @@ const probotHandler = async (robot: Application) => {
   };
 
   /**
-   * Checks that a PR done to `master` contains the required
+   * Checks that a PR done to `main` contains the required
    * backport information, i.e.: at least a `no-backport` or
    * a `target/XYZ` labels.
    *
@@ -152,7 +152,8 @@ const probotHandler = async (robot: Application) => {
   const backportInformationCheck = async (context: Context) => {
     const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
-    if (pr.base.ref !== 'master') {
+    // TODO(main-migration): Simplify once branch rename is complete.
+    if (pr.base.ref !== 'master' && pr.base.ref !== 'main') {
       return;
     }
 
@@ -228,8 +229,8 @@ const probotHandler = async (robot: Application) => {
         }
       }
 
-      // Check if the PR is going to master, if it's not check if it's correctly
-      // tagged as a backport of a PR that has already been merged into master.
+      // Check if the PR is going to main, if it's not check if it's correctly
+      // tagged as a backport of a PR that has already been merged into main.
       const { data: allChecks } = await context.github.checks.listForRef(
         context.repo({
           ref: pr.head.sha,
@@ -240,7 +241,8 @@ const probotHandler = async (robot: Application) => {
         (run) => run.name === VALID_BACKPORT_CHECK_NAME,
       );
 
-      if (pr.base.ref !== 'master') {
+      // TODO(main-migration): Simplify once branch rename is complete.
+      if (pr.base.ref !== 'master' && pr.base.ref !== 'main') {
         if (!checkRun) {
           robot.log(`Queueing new check run for #${pr.number}`);
           const response = await context.github.checks.create(
@@ -274,7 +276,7 @@ const probotHandler = async (robot: Application) => {
           }
         }
 
-        // If a branch is targeting something that isn't master it might not be a backport;
+        // If a branch is targeting something that isn't main it might not be a backport;
         // allow for a label to skip backport validity check for these branches.
         if (await labelExistsOnPR(context, pr.number, SKIP_CHECK_LABEL)) {
           robot.log(
@@ -298,7 +300,7 @@ const probotHandler = async (robot: Application) => {
 
         const failureMap = new Map();
 
-        // There are several types of PRs which might not target master yet which are
+        // There are several types of PRs which might not target main yet which are
         // inherently valid; e.g roller-bot PRs. Check for and allow those here.
         if (oldPRNumbers.length === 0) {
           robot.log(
@@ -317,7 +319,7 @@ const probotHandler = async (robot: Application) => {
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Invalid Backport',
               summary:
-                'This PR is targeting a branch that is not master but is missing a "Backport of #{N}" declaration.  \
+                'This PR is targeting a branch that is not main but is missing a "Backport of #{N}" declaration.  \
               Check out the trop documentation linked below for more information.',
               conclusion: CheckRunStatus.FAILURE,
             });
@@ -328,7 +330,7 @@ const probotHandler = async (robot: Application) => {
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
               summary:
-                'This PR is targeting a branch that is not master but a designated fast-track backport which does  \
+                'This PR is targeting a branch that is not main but a designated fast-track backport which does  \
               not require a manual backport number.',
               conclusion: CheckRunStatus.SUCCESS,
             });
@@ -348,10 +350,11 @@ const probotHandler = async (robot: Application) => {
             );
 
             // The current PR is only valid if the PR it is backporting
-            // was merged to master or to a supported release branch.
-            if (!['master', ...supported].includes(oldPR.base.ref)) {
+            // was merged to main or to a supported release branch.
+            // TODO(main-migration): Simplify once branch rename is complete.
+            if (!['master', 'main', ...supported].includes(oldPR.base.ref)) {
               const cause =
-                'the PR that it is backporting was not targeting the master branch.';
+                'the PR that it is backporting was not targeting the main branch.';
               failureMap.set(oldPRNumber, cause);
             } else if (!oldPR.merged) {
               const cause =
@@ -366,13 +369,13 @@ const probotHandler = async (robot: Application) => {
             robot.log(
               `#${
                 pr.number
-              } is targeting a branch that is not master - ${failureMap.get(
+              } is targeting a branch that is not main - ${failureMap.get(
                 oldPRNumber,
               )}`,
             );
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Invalid Backport',
-              summary: `This PR is targeting a branch that is not master but ${failureMap.get(
+              summary: `This PR is targeting a branch that is not main but ${failureMap.get(
                 oldPRNumber,
               )}`,
               conclusion: CheckRunStatus.FAILURE,
@@ -381,20 +384,20 @@ const probotHandler = async (robot: Application) => {
             robot.log(`#${pr.number} is a valid backpot of #${oldPRNumber}`);
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
-              summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into master`,
+              summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into main`,
               conclusion: CheckRunStatus.SUCCESS,
             });
           }
         }
       } else if (checkRun) {
-        // If we're somehow targeting master and have a check run,
+        // If we're somehow targeting main and have a check run,
         // we mark this check as cancelled.
         robot.log(
-          `#${pr.number} is targeting 'master' and is not a backport - marking as cancelled`,
+          `#${pr.number} is targeting 'main' and is not a backport - marking as cancelled`,
         );
         await updateBackportValidityCheck(context, checkRun, {
           title: 'Cancelled',
-          summary: 'This PR is targeting `master` and is not a backport',
+          summary: 'This PR is targeting `main` and is not a backport',
           conclusion: CheckRunStatus.NEUTRAL,
         });
       }
