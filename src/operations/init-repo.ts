@@ -42,7 +42,6 @@ export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
     await fs.remove(path.resolve(dir, file));
   }
 
-  await git.checkout('master');
   await git.pull();
   await git.addConfig('user.email', config.tropEmail || 'trop@example.com');
   await git.addConfig('user.name', config.tropName || 'Trop Bot');
