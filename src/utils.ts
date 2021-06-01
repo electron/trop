@@ -368,7 +368,8 @@ export const backportImpl = async (
   const noEOLSupport = getEnvVar('NO_EOL_SUPPORT', '');
   if (noEOLSupport) {
     const supported = await getSupportedBranches(context);
-    if (!['master', ...supported].includes(targetBranch)) {
+    const defaultBranch = context.payload.repository.default_branch;
+    if (![defaultBranch, ...supported].includes(targetBranch)) {
       log(
         'backportImpl',
         LogLevel.WARN,
