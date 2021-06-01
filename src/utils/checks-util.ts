@@ -77,9 +77,11 @@ export async function queueBackportInformationCheck(context: Context) {
       head_sha: pr.head.sha,
       status: 'queued' as 'queued',
       details_url: 'https://github.com/electron/trop',
-      title: 'Needs Backport Information',
-      summary:
-        'This PR requires backport information. It should have a "no-backport" or a "target/x-y-z" label.',
+      output: {
+        title: 'Needs Backport Information',
+        summary:
+          'This PR requires backport information. It should have a "no-backport" or a "target/x-y-z" label.',
+      },
     }),
   );
 }
