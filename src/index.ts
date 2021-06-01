@@ -185,12 +185,9 @@ const probotHandler = async (robot: Application) => {
     }
 
     if (!hasTarget && !isNoBackport) {
-      await updateBackportInformationCheck(context, backportCheck, {
-        title: 'Missing Backport Information',
-        summary:
-          'This PR is missing the required backport information. It should have a "no-backport" or a "target/x-y-z" label.',
-        conclusion: CheckRunStatus.FAILURE,
-      });
+      if (backportCheck.status !== 'queued') {
+        await queueBackportInformationCheck(context);
+      }
 
       return;
     }
