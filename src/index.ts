@@ -412,6 +412,7 @@ const probotHandler = async (robot: Application) => {
       'pull_request.reopened',
       'pull_request.labeled',
       'pull_request.unlabeled',
+      'pull_request.synchronize',
     ],
     backportInformationCheck,
   );
