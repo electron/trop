@@ -24,7 +24,7 @@ import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
 import { TryBackportOptions } from './interfaces';
-import { client } from './utils/prom';
+import { client, register } from './utils/prom';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
@@ -37,6 +37,8 @@ const backportViaSquashCount = new client.Counter({
   name: 'trop_backport_via_squash',
   help: 'The number of successful backports via tryBackportSquashCommit',
 });
+register.registerMetric(backportViaAllCount);
+register.registerMetric(backportViaSquashCount);
 
 export const labelClosedPR = async (
   context: Context,
