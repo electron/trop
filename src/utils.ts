@@ -30,12 +30,14 @@ const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
 const backportViaAllHisto = new client.Histogram({
-  name: 'trop_backport_via_all',
+  name: 'backport_via_all',
   help: 'Successful backports via tryBackportAllCommits',
+  buckets: [0, 100, 500, 1500, 3000, 5000, 10000],
 });
 const backportViaSquashHisto = new client.Histogram({
-  name: 'trop_backport_via_squash',
+  name: 'backport_via_squash',
   help: 'Successful backports via tryBackportSquashCommit',
+  buckets: [0, 100, 500, 1500, 3000, 5000, 10000],
 });
 register.registerMetric(backportViaAllHisto);
 register.registerMetric(backportViaSquashHisto);
