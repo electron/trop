@@ -27,8 +27,22 @@ import {
   updateBackportInformationCheck,
   updateBackportValidityCheck,
 } from './utils/checks-util';
+import { register } from './utils/prom';
 
 const probotHandler = async (robot: Application) => {
+  robot.router.get('/metrics', (req, res) => {
+    register
+      .metrics()
+      .then((metrics) => {
+        res.setHeader('Content-Type', register.contentType);
+        res.end(metrics);
+      })
+      .catch((err) => {
+        console.error('Failed to send metrics:', err);
+        res.status(500).end('');
+      });
+  });
+
   const handleClosedPRLabels = async (
     context: Context,
     pr: Octokit.PullsGetResponse,

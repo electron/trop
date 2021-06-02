@@ -24,9 +24,19 @@ import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
 import { TryBackportOptions } from './interfaces';
+import { client } from './utils/prom';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
+
+const backportViaAllCount = new client.Counter({
+  name: 'trop_backport_via_all',
+  help: 'The number of successful backports via tryBackportAllCommits',
+});
+const backportViaSquashCount = new client.Counter({
+  name: 'trop_backport_via_squash',
+  help: 'The number of successful backports via tryBackportSquashCommit',
+});
 
 export const labelClosedPR = async (
   context: Context,
@@ -477,6 +487,9 @@ export const backportImpl = async (
           targetBranch,
           tempBranch,
         });
+        backportViaSquashCount.inc(1);
+      } else {
+        backportViaAllCount.inc(1);
       }
 
       // Throw if neither succeeded - if we don't we
