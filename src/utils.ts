@@ -29,16 +29,16 @@ import { client, register } from './utils/prom';
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
-const backportViaAllCount = new client.Counter({
+const backportViaAllHisto = new client.Histogram({
   name: 'trop_backport_via_all',
-  help: 'The number of successful backports via tryBackportAllCommits',
+  help: 'Successful backports via tryBackportAllCommits',
 });
-const backportViaSquashCount = new client.Counter({
+const backportViaSquashHisto = new client.Histogram({
   name: 'trop_backport_via_squash',
-  help: 'The number of successful backports via tryBackportSquashCommit',
+  help: 'Successful backports via tryBackportSquashCommit',
 });
-register.registerMetric(backportViaAllCount);
-register.registerMetric(backportViaSquashCount);
+register.registerMetric(backportViaAllHisto);
+register.registerMetric(backportViaSquashHisto);
 
 export const labelClosedPR = async (
   context: Context,
@@ -467,6 +467,7 @@ export const backportImpl = async (
       const tempBranch = `trop/${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
 
       // First try to backport all commits in the original PR.
+      const end = backportViaAllHisto.startTimer();
       let success = await tryBackportAllCommits({
         context,
         repoAccessToken,
@@ -477,9 +478,11 @@ export const backportImpl = async (
         targetBranch,
         tempBranch,
       });
+      end();
 
       // If that fails, try to backport the squash commit.
       if (!success) {
+        const end = backportViaSquashHisto.startTimer();
         success = await tryBackportSquashCommit({
           repoAccessToken,
           purpose,
@@ -489,9 +492,7 @@ export const backportImpl = async (
           targetBranch,
           tempBranch,
         });
-        backportViaSquashCount.inc(1);
-      } else {
-        backportViaAllCount.inc(1);
+        end();
       }
 
       // Throw if neither succeeded - if we don't we
