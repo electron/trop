@@ -23,6 +23,11 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
 
   const git = simpleGit(options.dir);
 
+  // Abort previous patch attempts
+  try {
+    await git.raw(['am', '--abort']);
+  } catch {}
+
   // Create branch to cherry-pick the commits to.
   try {
     await git.checkout(`target_repo/${options.targetBranch}`);
@@ -37,7 +42,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
         LogLevel.INFO,
         `The provided temporary branch name "${options.tempBranch}" already exists, deleting existing ref before backporting`,
       );
-      await git.deleteLocalBranch(options.tempBranch);
+      await git.branch(['-D', options.tempBranch]);
     }
     await git.checkoutBranch(
       options.tempBranch,
@@ -48,6 +53,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       'backportCommitsToBranch',
       LogLevel.ERROR,
       `Failed to checkout new backport branch`,
+      error,
     );
 
     return false;
@@ -66,6 +72,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
         'backportCommitsToBranch',
         LogLevel.ERROR,
         `Failed to apply patch to ${options.targetBranch}`,
+        error,
       );
 
       return false;
