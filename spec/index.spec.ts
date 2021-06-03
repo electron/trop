@@ -64,7 +64,9 @@ jest.mock('../src/operations/backport-to-location', () => ({
 
 jest.mock('../src/utils/checks-util', () => ({
   updateBackportValidityCheck: jest.fn(),
-  getBackportInformationCheck: jest.fn().mockReturnValue(Promise.resolve()),
+  getBackportInformationCheck: jest
+    .fn()
+    .mockReturnValue(Promise.resolve({ status: 'thing' })),
   updateBackportInformationCheck: jest.fn().mockReturnValue(Promise.resolve()),
   queueBackportInformationCheck: jest.fn().mockReturnValue(Promise.resolve()),
 }));
@@ -203,7 +205,7 @@ describe('trop', () => {
       expect(updateManualBackport).toHaveBeenCalled();
     });
 
-    it('fails the check if there is no backport information for a new PR', async () => {
+    it('queues the check if there is no backport information for a new PR', async () => {
       const event = JSON.parse(
         (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
       );
@@ -212,15 +214,9 @@ describe('trop', () => {
 
       await robot.receive(event);
 
-      const updatePayload = (checkUtils.updateBackportInformationCheck as jest.Mock)
-        .mock.calls[0][2];
-
-      expect(updatePayload).toMatchObject({
-        title: 'Missing Backport Information',
-        summary:
-          'This PR is missing the required backport information. It should have a "no-backport" or a "target/x-y-z" label.',
-        conclusion: CheckRunStatus.FAILURE,
-      });
+      expect(
+        checkUtils.queueBackportInformationCheck as jest.Mock,
+      ).toHaveBeenCalledTimes(1);
     });
 
     it('fails the check if there is conflicting backport information in a new PR', async () => {
