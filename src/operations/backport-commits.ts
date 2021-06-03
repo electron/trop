@@ -27,6 +27,18 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
   try {
     await git.checkout(`target_repo/${options.targetBranch}`);
     await git.pull('target_repo', options.targetBranch);
+    if (
+      Object.keys((await git.branchLocal()).branches).includes(
+        options.tempBranch,
+      )
+    ) {
+      log(
+        'backportCommitsToBranch',
+        LogLevel.INFO,
+        `The provided temporary branch name "${options.tempBranch}" already exists, deleting existing ref before backporting`,
+      );
+      await git.deleteLocalBranch(options.tempBranch);
+    }
     await git.checkoutBranch(
       options.tempBranch,
       `target_repo/${options.targetBranch}`,
