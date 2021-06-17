@@ -56,7 +56,7 @@ export const labelClosedPR = async (
 
   if (change === PRChange.CLOSE) {
     const targetLabel = PRStatus.TARGET + targetBranch;
-    if (labelUtils.labelExistsOnPR(context, pr.number, targetLabel)) {
+    if (await labelUtils.labelExistsOnPR(context, pr.number, targetLabel)) {
       await labelUtils.removeLabel(context, pr.number, targetLabel);
     }
   }
