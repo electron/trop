@@ -85,10 +85,12 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
   if (!context) return;
 
   const commits = (
-    await context.github.pulls.listCommits(
-      context.repo({ pull_number: opts.pr.number }),
+    await context.github.paginate(
+      context.github.pulls.listCommits.endpoint.merge(
+        context.repo({ pull_number: opts.pr.number, per_page: 100 }),
+      ),
     )
-  ).data.map((commit: Octokit.PullsListCommitsResponseItem) => commit.sha);
+  ).map((commit: Octokit.PullsListCommitsResponseItem) => commit.sha);
 
   if (commits.length === 0) {
     log(
