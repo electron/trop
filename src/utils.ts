@@ -564,16 +564,22 @@ export const backportImpl = async (
             ? await getOriginalBackportNumber(context, pr)
             : pr.number;
 
+        if (labelToAdd) {
+          await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
+        }
+
         if (labelToRemove) {
           await labelUtils.removeLabel(
             context,
             originalPRNumber,
             labelToRemove,
           );
-        }
-
-        if (labelToAdd) {
-          await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
+        } else if (labelToAdd?.startsWith(PRStatus.IN_FLIGHT)) {
+          await labelUtils.removeLabel(
+            context,
+            originalPRNumber,
+            `${PRStatus.NEEDS_MANUAL}${targetBranch}`,
+          );
         }
 
         const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];
