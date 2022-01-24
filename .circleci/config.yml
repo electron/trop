@@ -2,7 +2,7 @@ version: 2
 jobs:
   test:
     docker:
-      - image: circleci/node:10.15
+      - image: cimg/node:16.13.2
     steps:
       - checkout
       - restore_cache:
