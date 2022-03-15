@@ -56,7 +56,7 @@ export const labelClosedPR = async (
 
   if (change === PRChange.CLOSE) {
     const targetLabel = PRStatus.TARGET + targetBranch;
-    if (labelUtils.labelExistsOnPR(context, pr.number, targetLabel)) {
+    if (await labelUtils.labelExistsOnPR(context, pr.number, targetLabel)) {
       await labelUtils.removeLabel(context, pr.number, targetLabel);
     }
   }
@@ -85,10 +85,12 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
   if (!context) return;
 
   const commits = (
-    await context.github.pulls.listCommits(
-      context.repo({ pull_number: opts.pr.number }),
+    await context.github.paginate(
+      context.github.pulls.listCommits.endpoint.merge(
+        context.repo({ pull_number: opts.pr.number, per_page: 100 }),
+      ),
     )
-  ).data.map((commit: Octokit.PullsListCommitsResponseItem) => commit.sha);
+  ).map((commit: Octokit.PullsListCommitsResponseItem) => commit.sha);
 
   if (commits.length === 0) {
     log(
@@ -582,16 +584,22 @@ export const backportImpl = async (
             ? await getOriginalBackportNumber(context, pr)
             : pr.number;
 
+        if (labelToAdd) {
+          await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
+        }
+
         if (labelToRemove) {
           await labelUtils.removeLabel(
             context,
             originalPRNumber,
             labelToRemove,
           );
-        }
-
-        if (labelToAdd) {
-          await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
+        } else if (labelToAdd?.startsWith(PRStatus.IN_FLIGHT)) {
+          await labelUtils.removeLabel(
+            context,
+            originalPRNumber,
+            `${PRStatus.NEEDS_MANUAL}${targetBranch}`,
+          );
         }
 
         const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];

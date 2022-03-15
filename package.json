@@ -21,7 +21,7 @@
     "@types/lru-cache": "^5.1.0",
     "config-yml": "^0.10.2",
     "fs-extra": "^7.0.0",
-    "node-fetch": "^2.6.1",
+    "node-fetch": "^2.6.7",
     "probot": "^9.6.6",
     "prom-client": "^13.1.0",
     "queue": "^4.5.0",

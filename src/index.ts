@@ -491,7 +491,7 @@ const probotHandler = async (robot: Application) => {
     if (!cmd.startsWith(TROP_COMMAND_PREFIX)) return;
 
     // Allow all users with push access to handle backports.
-    if (!isAuthorizedUser(context, comment.user.login)) {
+    if (!(await isAuthorizedUser(context, comment.user.login))) {
       robot.log(
         `@${comment.user.login} is not authorized to run PR backports - stopping`,
       );
