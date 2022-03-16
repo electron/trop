@@ -23,25 +23,19 @@ export const getSemverLabel = (pr: Octokit.PullsGetResponse) => {
   return pr.labels.find((l: any) => l.name.startsWith(SEMVER_PREFIX));
 };
 
-export const getHighestSemverLabel = (first: string, second: string) => {
-  if ([first, second].every((label) => label.startsWith(SEMVER_PREFIX))) {
+export const getHighestSemverLabel = (...labels: string[]) => {
+  const ranked = [
+    SEMVER_LABELS.PATCH,
+    SEMVER_LABELS.MINOR,
+    SEMVER_LABELS.MAJOR,
+  ];
+
+  const indices = labels.map((label) => ranked.indexOf(label));
+  if (indices.some((index) => index === -1)) {
     throw new Error('Invalid semver labels');
   }
 
-  // Labels are equal, return either.
-  if (first === second) return first;
-  // first is major, second is patch/minor/none.
-  if (first === SEMVER_LABELS.MAJOR) return first;
-  // second is major, first is patch/minor/none.
-  if (second === SEMVER_LABELS.MAJOR) return second;
-  // first is minor, second is patch/none.
-  if (first === SEMVER_LABELS.MINOR) return first;
-  // second is minor, first is patch/none.
-  if (second === SEMVER_LABELS.MINOR) return second;
-  // first is patch, second is none.
-  if (first === SEMVER_LABELS.PATCH) return first;
-  // second is patch, first is none.
-  return second;
+  return ranked[Math.max(...indices)];
 };
 
 export const removeLabel = async (

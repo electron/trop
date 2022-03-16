@@ -77,7 +77,10 @@ export const updateManualBackport = async (
       // we need to compare the two semver labels and ensure the higher one
       // takes precedence.
       const newPRSemverLabel = labelUtils.getSemverLabel(pr);
-      if (newPRSemverLabel) {
+      if (
+        newPRSemverLabel &&
+        newPRSemverLabel.name !== originalPRSemverLabel.name
+      ) {
         const higherLabel = labelUtils.getHighestSemverLabel(
           originalPRSemverLabel.name,
           newPRSemverLabel.name,
