@@ -10,6 +10,12 @@ export const NO_BACKPORT_LABEL = 'no-backport';
 
 export const SEMVER_PREFIX = 'semver/';
 
+export const SEMVER_LABELS = {
+  PATCH: 'semver/patch',
+  MINOR: 'semver/minor',
+  MAJOR: 'semver/major',
+};
+
 export const SKIP_CHECK_LABEL =
   process.env.SKIP_CHECK_LABEL || 'backport-check-skip';
 

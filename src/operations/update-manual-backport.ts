@@ -71,24 +71,29 @@ export const updateManualBackport = async (
     );
 
     // Propagate semver label from the original PR if the maintainer didn't add it.
-    const originalPRSemverLabel = originalPR.labels.find((l: any) =>
-      l.name.startsWith(SEMVER_PREFIX),
-    );
-
+    const originalPRSemverLabel = labelUtils.getSemverLabel(originalPR);
     if (originalPRSemverLabel) {
-      // Check to see if the PR for some reason has a semver label already.
-      // It might be the case that the opener updated the linked backport
-      // and so we might need to update the semver type.
-      const newPRSemverLabel = pr.labels.find((l: any) =>
-        l.name.startsWith(SEMVER_PREFIX),
-      );
-
-      // Remove the existing semver label.
+      // If the new PR for some reason has a semver label already, then
+      // we need to compare the two semver labels and ensure the higher one
+      // takes precedence.
+      const newPRSemverLabel = labelUtils.getSemverLabel(pr);
       if (newPRSemverLabel) {
-        await labelUtils.removeLabel(context, pr.number, newPRSemverLabel.name);
+        const higherLabel = labelUtils.getHighestSemverLabel(
+          originalPRSemverLabel.name,
+          newPRSemverLabel.name,
+        );
+        // The existing label is lower precedence - remove and replace it.
+        if (higherLabel === originalPRSemverLabel.name) {
+          await labelUtils.removeLabel(
+            context,
+            pr.number,
+            newPRSemverLabel.name,
+          );
+          newPRLabelsToAdd.push(originalPRSemverLabel.name);
+        }
+      } else {
+        newPRLabelsToAdd.push(originalPRSemverLabel.name);
       }
-
-      newPRLabelsToAdd.push(originalPRSemverLabel.name);
     }
 
     if (await isSemverMinorPR(context, pr)) {
