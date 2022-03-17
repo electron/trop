@@ -20,7 +20,7 @@ or a full link to the original PR:
 Backport of https://github.com/electron/electron/pull/21813
 ```
 
-If you raise a PR to a branch that isn't `master` or a release branch without including a valid reference as above, `trop` will create a
+If you raise a PR to a branch that isn't `main` or a release branch without including a valid reference as above, `trop` will create a
 "failed" check on that PR to prevent it being merged.
 
 ## Skipping Backport Checks
