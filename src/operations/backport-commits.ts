@@ -82,7 +82,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
   // Push the commit to the target branch on the remote.
   if (options.shouldPush) {
     await git.push(options.targetRemote, options.tempBranch, {
-      '--set-upstream': 'true',
+      '--set-upstream': null,
     });
   }
 
