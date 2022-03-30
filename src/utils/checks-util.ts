@@ -19,7 +19,7 @@ export async function updateBackportValidityCheck(
       conclusion: statusItems.conclusion as CheckRunStatus,
       completed_at: new Date().toISOString(),
       details_url:
-        'https://github.com/electron/trop/blob/master/docs/manual-backports.md',
+        'https://github.com/electron/trop/blob/main/docs/manual-backports.md',
       output: {
         title: statusItems.title,
         summary: statusItems.summary,

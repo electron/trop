@@ -443,7 +443,7 @@ export const backportImpl = async (
 
       const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
-      // Set up empty repo on master.
+      // Set up empty repo on main.
       const { dir } = await initRepo({
         slug,
         accessToken: repoAccessToken,
