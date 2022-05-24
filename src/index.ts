@@ -387,7 +387,7 @@ const probotHandler = async (robot: Application) => {
               conclusion: CheckRunStatus.FAILURE,
             });
           } else {
-            robot.log(`#${pr.number} is a valid backpot of #${oldPRNumber}`);
+            robot.log(`#${pr.number} is a valid backport of #${oldPRNumber}`);
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
               summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into ${pr.base.repo.default_branch}`,

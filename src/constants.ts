@@ -2,7 +2,7 @@ export const CHECK_PREFIX = 'Backportable? - ';
 
 export const BACKPORT_INFORMATION_CHECK = 'Backport Labels Added';
 
-export const NUM_SUPPORTED_VERSIONS = process.env.NUM_SUPPORTED_VERSIONS || 4;
+export const NUM_SUPPORTED_VERSIONS = process.env.NUM_SUPPORTED_VERSIONS || 3;
 
 export const BACKPORT_LABEL = 'backport';
 
