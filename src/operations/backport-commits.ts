@@ -1,8 +1,13 @@
+import * as config from 'config-yml';
 import * as fs from 'fs-extra';
+import { IQueue } from 'queue';
+import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
+
+const makeQueue: IQueue = require('queue');
 
 /**
  * Runs the git commands to apply backports in a series of cherry-picked commits.
@@ -66,7 +71,6 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
     try {
       await fs.writeFile(patchPath, patch, 'utf8');
       await git.raw(['am', '-3', patchPath]);
-      await fs.remove(patchPath);
     } catch (error) {
       log(
         'backportCommitsToBranch',
@@ -76,13 +80,103 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       );
 
       return false;
+    } finally {
+      if (await fs.pathExists(patchPath)) {
+        await fs.remove(patchPath);
+      }
     }
   }
 
   // Push the commit to the target branch on the remote.
   if (options.shouldPush) {
-    await git.push(options.targetRemote, options.tempBranch, {
-      '--set-upstream': null,
+    const appliedCommits = await git.log({
+      from: `target_repo/${options.targetBranch}`,
+      to: options.tempBranch,
+    });
+    let baseCommitSha = await git.revparse([
+      `target_repo/${options.targetBranch}`,
+    ]);
+    const baseTree = await options.github.git.getCommit({
+      owner: 'electron',
+      repo: 'electron',
+      commit_sha: baseCommitSha,
+    });
+    let baseTreeSha = baseTree.data.sha;
+
+    for (const commit of [...appliedCommits.all].reverse()) {
+      const rawDiffTree = await git.raw([
+        'diff-tree',
+        '--no-commit-id',
+        '--name-only',
+        '-r',
+        commit.hash,
+      ]);
+      const changedFiles = rawDiffTree
+        .trim()
+        .split('\n')
+        .map((s) => s.trim());
+      await git.checkout(commit.hash);
+
+      const newTree = await options.github.git.createTree({
+        base_tree: baseTreeSha,
+        owner: 'electron',
+        repo: 'electron',
+        tree: await Promise.all(
+          changedFiles.map(async (changedFile) => {
+            const onDiskPath = path.resolve(options.dir, changedFile);
+            if (!(await fs.pathExists(onDiskPath))) {
+              return {
+                path: changedFile,
+                mode: '100644',
+                type: 'blob',
+                sha: null as any,
+              };
+            }
+            const fileContents = await fs.readFile(onDiskPath, 'utf-8');
+            const stat = await fs.stat(onDiskPath);
+            return {
+              path: changedFile,
+              mode: stat.mode === 33188 ? '100644' : '100755',
+              type: 'blob',
+              contents: fileContents,
+            };
+          }),
+        ),
+      });
+
+      const authorEmail = await git.raw(['log', "--format='%ae'", commit.hash]);
+      const authorName = await git.raw(['log', "--format='%an'", commit.hash]);
+      const commitMessage = await git.raw([
+        'log',
+        "--format='%B'",
+        commit.hash,
+      ]);
+
+      const newCommit = await options.github.git.createCommit({
+        owner: 'electron',
+        repo: 'electron',
+        parents: [baseCommitSha],
+        tree: baseTreeSha,
+        message: commitMessage.trim(),
+        author: {
+          email: authorEmail.trim(),
+          name: authorName.trim(),
+        },
+        committer: {
+          email: config.tropEmail,
+          name: config.tropName,
+        },
+      });
+
+      baseTreeSha = newTree.data.sha;
+      baseCommitSha = newCommit.data.sha;
+    }
+
+    await options.github.git.createRef({
+      owner: 'electron',
+      repo: 'electron',
+      sha: baseCommitSha,
+      ref: options.tempBranch,
     });
   }
 

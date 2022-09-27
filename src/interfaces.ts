@@ -1,5 +1,5 @@
 import { Octokit } from '@octokit/rest';
-import { Context } from 'probot';
+import { Context, GitHubAPI } from 'probot';
 import { BackportPurpose } from './enums';
 
 export interface RemotesOptions {
@@ -23,10 +23,11 @@ export interface BackportOptions {
   tempBranch: string;
   patches: string[];
   shouldPush: boolean;
+  github: GitHubAPI;
 }
 
 export interface TryBackportOptions {
-  context?: Context;
+  context: Context;
   repoAccessToken: string;
   purpose: BackportPurpose;
   pr: Octokit.PullsGetResponse;

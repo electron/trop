@@ -166,6 +166,7 @@ and must be performed manually.',
     patches,
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
+    github: context.github,
   });
 
   if (success) {
@@ -214,6 +215,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
     patches: [patch],
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
+    github: opts.context.github,
   });
 
   if (success) {
@@ -487,6 +489,7 @@ export const backportImpl = async (
       if (!success) {
         const end = backportViaSquashHisto.startTimer();
         success = await tryBackportSquashCommit({
+          context,
           repoAccessToken,
           purpose,
           pr,
