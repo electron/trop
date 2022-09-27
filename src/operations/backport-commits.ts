@@ -5,11 +5,16 @@ import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
 
-const cleanRawGitString = (s: string) =>
-  s
-    .trim()
-    .slice(1, s.length - 1)
-    .trim();
+const cleanRawGitString = (s: string) => {
+  let nS = s.trim();
+  if (nS.startsWith(`'`)) {
+    nS = nS.slice(1).trim();
+  }
+  if (nS.endsWith(`'`)) {
+    nS = nS.slice(0, nS.length - 1).trim();
+  }
+  return nS;
+};
 
 /**
  * Runs the git commands to apply backports in a series of cherry-picked commits.
