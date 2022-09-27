@@ -187,7 +187,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       owner: 'electron',
       repo: 'electron',
       sha: baseCommitSha,
-      ref: options.tempBranch,
+      ref: `refs/heads/${options.tempBranch}`,
     });
   }
 
