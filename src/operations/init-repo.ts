@@ -6,7 +6,6 @@ import * as simpleGit from 'simple-git/promise';
 import { InitRepoOptions } from '../interfaces';
 import { LogLevel } from '../enums';
 import { log } from '../utils/log-util';
-import { ResetMode } from 'simple-git';
 
 const baseDir = path.resolve(os.tmpdir(), 'trop-working');
 
@@ -36,7 +35,7 @@ export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
   );
 
   // Clean up just in case.
-  await git.reset(ResetMode.HARD);
+  await git.reset('hard');
   const status = await git.status();
 
   for (const file of status.not_added) {

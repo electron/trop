@@ -125,16 +125,16 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
           changedFiles.map(async (changedFile) => {
             const onDiskPath = path.resolve(options.dir, changedFile);
             if (!(await fs.pathExists(onDiskPath))) {
-              return {
+              return <const>{
                 path: changedFile,
-                mode: '100644',
+                mode: <const>'100644',
                 type: 'blob',
                 sha: null as any,
               };
             }
             const fileContents = await fs.readFile(onDiskPath, 'utf-8');
             const stat = await fs.stat(onDiskPath);
-            return {
+            return <const>{
               path: changedFile,
               mode: stat.mode === 33188 ? '100644' : '100755',
               type: 'blob',
