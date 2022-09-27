@@ -172,14 +172,14 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
           .trim()
           .slice(1, commitMessage.length - 1)
           .trim(),
-        // author: {
-        //   email: authorEmail.trim(),
-        //   name: authorName.trim(),
-        // },
-        // committer: {
-        //   email: config.tropEmail,
-        //   name: config.tropName,
-        // },
+        author: {
+          email: authorEmail.trim(),
+          name: authorName.trim(),
+        },
+        committer: {
+          email: config.tropEmail,
+          name: config.tropName,
+        },
       });
 
       baseTreeSha = newTree.data.sha;
