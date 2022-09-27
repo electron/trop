@@ -156,7 +156,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
         owner: 'electron',
         repo: 'electron',
         parents: [baseCommitSha],
-        tree: baseTreeSha,
+        tree: newTree.data.sha,
         message: commitMessage.trim(),
         author: {
           email: authorEmail.trim(),
