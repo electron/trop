@@ -138,7 +138,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
               path: changedFile,
               mode: stat.mode === 33188 ? '100644' : '100755',
               type: 'blob',
-              contents: fileContents,
+              content: fileContents,
             };
           }),
         ),
