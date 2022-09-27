@@ -144,10 +144,21 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
         ),
       });
 
-      const authorEmail = await git.raw(['log', "--format='%ae'", commit.hash]);
-      const authorName = await git.raw(['log', "--format='%an'", commit.hash]);
+      const authorEmail = await git.raw([
+        'show',
+        '-s',
+        "--format='%ae'",
+        commit.hash,
+      ]);
+      const authorName = await git.raw([
+        'show',
+        '-s',
+        "--format='%an'",
+        commit.hash,
+      ]);
       const commitMessage = await git.raw([
-        'log',
+        'show',
+        '-s',
         "--format='%B'",
         commit.hash,
       ]);
