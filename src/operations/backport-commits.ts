@@ -1,13 +1,15 @@
-import * as config from 'config-yml';
 import * as fs from 'fs-extra';
-import { IQueue } from 'queue';
 import * as path from 'path';
 import * as simpleGit from 'simple-git/promise';
 import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
 
-const makeQueue: IQueue = require('queue');
+const cleanRawGitString = (s: string) =>
+  s
+    .trim()
+    .slice(1, s.length - 1)
+    .trim();
 
 /**
  * Runs the git commands to apply backports in a series of cherry-picked commits.
@@ -144,30 +146,17 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
         ),
       });
 
-      const authorEmail = await git.raw([
-        'show',
-        '-s',
-        "--format='%ae'",
-        commit.hash,
-      ]);
-      const authorName = await git.raw([
-        'show',
-        '-s',
-        "--format='%an'",
-        commit.hash,
-      ]);
-      const commitMessage = await git.raw([
-        'show',
-        '-s',
-        "--format='%B'",
-        commit.hash,
-      ]);
-      const cleanCommitMessage = commitMessage
-        .trim()
-        .slice(1, commitMessage.length - 1)
-        .trim();
+      const authorEmail = cleanRawGitString(
+        await git.raw(['show', '-s', "--format='%ae'", commit.hash]),
+      );
+      const authorName = cleanRawGitString(
+        await git.raw(['show', '-s', "--format='%an'", commit.hash]),
+      );
+      const commitMessage = cleanRawGitString(
+        await git.raw(['show', '-s', "--format='%B'", commit.hash]),
+      );
 
-      const newMessage = `${cleanCommitMessage}\n\nCo-authored-by: ${authorName} <${authorEmail}>`;
+      const newMessage = `${commitMessage}\n\nCo-authored-by: ${authorName} <${authorEmail}>`;
 
       const newCommit = await options.github.git.createCommit({
         owner: 'electron',
