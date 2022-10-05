@@ -141,9 +141,10 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
             }
             const fileContents = await fs.readFile(onDiskPath, 'utf-8');
             const stat = await fs.stat(onDiskPath);
+            const userMode = (stat.mode & parseInt('777', 8)).toString(8)[0];
             return <const>{
               path: changedFile,
-              mode: stat.mode === 33188 ? '100644' : '100755',
+              mode: userMode === '6' ? '100644' : '100755',
               type: 'blob',
               content: fileContents,
             };
