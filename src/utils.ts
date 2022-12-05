@@ -1,9 +1,7 @@
-import { Application, Context } from 'probot';
-import { Octokit } from '@octokit/rest';
 import fetch from 'node-fetch';
 import * as fs from 'fs-extra';
 import { IQueue } from 'queue';
-import * as simpleGit from 'simple-git/promise';
+import simpleGit from 'simple-git';
 
 import queue from './Queue';
 import {
@@ -24,6 +22,12 @@ import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
 import { TryBackportOptions } from './interfaces';
 import { client, register } from './utils/prom';
+import {
+  SimpleWebHookRepoContext,
+  WebHookPR,
+  WebHookRepoContext,
+} from './types';
+import { Context, Probot } from 'probot';
 
 const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
@@ -42,8 +46,8 @@ register.registerMetric(backportViaAllHisto);
 register.registerMetric(backportViaSquashHisto);
 
 export const labelClosedPR = async (
-  context: Context,
-  pr: Octokit.PullsGetResponse,
+  context: WebHookRepoContext,
+  pr: WebHookPR,
   targetBranch: String,
   change: PRChange,
 ) => {
@@ -84,12 +88,11 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
   if (!context) return;
 
   const commits = (
-    await context.github.paginate(
-      context.github.pulls.listCommits.endpoint.merge(
-        context.repo({ pull_number: opts.pr.number, per_page: 100 }),
-      ),
+    await context.octokit.paginate(
+      'GET /repos/{owner}/{repo}/pulls/{pull_number}/commits',
+      context.repo({ pull_number: opts.pr.number, per_page: 100 }),
     )
-  ).map((commit: Octokit.PullsListCommitsResponseItem) => commit.sha);
+  ).map((commit) => commit.sha);
 
   if (commits.length === 0) {
     log(
@@ -107,7 +110,7 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
       LogLevel.ERROR,
       `Too many commits (${commits.length})...backport will not be performed.`,
     );
-    await context.github.issues.createComment(
+    await context.octokit.issues.createComment(
       context.repo({
         issue_number: opts.pr.number,
         body:
@@ -166,7 +169,7 @@ and must be performed manually.',
     patches,
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
-    github: context.github,
+    github: context.octokit,
   });
 
   if (success) {
@@ -215,7 +218,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
     patches: [patch],
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
-    github: opts.context.github,
+    github: opts.context.octokit,
   });
 
   if (success) {
@@ -229,8 +232,11 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
   return success;
 };
 
-export const isAuthorizedUser = async (context: Context, username: string) => {
-  const { data } = await context.github.repos.getCollaboratorPermissionLevel(
+export const isAuthorizedUser = async (
+  context: Context<'issue_comment'>,
+  username: string,
+) => {
+  const { data } = await context.octokit.repos.getCollaboratorPermissionLevel(
     context.repo({
       username,
     }),
@@ -239,10 +245,7 @@ export const isAuthorizedUser = async (context: Context, username: string) => {
   return ['admin', 'write'].includes(data.permission);
 };
 
-export const getPRNumbersFromPRBody = (
-  pr: Octokit.PullsGetResponse,
-  checkNotBot = false,
-) => {
+export const getPRNumbersFromPRBody = (pr: WebHookPR, checkNotBot = false) => {
   const backportNumbers: number[] = [];
 
   const isBot = pr.user.login === getEnvVar('BOT_USER_NAME');
@@ -250,7 +253,7 @@ export const getPRNumbersFromPRBody = (
 
   let match: RegExpExecArray | null;
   const backportPattern = getBackportPattern();
-  while ((match = backportPattern.exec(pr.body))) {
+  while ((match = backportPattern.exec(pr.body || ''))) {
     // This might be the first or second capture group depending on if it's a link or not.
     backportNumbers.push(
       match[1] ? parseInt(match[1], 10) : parseInt(match[2], 10),
@@ -276,21 +279,21 @@ export const getPRNumbersFromPRBody = (
  * @param pr Pull Request
  */
 const getOriginalBackportNumber = async (
-  context: Context,
-  pr: Octokit.PullsGetResponse,
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
 ) => {
-  let originalPR = pr;
+  let originalPR: Pick<WebHookPR, 'number' | 'body'> = pr;
   let match: RegExpExecArray | null;
 
   const backportPattern = getBackportPattern();
-  while ((match = backportPattern.exec(originalPR.body))) {
+  while ((match = backportPattern.exec(originalPR.body || ''))) {
     // This might be the first or second capture group depending on if it's a link or not.
     const oldPRNumber = match[1]
       ? parseInt(match[1], 10)
       : parseInt(match[2], 10);
 
     // Fetch the PR body this PR is marked as backporting.
-    const { data: pullRequest } = await context.github.pulls.get({
+    const { data: pullRequest } = await context.octokit.pulls.get({
       owner: 'electron',
       repo: 'electron',
       pull_number: oldPRNumber,
@@ -303,8 +306,8 @@ const getOriginalBackportNumber = async (
 };
 
 export const isSemverMinorPR = async (
-  context: Context,
-  pr: Octokit.PullsGetResponse,
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
 ) => {
   log(
     'isSemverMinorPR',
@@ -323,7 +326,10 @@ export const isSemverMinorPR = async (
   return hasLabel || hasPrefix;
 };
 
-const checkUserHasWriteAccess = async (context: Context, user: string) => {
+const checkUserHasWriteAccess = async (
+  context: SimpleWebHookRepoContext,
+  user: string,
+) => {
   log(
     'checkUserHasWriteAccess',
     LogLevel.INFO,
@@ -333,7 +339,7 @@ const checkUserHasWriteAccess = async (context: Context, user: string) => {
   const params = context.repo({ username: user });
   const {
     data: userInfo,
-  } = await context.github.repos.getCollaboratorPermissionLevel(params);
+  } = await context.octokit.repos.getCollaboratorPermissionLevel(params);
 
   // Possible values for the permission key: 'admin', 'write', 'read', 'none'.
   // In order for the user's review to count, they must be at least 'write'.
@@ -341,8 +347,8 @@ const checkUserHasWriteAccess = async (context: Context, user: string) => {
 };
 
 const createBackportComment = async (
-  context: Context,
-  pr: Octokit.PullsGetResponse,
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
 ) => {
   const prNumber = await getOriginalBackportNumber(context, pr);
 
@@ -354,10 +360,10 @@ const createBackportComment = async (
 
   let body = `Backport of #${prNumber}\n\nSee that PR for details.`;
 
-  const onelineMatch = pr.body.match(
+  const onelineMatch = pr.body?.match(
     /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi,
   );
-  const multilineMatch = pr.body.match(
+  const multilineMatch = pr.body?.match(
     /(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/gi,
   );
 
@@ -374,8 +380,9 @@ const createBackportComment = async (
 };
 
 export const backportImpl = async (
-  robot: Application,
-  context: Context,
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
   targetBranch: string,
   purpose: BackportPurpose,
   labelToRemove?: string,
@@ -392,46 +399,44 @@ export const backportImpl = async (
         LogLevel.WARN,
         `${targetBranch} is no longer supported - no backport will be initiated.`,
       );
-      await context.github.issues.createComment(
+      await context.octokit.issues.createComment(
         context.repo({
           body: `${targetBranch} is no longer supported - no backport will be initiated.`,
-          issue_number: context.payload.issue.number,
+          issue_number: pr.number,
         }),
       );
       return;
     }
   }
 
-  const base: Octokit.PullsGetResponseBase = context.payload.pull_request.base;
+  const base = pr.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
-  const bp = `backport from PR #${context.payload.pull_request.number} to "${targetBranch}"`;
+  const bp = `backport from PR #${pr.number} to "${targetBranch}"`;
   log('backportImpl', LogLevel.INFO, `Queuing ${bp} for "${slug}"`);
 
   const getCheckRun = async () => {
-    const allChecks = await context.github.checks.listForRef(
+    const allChecks = await context.octokit.checks.listForRef(
       context.repo({
-        ref: context.payload.pull_request.head.sha,
+        ref: pr.head.sha,
         per_page: 100,
       }),
     );
 
-    return allChecks.data.check_runs.find(
-      (run: Octokit.ChecksListForRefResponseCheckRunsItem) => {
-        return run.name === `${CHECK_PREFIX}${targetBranch}`;
-      },
-    );
+    return allChecks.data.check_runs.find((run) => {
+      return run.name === `${CHECK_PREFIX}${targetBranch}`;
+    });
   };
 
   let createdDir: string | null = null;
 
   queue.enterQueue(
-    `backport-${context.payload.pull_request.head.sha}-${targetBranch}-${purpose}`,
+    `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
       if (purpose === BackportPurpose.Check) {
         const checkRun = await getCheckRun();
         if (checkRun) {
-          await context.github.checks.update(
+          await context.octokit.checks.update(
             context.repo({
               check_run_id: checkRun.id,
               name: checkRun.name,
@@ -442,8 +447,6 @@ export const backportImpl = async (
       }
 
       const repoAccessToken = await getRepoToken(robot, context);
-
-      const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
       // Set up empty repo on main.
       const { dir } = await initRepo({
@@ -516,7 +519,7 @@ export const backportImpl = async (
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('backportImpl', LogLevel.INFO, 'Creating Pull Request');
 
-        const { data: newPr } = await context.github.pulls.create(
+        const { data: newPr } = await context.octokit.pulls.create(
           context.repo({
             head: `${tempBranch}`,
             base: targetBranch,
@@ -537,7 +540,7 @@ export const backportImpl = async (
         }
 
         if (reviewers.length > 0) {
-          await context.github.pulls.createReviewRequest(
+          await context.octokit.pulls.requestReviewers(
             context.repo({
               pull_number: newPr.number,
               reviewers,
@@ -550,7 +553,7 @@ export const backportImpl = async (
           LogLevel.INFO,
           `Adding breadcrumb comment to ${pr.number}`,
         );
-        await context.github.issues.createComment(
+        await context.octokit.issues.createComment(
           context.repo({
             issue_number: pr.number,
             body: `I have automatically backported this PR to "${targetBranch}", \
@@ -628,7 +631,7 @@ export const backportImpl = async (
       if (purpose === BackportPurpose.Check) {
         const checkRun = await getCheckRun();
         if (checkRun) {
-          context.github.checks.update(
+          context.octokit.checks.update(
             context.repo({
               check_run_id: checkRun.id,
               name: checkRun.name,
@@ -686,14 +689,13 @@ export const backportImpl = async (
         await fs.remove(createdDir);
       }
 
-      const pr = context.payload.pull_request;
       if (purpose === BackportPurpose.ExecuteBackport) {
-        await context.github.issues.createComment(
+        await context.octokit.issues.createComment(
           context.repo({
             issue_number: pr.number,
             body: `I was unable to backport this PR to "${targetBranch}" cleanly;
    you will need to perform this backport manually.`,
-          }) as any,
+          }),
         );
 
         const labelToRemove = PRStatus.TARGET + targetBranch;
@@ -713,7 +715,7 @@ export const backportImpl = async (
         const checkRun = await getCheckRun();
         if (checkRun) {
           const mdSep = '``````````````````````````````';
-          const updateOpts: Octokit.ChecksUpdateParams = context.repo({
+          const updateOpts = context.repo({
             check_run_id: checkRun.id,
             name: checkRun.name,
             conclusion: 'neutral' as 'neutral',
@@ -728,11 +730,11 @@ export const backportImpl = async (
             },
           });
           try {
-            await context.github.checks.update(updateOpts as any);
+            await context.octokit.checks.update(updateOpts);
           } catch (err) {
             // A GitHub error occurred - try to mark it as a failure without annotations.
             updateOpts.output!.annotations = undefined;
-            await context.github.checks.update(updateOpts as any);
+            await context.octokit.checks.update(updateOpts);
           }
         }
       }

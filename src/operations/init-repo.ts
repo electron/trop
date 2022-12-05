@@ -2,7 +2,7 @@ import * as config from 'config-yml';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
-import * as simpleGit from 'simple-git/promise';
+import simpleGit from 'simple-git';
 import { InitRepoOptions } from '../interfaces';
 import { LogLevel } from '../enums';
 import { log } from '../utils/log-util';

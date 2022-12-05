@@ -1,9 +1,9 @@
 import { NUM_SUPPORTED_VERSIONS } from '../constants';
 
 import { getEnvVar } from './env-util';
-import { Context } from 'probot';
 import { log } from './log-util';
 import { LogLevel } from '../enums';
+import { WebHookRepoContext } from '../types';
 
 /**
  * Fetches an array of the currently supported branches for a repository.
@@ -12,7 +12,7 @@ import { LogLevel } from '../enums';
  * @returns {Promise<string[]>} - an array of currently supported branches in x-y-z format
  */
 export async function getSupportedBranches(
-  context: Context,
+  context: Pick<WebHookRepoContext, 'octokit' | 'repo'>,
 ): Promise<string[]> {
   log(
     'getSupportedBranches',
@@ -26,7 +26,7 @@ export async function getSupportedBranches(
   );
   const SUPPORTED_BRANCH_PATTERN = new RegExp(SUPPORTED_BRANCH_ENV_PATTERN);
 
-  const { data: branches } = await context.github.repos.listBranches(
+  const { data: branches } = await context.octokit.repos.listBranches(
     context.repo({
       protected: true,
     }),

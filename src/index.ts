@@ -1,4 +1,4 @@
-import { Application, Context } from 'probot';
+import { ApplicationFunction, Context } from 'probot';
 
 import {
   backportImpl,
@@ -14,7 +14,7 @@ import {
 import { CHECK_PREFIX, NO_BACKPORT_LABEL, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
-import { Octokit } from '@octokit/rest';
+import { Label } from '@octokit/webhooks-types';
 import {
   backportToLabel,
   backportToBranch,
@@ -28,9 +28,10 @@ import {
   updateBackportValidityCheck,
 } from './utils/checks-util';
 import { register } from './utils/prom';
+import { SimpleWebHookRepoContext, WebHookPR, WebHookPRContext } from './types';
 
-const probotHandler = async (robot: Application) => {
-  robot.router.get('/metrics', (req, res) => {
+const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
+  getRouter?.('/metrics').get('/', (req, res) => {
     register
       .metrics()
       .then((metrics) => {
@@ -44,8 +45,8 @@ const probotHandler = async (robot: Application) => {
   });
 
   const handleClosedPRLabels = async (
-    context: Context,
-    pr: Octokit.PullsGetResponse,
+    context: WebHookPRContext,
+    pr: WebHookPR,
     change: PRChange,
   ) => {
     for (const label of pr.labels) {
@@ -59,18 +60,17 @@ const probotHandler = async (robot: Application) => {
   };
 
   const backportAllLabels = (
-    context: Context,
-    pr: Octokit.PullsGetResponse,
+    context: SimpleWebHookRepoContext,
+    pr: WebHookPR,
   ) => {
     for (const label of pr.labels) {
-      context.payload.pull_request = context.payload.pull_request || pr;
-      backportToLabel(robot, context, label);
+      backportToLabel(robot, context, pr, label);
     }
   };
 
   const handleTropBackportClosed = async (
-    context: Context,
-    pr: Octokit.PullsGetResponse,
+    context: WebHookPRContext,
+    pr: WebHookPR,
     change: PRChange,
   ) => {
     const closeType = change === PRChange.MERGE ? 'merged' : 'closed';
@@ -81,7 +81,7 @@ const probotHandler = async (robot: Application) => {
 
     robot.log(`Deleting base branch: ${pr.head.ref}`);
     try {
-      await context.github.git.deleteRef(
+      await context.octokit.git.deleteRef(
         context.repo({ ref: `heads/${pr.head.ref}` }),
       );
     } catch (e) {
@@ -89,8 +89,8 @@ const probotHandler = async (robot: Application) => {
     }
   };
 
-  const runCheck = async (context: Context, pr: Octokit.PullsGetResponse) => {
-    const allChecks = await context.github.checks.listForRef(
+  const runCheck = async (context: WebHookPRContext, pr: WebHookPR) => {
+    const allChecks = await context.octokit.checks.listForRef(
       context.repo({
         ref: pr.head.sha,
         per_page: 100,
@@ -108,7 +108,7 @@ const probotHandler = async (robot: Application) => {
       if (existing) {
         if (existing.conclusion !== 'neutral') continue;
 
-        await context.github.checks.update(
+        await context.octokit.checks.update(
           context.repo({
             name: existing.name,
             check_run_id: existing.id,
@@ -116,7 +116,7 @@ const probotHandler = async (robot: Application) => {
           }),
         );
       } else {
-        await context.github.checks.create(
+        await context.octokit.checks.create(
           context.repo({
             name: runName,
             head_sha: pr.head.sha,
@@ -126,7 +126,13 @@ const probotHandler = async (robot: Application) => {
         );
       }
 
-      await backportImpl(robot, context, targetBranch, BackportPurpose.Check);
+      await backportImpl(
+        robot,
+        context,
+        pr,
+        targetBranch,
+        BackportPurpose.Check,
+      );
     }
 
     for (const checkRun of checkRuns) {
@@ -148,10 +154,10 @@ const probotHandler = async (robot: Application) => {
     }
   };
 
-  const maybeRunCheck = async (context: Context) => {
+  const maybeRunCheck = async (context: WebHookPRContext) => {
     const payload = context.payload;
     if (!payload.pull_request.merged) {
-      await runCheck(context, payload.pull_request as any);
+      await runCheck(context, payload.pull_request);
     }
   };
 
@@ -163,55 +169,6 @@ const probotHandler = async (robot: Application) => {
    * @param context
    * @returns
    */
-  const backportInformationCheck = async (context: Context) => {
-    const pr: Octokit.PullsGetResponse = context.payload.pull_request;
-
-    if (pr.base.ref !== pr.base.repo.default_branch) {
-      return;
-    }
-
-    let backportCheck = await getBackportInformationCheck(context);
-
-    if (!backportCheck) {
-      await queueBackportInformationCheck(context);
-      backportCheck = (await getBackportInformationCheck(context))!;
-    }
-
-    const isNoBackport = pr.labels.some(
-      (prLabel) => prLabel.name === NO_BACKPORT_LABEL,
-    );
-    const hasTarget = pr.labels.some(
-      (prLabel) =>
-        prLabel.name.startsWith(PRStatus.TARGET) ||
-        prLabel.name.startsWith(PRStatus.IN_FLIGHT) ||
-        prLabel.name.startsWith(PRStatus.MERGED),
-    );
-
-    if (hasTarget && isNoBackport) {
-      await updateBackportInformationCheck(context, backportCheck, {
-        title: 'Conflicting Backport Information',
-        summary:
-          'The PR has a "no-backport" and at least one "target/x-y-z" label. Impossible to determine backport action.',
-        conclusion: CheckRunStatus.FAILURE,
-      });
-
-      return;
-    }
-
-    if (!hasTarget && !isNoBackport) {
-      if (backportCheck.status !== 'queued') {
-        await queueBackportInformationCheck(context);
-      }
-
-      return;
-    }
-
-    await updateBackportInformationCheck(context, backportCheck, {
-      title: 'Backport Information Provided',
-      summary: 'This PR contains the required  backport information.',
-      conclusion: CheckRunStatus.SUCCESS,
-    });
-  };
 
   const VALID_BACKPORT_CHECK_NAME = 'Valid Backport';
 
@@ -223,8 +180,12 @@ const probotHandler = async (robot: Application) => {
       'pull_request.labeled',
       'pull_request.unlabeled',
     ],
-    async (context: Context) => {
-      const { pull_request: pr, label, action } = context.payload;
+    async (context) => {
+      const { pull_request: pr, action } = context.payload;
+      let label: Label;
+      if ('label' in context.payload) {
+        label = context.payload.label;
+      }
       const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
 
       robot.log(`Found ${oldPRNumbers.length} backport numbers for this PR`);
@@ -241,7 +202,7 @@ const probotHandler = async (robot: Application) => {
 
       // Check if the PR is going to main, if it's not check if it's correctly
       // tagged as a backport of a PR that has already been merged into main.
-      const { data: allChecks } = await context.github.checks.listForRef(
+      const { data: allChecks } = await context.octokit.checks.listForRef(
         context.repo({
           ref: pr.head.sha,
           per_page: 100,
@@ -253,7 +214,7 @@ const probotHandler = async (robot: Application) => {
 
       if (!checkRun) {
         robot.log(`Queueing new check run for #${pr.number}`);
-        const response = await context.github.checks.create(
+        const response = await context.octokit.checks.create(
           context.repo({
             name: VALID_BACKPORT_CHECK_NAME,
             head_sha: pr.head.sha,
@@ -262,7 +223,7 @@ const probotHandler = async (robot: Application) => {
           }),
         );
 
-        checkRun = (response.data as any) as Octokit.ChecksListForRefResponseCheckRunsItem;
+        checkRun = response.data;
       }
 
       if (pr.base.ref !== pr.base.repo.default_branch) {
@@ -273,14 +234,14 @@ const probotHandler = async (robot: Application) => {
               label.name.startsWith(status),
             )
           ) {
-            const targetBranch = label.name.match(
+            const targetBranch = label!.name.match(
               /^(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))$/,
             );
             if (targetBranch?.[0] && targetBranch?.[0] === pr.base.ref) {
               robot.log(
                 `#${pr.number} is trying to backport to itself - this is not allowed`,
               );
-              await removeLabel(context, pr.number, label.name);
+              await removeLabel(context, 1, '');
             }
           }
         }
@@ -319,7 +280,7 @@ const probotHandler = async (robot: Application) => {
             !FASTTRACK_PREFIXES.some((pre) => pr.title.startsWith(pre)) &&
             !FASTTRACK_USERS.some((user) => pr.user.login === user) &&
             !FASTTRACK_LABELS.some((label) =>
-              pr.labels.some((prLabel: any) => prLabel.name === label),
+              pr.labels.some((prLabel) => prLabel.name === label),
             )
           ) {
             robot.log(
@@ -348,7 +309,7 @@ const probotHandler = async (robot: Application) => {
 
           for (const oldPRNumber of oldPRNumbers) {
             robot.log(`Checking validity of #${oldPRNumber}`);
-            const { data: oldPR } = await context.github.pulls.get(
+            const { data: oldPR } = await context.octokit.pulls.get(
               context.repo({
                 pull_number: oldPRNumber,
               }),
@@ -428,12 +389,60 @@ const probotHandler = async (robot: Application) => {
       'pull_request.unlabeled',
       'pull_request.synchronize',
     ],
-    backportInformationCheck,
+    async (context) => {
+      const pr = context.payload.pull_request;
+
+      if (pr.base.ref !== pr.base.repo.default_branch) {
+        return;
+      }
+
+      let backportCheck = await getBackportInformationCheck(context);
+
+      if (!backportCheck) {
+        await queueBackportInformationCheck(context);
+        backportCheck = (await getBackportInformationCheck(context))!;
+      }
+
+      const isNoBackport = pr.labels.some(
+        (prLabel) => prLabel.name === NO_BACKPORT_LABEL,
+      );
+      const hasTarget = pr.labels.some(
+        (prLabel) =>
+          prLabel.name.startsWith(PRStatus.TARGET) ||
+          prLabel.name.startsWith(PRStatus.IN_FLIGHT) ||
+          prLabel.name.startsWith(PRStatus.MERGED),
+      );
+
+      if (hasTarget && isNoBackport) {
+        await updateBackportInformationCheck(context, backportCheck, {
+          title: 'Conflicting Backport Information',
+          summary:
+            'The PR has a "no-backport" and at least one "target/x-y-z" label. Impossible to determine backport action.',
+          conclusion: CheckRunStatus.FAILURE,
+        });
+
+        return;
+      }
+
+      if (!hasTarget && !isNoBackport) {
+        if (backportCheck.status !== 'queued') {
+          await queueBackportInformationCheck(context);
+        }
+
+        return;
+      }
+
+      await updateBackportInformationCheck(context, backportCheck, {
+        title: 'Backport Information Provided',
+        summary: 'This PR contains the required  backport information.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    },
   );
 
   // Backport pull requests to labeled targets when PR is merged.
-  robot.on('pull_request.closed', async (context: Context) => {
-    const pr: Octokit.PullsGetResponse = context.payload.pull_request;
+  robot.on('pull_request.closed', async (context) => {
+    const pr = context.payload.pull_request;
     const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
     if (pr.merged) {
       if (oldPRNumbers.length > 0) {
@@ -479,7 +488,7 @@ const probotHandler = async (robot: Application) => {
   const TROP_COMMAND_PREFIX = '/trop ';
 
   // Manually trigger backporting process on trigger comment phrase.
-  robot.on('issue_comment.created', async (context: Context) => {
+  robot.on('issue_comment.created', async (context) => {
     const { issue, comment } = context.payload;
 
     const isPullRequest = (i: { number: number; html_url: string }) =>
@@ -495,7 +504,7 @@ const probotHandler = async (robot: Application) => {
       robot.log(
         `@${comment.user.login} is not authorized to run PR backports - stopping`,
       );
-      await context.github.issues.createComment(
+      await context.octokit.issues.createComment(
         context.repo({
           issue_number: issue.number,
           body: `@${comment.user.login} is not authorized to run PR backports.`,
@@ -512,12 +521,12 @@ const probotHandler = async (robot: Application) => {
         command: /^run backport/,
         execute: async () => {
           const pr = (
-            await context.github.pulls.get(
+            await context.octokit.pulls.get(
               context.repo({ pull_number: issue.number }),
             )
           ).data;
           if (!pr.merged) {
-            await context.github.issues.createComment(
+            await context.octokit.issues.createComment(
               context.repo({
                 issue_number: issue.number,
                 body:
@@ -534,11 +543,11 @@ const probotHandler = async (robot: Application) => {
         command: /^run backport$/,
         execute: async () => {
           const pr = (
-            await context.github.pulls.get(
+            await context.octokit.pulls.get(
               context.repo({ pull_number: issue.number }),
             )
-          ).data as any;
-          await context.github.issues.createComment(
+          ).data as WebHookPR;
+          await context.octokit.issues.createComment(
             context.repo({
               body:
                 'The backport process for this PR has been manually initiated - here we go! :D',
@@ -561,15 +570,15 @@ const probotHandler = async (robot: Application) => {
 
             if (!branch.trim()) continue;
             const pr = (
-              await context.github.pulls.get(
+              await context.octokit.pulls.get(
                 context.repo({ pull_number: issue.number }),
               )
-            ).data;
+            ).data as WebHookPR;
 
             try {
-              await context.github.repos.getBranch(context.repo({ branch }));
+              await context.octokit.repos.getBranch(context.repo({ branch }));
             } catch (err) {
-              await context.github.issues.createComment(
+              await context.octokit.issues.createComment(
                 context.repo({
                   body: `The branch you provided \`${branch}\` does not appear to exist.`,
                   issue_number: issue.number,
@@ -586,7 +595,7 @@ const probotHandler = async (robot: Application) => {
                 robot.log(
                   `${branch} is no longer supported - no backport will be initiated`,
                 );
-                await context.github.issues.createComment(
+                await context.octokit.issues.createComment(
                   context.repo({
                     body: `\`${branch}\` is no longer supported - no backport will be initiated.`,
                     issue_number: issue.number,
@@ -599,14 +608,13 @@ const probotHandler = async (robot: Application) => {
             robot.log(
               `Initiating manual backport process for #${issue.number} to ${branch}`,
             );
-            await context.github.issues.createComment(
+            await context.octokit.issues.createComment(
               context.repo({
                 body: `The backport process for this PR has been manually initiated - sending your PR to \`${branch}\`!`,
                 issue_number: issue.number,
               }),
             );
-            context.payload.pull_request = context.payload.pull_request || pr;
-            backportToBranch(robot, context, branch);
+            backportToBranch(robot, context, pr, branch);
           }
           return true;
         },

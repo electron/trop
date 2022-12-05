@@ -12,7 +12,8 @@
     "experimentalDecorators": true,
 		"allowJs": true,
 		"strict": true,
-		"allowSyntheticDefaultImports": true
+		"allowSyntheticDefaultImports": true,
+		"strictNullChecks": true
 	},
 	"exclude": [
 		"node_modules",

@@ -1,21 +1,22 @@
-import { Application, Context } from 'probot';
 import { PRStatus, BackportPurpose, LogLevel } from '../enums';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 import { backportImpl } from '../utils';
-import { Octokit } from '@octokit/rest';
+import { Probot } from 'probot';
+import { SimpleWebHookRepoContext, WebHookPR } from '../types';
 
 /**
  * Performs a backport to a specified label representing a branch.
  *
- * @param {Application} robot - an instance of Probot
- * @param {Context} context - the context of the event that was triggered
+ * @param {Probot} robot - an instance of Probot
+ * @param {WebHookRepoContext} context - the context of the event that was triggered
  * @param {PullsGetResponseLabelsItem} label - the label representing the target branch for backporting
  */
 export const backportToLabel = async (
-  robot: Application,
-  context: Context,
-  label: Octokit.PullsGetResponseLabelsItem,
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
+  label: { name: string },
 ) => {
   log(
     'backportToLabel',
@@ -47,6 +48,7 @@ export const backportToLabel = async (
   await backportImpl(
     robot,
     context,
+    pr,
     targetBranch,
     BackportPurpose.ExecuteBackport,
     labelToRemove,
@@ -57,13 +59,14 @@ export const backportToLabel = async (
 /**
  * Performs a backport to a specified target branch.
  *
- * @param {Application} robot - an instance of Probot
- * @param {Context} context - the context of the event that was triggered
+ * @param {Probot} robot - an instance of Probot
+ * @param {WebHookRepoContext} context - the context of the event that was triggered
  * @param {string} targetBranch - the branch to which the backport will be performed
  */
 export const backportToBranch = async (
-  robot: Application,
-  context: Context,
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
   targetBranch: string,
 ) => {
   log(
@@ -77,6 +80,7 @@ export const backportToBranch = async (
   await backportImpl(
     robot,
     context,
+    pr,
     targetBranch,
     BackportPurpose.ExecuteBackport,
     labelToRemove,
