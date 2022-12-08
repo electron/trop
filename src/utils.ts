@@ -11,7 +11,6 @@ import {
   BACKPORT_REQUESTED_LABEL,
   DEFAULT_BACKPORT_REVIEW_TEAM,
   BACKPORT_LABEL,
-  SEMVER_PREFIX,
 } from './constants';
 import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
@@ -167,6 +166,7 @@ and must be performed manually.',
     patches,
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
+    github: context.github,
   });
 
   if (success) {
@@ -230,6 +230,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
     patches: [patch],
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
+    github: opts.context.github,
   });
 
   if (success) {
@@ -459,7 +460,7 @@ export const backportImpl = async (
 
       const pr: Octokit.PullsGetResponse = context.payload.pull_request;
 
-      // Set up empty repo on master.
+      // Set up empty repo on main.
       const { dir } = await initRepo({
         slug,
         accessToken: repoAccessToken,
@@ -503,6 +504,7 @@ export const backportImpl = async (
       if (!success) {
         const end = backportViaSquashHisto.startTimer();
         success = await tryBackportSquashCommit({
+          context,
           repoAccessToken,
           purpose,
           pr,
@@ -613,11 +615,29 @@ export const backportImpl = async (
           labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
         }
 
-        const semverLabel = pr.labels.find((l: any) =>
-          l.name.startsWith(SEMVER_PREFIX),
-        );
+        const semverLabel = labelUtils.getSemverLabel(pr);
         if (semverLabel) {
-          labelsToAdd.push(semverLabel.name);
+          // If the new PR for some reason has a semver label already, then
+          // we need to compare the two semver labels and ensure the higher one
+          // takes precedence.
+          const newPRSemverLabel = labelUtils.getSemverLabel(newPr);
+          if (newPRSemverLabel && newPRSemverLabel.name !== semverLabel.name) {
+            const higherLabel = labelUtils.getHighestSemverLabel(
+              semverLabel.name,
+              newPRSemverLabel.name,
+            );
+            // The existing label is lower precedence - remove and replace it.
+            if (higherLabel === semverLabel.name) {
+              await labelUtils.removeLabel(
+                context,
+                newPr.number,
+                newPRSemverLabel.name,
+              );
+              labelsToAdd.push(semverLabel.name);
+            }
+          } else {
+            labelsToAdd.push(semverLabel.name);
+          }
         }
 
         await labelUtils.addLabels(context, newPr.number, labelsToAdd);

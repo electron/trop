@@ -13,9 +13,9 @@ Welcome! We're glad you want to try out `trop`.
 #### Using `trop`:
 
 **Automatically With Labels**:
-1. Open a bugfix or feature pull request to `master`
+1. Open a bugfix or feature pull request to `main`
 2. Add backport label(s) to the pull request (ex. `target/2-0-x`)
-3. Your pull request is reviewed and you or a co-contributor merges it into `master`
+3. Your pull request is reviewed and you or a co-contributor merges it into `main`
 4. `trop` will automatically open pull requests containing `cherry-pick`s of the code into the backporting branches you specified in your labels (in this case, `2-0-x`).
 5. You or a co-contributor resolves any conflicts and merges in `trop`'s backports
 
@@ -24,8 +24,8 @@ so that you or another contributor and perform the backport manually.  Trop will
 and update the labels appropriately.
 
 **Manual Triggering With Labels**:
-1. Open a bugfix or feature pull request to `master`
-2. Your pull request is reviewed and you or a co-contributor merges it into `master`
+1. Open a bugfix or feature pull request to `main`
+2. Your pull request is reviewed and you or a co-contributor merges it into `main`
 3. After it's been merged, you add backport label(s) to the pull request (ex. `target/2-0-x`)
 4. You create a new comment with the following body: `/trop run backport`
 5. `trop` will begin the backport process for target branches you have specified via labels
@@ -33,8 +33,8 @@ and update the labels appropriately.
 7. You or a co-contributor resolves any conflicts and merges in `trop`'s backports
 
 **Manual Triggering Without Labels**:
-1. Open a bugfix or feature pull request to `master`
-2. Your pull request is reviewed and you or a co-contributor merges it into `master`
+1. Open a bugfix or feature pull request to `main`
+2. Your pull request is reviewed and you or a co-contributor merges it into `main`
 3. You create a new comment with the following body: `/trop run backport-to [BRANCH_NAME]`, where `[BRANCH_NAME]` is replaced with the branch you wish to backport to
 4. `trop` will begin the backport process for target branch you manually specified
 5. `trop` will automatically open pull requests containing `cherry-pick`s of the code into the branch you specified in your comment body

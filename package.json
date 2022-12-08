@@ -9,8 +9,8 @@
   "scripts": {
     "build": "tsc",
     "start": "probot run ./lib/index.js",
-    "prettier:write": "prettier --write \"src/**/*.ts\"",
-    "lint": "prettier --check \"src/**/*.ts\"",
+    "prettier:write": "prettier --write \"{src,spec}/**/*.ts\"",
+    "lint": "prettier --check \"{src,spec}/**/*.ts\"",
     "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/",
     "postinstall": "tsc",
     "prepare": "husky install"
@@ -25,7 +25,7 @@
     "probot": "^9.6.6",
     "prom-client": "^13.1.0",
     "queue": "^4.5.0",
-    "simple-git": "1.105.0",
+    "simple-git": "3.5.0",
     "what-the-diff": "^0.4.0"
   },
   "devDependencies": {
@@ -48,7 +48,7 @@
     "typescript": "^4.2.4"
   },
   "lint-staged": {
-    "**/*.ts": "prettier --write **/*.ts"
+    "{src,spec}/**/*.ts": "prettier --write **/*.ts"
   },
   "engines": {
     "node": ">= 7.7.0",

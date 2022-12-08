@@ -251,21 +251,21 @@ const probotHandler = async (robot: Application) => {
         (run) => run.name === VALID_BACKPORT_CHECK_NAME,
       );
 
+      if (!checkRun) {
+        robot.log(`Queueing new check run for #${pr.number}`);
+        const response = await context.github.checks.create(
+          context.repo({
+            name: VALID_BACKPORT_CHECK_NAME,
+            head_sha: pr.head.sha,
+            status: 'queued' as 'queued',
+            details_url: 'https://github.com/electron/trop',
+          }),
+        );
+
+        checkRun = (response.data as any) as Octokit.ChecksListForRefResponseCheckRunsItem;
+      }
+
       if (pr.base.ref !== pr.base.repo.default_branch) {
-        if (!checkRun) {
-          robot.log(`Queueing new check run for #${pr.number}`);
-          const response = await context.github.checks.create(
-            context.repo({
-              name: VALID_BACKPORT_CHECK_NAME,
-              head_sha: pr.head.sha,
-              status: 'queued' as 'queued',
-              details_url: 'https://github.com/electron/trop',
-            }),
-          );
-
-          checkRun = (response.data as any) as Octokit.ChecksListForRefResponseCheckRunsItem;
-        }
-
         // Ensure that we aren't including our own base branch in the backport process.
         if (action === 'labeled') {
           if (
@@ -387,7 +387,7 @@ const probotHandler = async (robot: Application) => {
               conclusion: CheckRunStatus.FAILURE,
             });
           } else {
-            robot.log(`#${pr.number} is a valid backpot of #${oldPRNumber}`);
+            robot.log(`#${pr.number} is a valid backport of #${oldPRNumber}`);
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
               summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into ${pr.base.repo.default_branch}`,
@@ -395,7 +395,7 @@ const probotHandler = async (robot: Application) => {
             });
           }
         }
-      } else if (checkRun) {
+      } else {
         // If we're somehow targeting main and have a check run,
         // we mark this check as cancelled.
         robot.log(

@@ -2,6 +2,7 @@ import { Context } from 'probot';
 import { Octokit } from '@octokit/rest';
 import { log } from './log-util';
 import { LogLevel } from '../enums';
+import { SEMVER_LABELS, SEMVER_PREFIX } from '../constants';
 
 export const addLabels = async (
   context: Context,
@@ -16,6 +17,25 @@ export const addLabels = async (
       labels: labelsToAdd,
     }),
   );
+};
+
+export const getSemverLabel = (pr: Octokit.PullsGetResponse) => {
+  return pr.labels.find((l: any) => l.name.startsWith(SEMVER_PREFIX));
+};
+
+export const getHighestSemverLabel = (...labels: string[]) => {
+  const ranked = [
+    SEMVER_LABELS.PATCH,
+    SEMVER_LABELS.MINOR,
+    SEMVER_LABELS.MAJOR,
+  ];
+
+  const indices = labels.map((label) => ranked.indexOf(label));
+  if (indices.some((index) => index === -1)) {
+    throw new Error('Invalid semver labels');
+  }
+
+  return ranked[Math.max(...indices)];
 };
 
 export const removeLabel = async (
