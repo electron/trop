@@ -1,4 +1,4 @@
-[![Build Status](https://img.shields.io/travis/electron/trop.svg)](https://travis-ci.org/electron/trop)
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/electron/trop/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/electron/trop/tree/main)
 
 # trop
 
