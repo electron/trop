@@ -24,7 +24,7 @@
     "probot": "^12.2.8",
     "prom-client": "^13.1.0",
     "queue": "^4.5.0",
-    "simple-git": "3.5.0",
+    "simple-git": "3.15.0",
     "what-the-diff": "^0.4.0"
   },
   "devDependencies": {
