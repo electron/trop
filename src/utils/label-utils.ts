@@ -1,17 +1,20 @@
-import { Context } from 'probot';
-import { Octokit } from '@octokit/rest';
 import { log } from './log-util';
 import { LogLevel } from '../enums';
 import { SEMVER_LABELS, SEMVER_PREFIX } from '../constants';
+import {
+  SimpleWebHookRepoContext,
+  WebHookPR,
+  WebHookRepoContext,
+} from '../types';
 
 export const addLabels = async (
-  context: Context,
+  context: SimpleWebHookRepoContext,
   prNumber: number,
   labelsToAdd: string[],
 ) => {
   log('addLabel', LogLevel.INFO, `Adding ${labelsToAdd} to PR #${prNumber}`);
 
-  return context.github.issues.addLabels(
+  return context.octokit.issues.addLabels(
     context.repo({
       issue_number: prNumber,
       labels: labelsToAdd,
@@ -19,7 +22,7 @@ export const addLabels = async (
   );
 };
 
-export const getSemverLabel = (pr: Octokit.PullsGetResponse) => {
+export const getSemverLabel = (pr: Pick<WebHookPR, 'labels'>) => {
   return pr.labels.find((l: any) => l.name.startsWith(SEMVER_PREFIX));
 };
 
@@ -39,7 +42,7 @@ export const getHighestSemverLabel = (...labels: string[]) => {
 };
 
 export const removeLabel = async (
-  context: Context,
+  context: Pick<WebHookRepoContext, 'octokit' | 'repo'>,
   prNumber: number,
   labelToRemove: string,
 ) => {
@@ -52,7 +55,7 @@ export const removeLabel = async (
   // If the issue does not have the label, don't try remove it
   if (!(await labelExistsOnPR(context, prNumber, labelToRemove))) return;
 
-  return context.github.issues.removeLabel(
+  return context.octokit.issues.removeLabel(
     context.repo({
       issue_number: prNumber,
       name: labelToRemove,
@@ -61,14 +64,14 @@ export const removeLabel = async (
 };
 
 export const labelToTargetBranch = (
-  label: Octokit.PullsGetResponseLabelsItem,
+  label: { name: string },
   prefix: string,
 ) => {
   return label.name.replace(prefix, '');
 };
 
 export const labelExistsOnPR = async (
-  context: Context,
+  context: Pick<WebHookRepoContext, 'octokit' | 'repo'>,
   prNumber: number,
   labelName: string,
 ) => {
@@ -78,7 +81,7 @@ export const labelExistsOnPR = async (
     `Checking if ${labelName} exists on #${prNumber}`,
   );
 
-  const labels = await context.github.issues.listLabelsOnIssue(
+  const labels = await context.octokit.issues.listLabelsOnIssue(
     context.repo({
       issue_number: prNumber,
       per_page: 100,

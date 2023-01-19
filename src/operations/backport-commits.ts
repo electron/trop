@@ -1,6 +1,6 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import * as simpleGit from 'simple-git/promise';
+import simpleGit from 'simple-git';
 import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
@@ -111,7 +111,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
     let baseTreeSha = baseTree.data.sha;
 
     for (const commit of [...appliedCommits.all].reverse()) {
-      const rawDiffTree = await git.raw([
+      const rawDiffTree: string = await git.raw([
         'diff-tree',
         '--no-commit-id',
         '--name-only',
@@ -121,7 +121,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       const changedFiles = rawDiffTree
         .trim()
         .split('\n')
-        .map((s) => s.trim());
+        .map((s: string) => s.trim());
       await git.checkout(commit.hash);
 
       const newTree = await options.github.git.createTree({

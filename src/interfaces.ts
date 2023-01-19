@@ -1,6 +1,9 @@
-import { Octokit } from '@octokit/rest';
-import { Context, GitHubAPI } from 'probot';
 import { BackportPurpose } from './enums';
+import {
+  SimpleWebHookRepoContext,
+  WebHookPR,
+  WebHookRepoContext,
+} from './types';
 
 export interface RemotesOptions {
   dir: string;
@@ -23,14 +26,14 @@ export interface BackportOptions {
   tempBranch: string;
   patches: string[];
   shouldPush: boolean;
-  github: GitHubAPI;
+  github: WebHookRepoContext['octokit'];
 }
 
 export interface TryBackportOptions {
-  context: Context;
+  context: SimpleWebHookRepoContext;
   repoAccessToken: string;
   purpose: BackportPurpose;
-  pr: Octokit.PullsGetResponse;
+  pr: WebHookPR;
   dir: string;
   slug: string;
   targetBranch: string;

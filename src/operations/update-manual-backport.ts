@@ -1,14 +1,13 @@
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 import { PRChange, PRStatus, LogLevel } from '../enums';
-import { Context } from 'probot';
 import {
   BACKPORT_LABEL,
   BACKPORT_REQUESTED_LABEL,
-  SEMVER_PREFIX,
   SKIP_CHECK_LABEL,
 } from '../constants';
 import { isSemverMinorPR } from '../utils';
+import { WebHookPRContext } from '../types';
 
 /**
  * Updates the labels on a backport's original PR as well as comments with links
@@ -20,7 +19,7 @@ import { isSemverMinorPR } from '../utils';
  * @returns {Object} - an object containing the repo initialization directory
  */
 export const updateManualBackport = async (
-  context: Context,
+  context: WebHookPRContext,
   type: PRChange,
   oldPRNumber: number,
 ) => {
@@ -66,7 +65,7 @@ export const updateManualBackport = async (
       newPRLabelsToAdd.push(BACKPORT_LABEL);
     }
 
-    const { data: originalPR } = await context.github.pulls.get(
+    const { data: originalPR } = await context.octokit.pulls.get(
       context.repo({ pull_number: oldPRNumber }),
     );
 
@@ -114,7 +113,9 @@ please check out #${pr.number}`;
 
     // TODO(codebytere): Once probot updates to @octokit/rest@16 we can use .paginate to
     // get all the comments properly, for now 100 should do
-    const { data: existingComments } = await context.github.issues.listComments(
+    const {
+      data: existingComments,
+    } = await context.octokit.issues.listComments(
       context.repo({
         issue_number: oldPRNumber,
         per_page: 100,
@@ -128,7 +129,7 @@ please check out #${pr.number}`;
 
     if (shouldComment) {
       // Comment on the original PR with the manual backport link
-      await context.github.issues.createComment(
+      await context.octokit.issues.createComment(
         context.repo({
           issue_number: oldPRNumber,
           body: commentBody,

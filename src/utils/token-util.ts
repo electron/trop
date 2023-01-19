@@ -1,6 +1,7 @@
-import { Context, Application } from 'probot';
+import { Probot } from 'probot';
 import { log } from './log-util';
 import { LogLevel } from '../enums';
+import { SimpleWebHookRepoContext } from '../types';
 
 /**
  * Creates and returns an installation token for a GitHub App.
@@ -10,14 +11,14 @@ import { LogLevel } from '../enums';
  * @returns {Promise<string>} - a string representing a GitHub App installation token
  */
 export const getRepoToken = async (
-  robot: Application,
-  context: Context,
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
 ): Promise<string> => {
   log('getRepoToken', LogLevel.INFO, 'Creating GitHub App token');
 
   const hub = await robot.auth();
-  const response = await hub.apps.createInstallationToken({
-    installation_id: context.payload.installation.id,
+  const response = await hub.apps.createInstallationAccessToken({
+    installation_id: context.payload.installation!.id,
   });
   return response.data.token;
 };

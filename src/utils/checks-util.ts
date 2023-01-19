@@ -1,18 +1,17 @@
-import { Context } from 'probot';
 import { CheckRunStatus } from '../enums';
-import { Octokit } from '@octokit/rest';
 import { BACKPORT_INFORMATION_CHECK } from '../constants';
+import { WebHookPRContext } from '../types';
 
 export async function updateBackportValidityCheck(
-  context: Context,
-  checkRun: Octokit.ChecksListForRefResponseCheckRunsItem,
+  context: WebHookPRContext,
+  checkRun: BackportCheck,
   statusItems: {
     conclusion: CheckRunStatus;
     title: string;
     summary: string;
   },
 ) {
-  await context.github.checks.update(
+  await context.octokit.checks.update(
     context.repo({
       check_run_id: checkRun.id,
       name: checkRun.name,
@@ -28,9 +27,9 @@ export async function updateBackportValidityCheck(
   );
 }
 
-export async function getBackportInformationCheck(context: Context) {
-  const pr: Octokit.PullsGetResponse = context.payload.pull_request;
-  const allChecks = await context.github.checks.listForRef(
+export async function getBackportInformationCheck(context: WebHookPRContext) {
+  const pr = context.payload.pull_request;
+  const allChecks = await context.octokit.checks.listForRef(
     context.repo({
       ref: pr.head.sha,
       per_page: 100,
@@ -44,16 +43,20 @@ export async function getBackportInformationCheck(context: Context) {
   return backportCheck.length > 0 ? backportCheck[0] : null;
 }
 
+type BackportCheck = NonNullable<
+  Awaited<ReturnType<typeof getBackportInformationCheck>>
+>;
+
 export async function updateBackportInformationCheck(
-  context: Context,
-  backportCheck: Octokit.ChecksListForRefResponseCheckRunsItem,
+  context: WebHookPRContext,
+  backportCheck: BackportCheck,
   statusItems: {
     conclusion: CheckRunStatus;
     title: string;
     summary: string;
   },
 ) {
-  await context.github.checks.update(
+  await context.octokit.checks.update(
     context.repo({
       check_run_id: backportCheck.id,
       name: backportCheck.name,
@@ -68,14 +71,14 @@ export async function updateBackportInformationCheck(
   );
 }
 
-export async function queueBackportInformationCheck(context: Context) {
-  const pr: Octokit.PullsGetResponse = context.payload.pull_request;
+export async function queueBackportInformationCheck(context: WebHookPRContext) {
+  const pr = context.payload.pull_request;
 
-  await context.github.checks.create(
+  await context.octokit.checks.create(
     context.repo({
       name: BACKPORT_INFORMATION_CHECK,
       head_sha: pr.head.sha,
-      status: 'queued' as 'queued',
+      status: 'queued',
       details_url: 'https://github.com/electron/trop',
       output: {
         title: 'Needs Backport Information',

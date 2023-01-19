@@ -1,4 +1,4 @@
-import * as simpleGit from 'simple-git/promise';
+import simpleGit from 'simple-git';
 import { RemotesOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';

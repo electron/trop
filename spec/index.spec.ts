@@ -1,9 +1,8 @@
-jest.mock('request');
-
 import { promises as fs } from 'fs';
+import * as nock from 'nock';
 import { posix as path } from 'path';
 
-import { Application } from 'probot';
+import { Probot, ProbotOctokit } from 'probot';
 
 import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
 import {
@@ -72,12 +71,13 @@ jest.mock('../src/utils/checks-util', () => ({
 }));
 
 describe('trop', () => {
-  let robot: Application;
-  let github: any;
+  let robot: Probot;
+  let octokit: any;
   process.env = { BOT_USER_NAME: 'trop[bot]' };
 
   beforeEach(() => {
-    github = {
+    nock.disableNetConnect();
+    octokit = {
       repos: {
         getBranch: jest.fn().mockReturnValue(Promise.resolve()),
         listBranches: jest.fn().mockReturnValue(
@@ -136,64 +136,76 @@ describe('trop', () => {
       },
     };
 
-    robot = new Application();
-    robot.auth = () => Promise.resolve(github);
+    robot = new Probot({
+      githubToken: 'test',
+      Octokit: ProbotOctokit.defaults({
+        retry: { enabled: false },
+        throttle: { enabled: false },
+      }),
+    });
+    (robot as any).state.octokit.auth = () => Promise.resolve(octokit);
+    robot.auth = () => Promise.resolve(octokit);
     robot.load(trop);
+  });
+
+  afterEach(() => {
+    nock.cleanAll();
+    nock.enableNetConnect();
   });
 
   describe('issue_comment.created event', () => {
     it('manually triggers the backport on comment', async () => {
       await robot.receive(issueCommentBackportCreatedEvent);
 
-      expect(github.pulls.get).toHaveBeenCalled();
-      expect(github.issues.createComment).toHaveBeenCalled();
+      expect(octokit.pulls.get).toHaveBeenCalled();
+      expect(octokit.issues.createComment).toHaveBeenCalled();
       expect(backportToLabel).toHaveBeenCalled();
     });
 
     it('does not trigger the backport on comment if the PR is not merged', async () => {
-      github.pulls.get = jest
+      octokit.pulls.get = jest
         .fn()
         .mockReturnValue(Promise.resolve({ data: { merged: false } }));
 
       await robot.receive(issueCommentBackportCreatedEvent);
 
-      expect(github.pulls.get).toHaveBeenCalled();
-      expect(github.issues.createComment).toHaveBeenCalled();
+      expect(octokit.pulls.get).toHaveBeenCalled();
+      expect(octokit.issues.createComment).toHaveBeenCalled();
       expect(backportToLabel).not.toHaveBeenCalled();
     });
 
     it('triggers the backport on comment to a targeted branch', async () => {
       await robot.receive(issueCommentBackportToCreatedEvent);
 
-      expect(github.pulls.get).toHaveBeenCalled();
-      expect(github.issues.createComment).toHaveBeenCalled();
+      expect(octokit.pulls.get).toHaveBeenCalled();
+      expect(octokit.issues.createComment).toHaveBeenCalled();
       expect(backportToBranch).toHaveBeenCalled();
     });
 
     it('allows for multiple PRs to be triggered in the same comment', async () => {
       await robot.receive(issueCommentBackportToMultipleCreatedEvent);
 
-      expect(github.pulls.get).toHaveBeenCalledTimes(3);
-      expect(github.issues.createComment).toHaveBeenCalledTimes(2);
+      expect(octokit.pulls.get).toHaveBeenCalledTimes(3);
+      expect(octokit.issues.createComment).toHaveBeenCalledTimes(2);
       expect(backportToBranch).toHaveBeenCalledTimes(2);
     });
 
     it('allows for multiple PRs to be triggered in the same comment with space-separated branches', async () => {
       await robot.receive(issueCommentBackportToMultipleCreatedSpacesEvent);
 
-      expect(github.pulls.get).toHaveBeenCalledTimes(4);
-      expect(github.issues.createComment).toHaveBeenCalledTimes(3);
+      expect(octokit.pulls.get).toHaveBeenCalledTimes(4);
+      expect(octokit.issues.createComment).toHaveBeenCalledTimes(3);
       expect(backportToBranch).toHaveBeenCalledTimes(3);
     });
 
     it('does not trigger the backport on comment to a targeted branch if the branch does not exist', async () => {
-      github.repos.getBranch = jest
+      octokit.repos.getBranch = jest
         .fn()
         .mockReturnValue(Promise.reject(new Error('404')));
       await robot.receive(issueCommentBackportToCreatedEvent);
 
-      expect(github.pulls.get).toHaveBeenCalled();
-      expect(github.issues.createComment).toHaveBeenCalled();
+      expect(octokit.pulls.get).toHaveBeenCalled();
+      expect(octokit.issues.createComment).toHaveBeenCalled();
       expect(backportToBranch).toHaveBeenCalledTimes(0);
     });
   });
