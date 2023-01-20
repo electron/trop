@@ -29,10 +29,9 @@
   },
   "devDependencies": {
     "@types/bunyan": "^1.8.5",
-    "@types/express": "^4.17.2",
     "@types/fs-extra": "^5.0.1",
     "@types/jest": "^29.0.0",
-    "@types/node": "^10.17.9",
+    "@types/node": "^18.11.8",
     "@types/node-fetch": "^2.5.4",
     "@types/pino-std-serializers": "^4.0.0",
     "@types/sinon": "^5.0.5",
