@@ -4,6 +4,7 @@ import simpleGit from 'simple-git';
 import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
+import { OWNER, REPO } from '../constants';
 
 const cleanRawGitString = (s: string) => {
   let nS = s.trim();
@@ -104,8 +105,8 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       `target_repo/${options.targetBranch}`,
     ]);
     const baseTree = await options.github.git.getCommit({
-      owner: 'electron',
-      repo: 'electron',
+      owner: OWNER,
+      repo: REPO,
       commit_sha: baseCommitSha,
     });
     let baseTreeSha = baseTree.data.sha;
@@ -126,8 +127,8 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
 
       const newTree = await options.github.git.createTree({
         base_tree: baseTreeSha,
-        owner: 'electron',
-        repo: 'electron',
+        owner: OWNER,
+        repo: REPO,
         tree: await Promise.all(
           changedFiles.map(async (changedFile) => {
             const onDiskPath = path.resolve(options.dir, changedFile);
@@ -165,8 +166,8 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
       const newMessage = `${commitMessage}\n\nCo-authored-by: ${authorName} <${authorEmail}>`;
 
       const newCommit = await options.github.git.createCommit({
-        owner: 'electron',
-        repo: 'electron',
+        owner: OWNER,
+        repo: REPO,
         parents: [baseCommitSha],
         tree: newTree.data.sha,
         message: newMessage,
@@ -177,8 +178,8 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
     }
 
     await options.github.git.createRef({
-      owner: 'electron',
-      repo: 'electron',
+      owner: OWNER,
+      repo: REPO,
       sha: baseCommitSha,
       ref: `refs/heads/${options.tempBranch}`,
     });

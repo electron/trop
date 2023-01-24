@@ -9,6 +9,8 @@ import {
   BACKPORT_REQUESTED_LABEL,
   DEFAULT_BACKPORT_REVIEW_TEAM,
   BACKPORT_LABEL,
+  OWNER,
+  REPO
 } from './constants';
 import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
@@ -309,8 +311,8 @@ const getOriginalBackportNumber = async (
 
     // Fetch the PR body this PR is marked as backporting.
     const { data: pullRequest } = await context.octokit.pulls.get({
-      owner: 'electron',
-      repo: 'electron',
+      owner: OWNER,
+      repo: REPO,
       pull_number: oldPRNumber,
     });
 
