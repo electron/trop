@@ -16,9 +16,6 @@ export const SEMVER_LABELS = {
   MAJOR: 'semver/major',
 };
 
-export const OWNER = process.env.OWNER || 'electron';
-export const REPO = process.env.REPO || 'electron';
-
 export const SKIP_CHECK_LABEL =
   process.env.SKIP_CHECK_LABEL || 'backport-check-skip';
 

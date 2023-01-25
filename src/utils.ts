@@ -9,8 +9,6 @@ import {
   BACKPORT_REQUESTED_LABEL,
   DEFAULT_BACKPORT_REVIEW_TEAM,
   BACKPORT_LABEL,
-  OWNER,
-  REPO
 } from './constants';
 import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
@@ -172,6 +170,7 @@ and must be performed manually.',
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
     github: context.octokit,
+    context,
   });
 
   if (success) {
@@ -236,6 +235,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
     github: opts.context.octokit,
+    context: opts.context,
   });
 
   if (success) {
@@ -311,8 +311,8 @@ const getOriginalBackportNumber = async (
 
     // Fetch the PR body this PR is marked as backporting.
     const { data: pullRequest } = await context.octokit.pulls.get({
-      owner: OWNER,
-      repo: REPO,
+      owner: pr.base.repo.owner.login,
+      repo: pr.base.repo.name,
       pull_number: oldPRNumber,
     });
 
