@@ -170,6 +170,7 @@ and must be performed manually.',
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
     github: context.octokit,
+    context,
   });
 
   if (success) {
@@ -234,6 +235,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
     github: opts.context.octokit,
+    context: opts.context,
   });
 
   if (success) {
@@ -309,8 +311,8 @@ const getOriginalBackportNumber = async (
 
     // Fetch the PR body this PR is marked as backporting.
     const { data: pullRequest } = await context.octokit.pulls.get({
-      owner: 'electron',
-      repo: 'electron',
+      owner: pr.base.repo.owner.login,
+      repo: pr.base.repo.name,
       pull_number: oldPRNumber,
     });
 

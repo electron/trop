@@ -27,6 +27,7 @@ export interface BackportOptions {
   patches: string[];
   shouldPush: boolean;
   github: WebHookRepoContext['octokit'];
+  context: SimpleWebHookRepoContext;
 }
 
 export interface TryBackportOptions {

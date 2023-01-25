@@ -103,11 +103,11 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
     let baseCommitSha = await git.revparse([
       `target_repo/${options.targetBranch}`,
     ]);
-    const baseTree = await options.github.git.getCommit({
-      owner: 'electron',
-      repo: 'electron',
-      commit_sha: baseCommitSha,
-    });
+    const baseTree = await options.github.git.getCommit(
+      options.context.repo({
+        commit_sha: baseCommitSha,
+      }),
+    );
     let baseTreeSha = baseTree.data.sha;
 
     for (const commit of [...appliedCommits.all].reverse()) {
@@ -124,33 +124,33 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
         .map((s: string) => s.trim());
       await git.checkout(commit.hash);
 
-      const newTree = await options.github.git.createTree({
-        base_tree: baseTreeSha,
-        owner: 'electron',
-        repo: 'electron',
-        tree: await Promise.all(
-          changedFiles.map(async (changedFile) => {
-            const onDiskPath = path.resolve(options.dir, changedFile);
-            if (!(await fs.pathExists(onDiskPath))) {
+      const newTree = await options.github.git.createTree(
+        options.context.repo({
+          base_tree: baseTreeSha,
+          tree: await Promise.all(
+            changedFiles.map(async (changedFile) => {
+              const onDiskPath = path.resolve(options.dir, changedFile);
+              if (!(await fs.pathExists(onDiskPath))) {
+                return <const>{
+                  path: changedFile,
+                  mode: <const>'100644',
+                  type: 'blob',
+                  sha: null as any,
+                };
+              }
+              const fileContents = await fs.readFile(onDiskPath, 'utf-8');
+              const stat = await fs.stat(onDiskPath);
+              const userMode = (stat.mode & parseInt('777', 8)).toString(8)[0];
               return <const>{
                 path: changedFile,
-                mode: <const>'100644',
+                mode: userMode === '6' ? '100644' : '100755',
                 type: 'blob',
-                sha: null as any,
+                content: fileContents,
               };
-            }
-            const fileContents = await fs.readFile(onDiskPath, 'utf-8');
-            const stat = await fs.stat(onDiskPath);
-            const userMode = (stat.mode & parseInt('777', 8)).toString(8)[0];
-            return <const>{
-              path: changedFile,
-              mode: userMode === '6' ? '100644' : '100755',
-              type: 'blob',
-              content: fileContents,
-            };
-          }),
-        ),
-      });
+            }),
+          ),
+        }),
+      );
 
       const authorEmail = cleanRawGitString(
         await git.raw(['show', '-s', "--format='%ae'", commit.hash]),
@@ -164,24 +164,24 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
 
       const newMessage = `${commitMessage}\n\nCo-authored-by: ${authorName} <${authorEmail}>`;
 
-      const newCommit = await options.github.git.createCommit({
-        owner: 'electron',
-        repo: 'electron',
-        parents: [baseCommitSha],
-        tree: newTree.data.sha,
-        message: newMessage,
-      });
+      const newCommit = await options.github.git.createCommit(
+        options.context.repo({
+          parents: [baseCommitSha],
+          tree: newTree.data.sha,
+          message: newMessage,
+        }),
+      );
 
       baseTreeSha = newTree.data.sha;
       baseCommitSha = newCommit.data.sha;
     }
 
-    await options.github.git.createRef({
-      owner: 'electron',
-      repo: 'electron',
-      sha: baseCommitSha,
-      ref: `refs/heads/${options.tempBranch}`,
-    });
+    await options.github.git.createRef(
+      options.context.repo({
+        sha: baseCommitSha,
+        ref: `refs/heads/${options.tempBranch}`,
+      }),
+    );
   }
 
   return { dir: options.dir };
