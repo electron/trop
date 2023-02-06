@@ -3,7 +3,7 @@
 ### Getting Code Locally
 
 ```sh
-$ git clone https://github.com/codebytere/trop
+$ git clone https://github.com/electron/trop
 $ cd trop
 $ npm install
 ```
