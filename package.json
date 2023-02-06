@@ -4,7 +4,7 @@
   "description": "",
   "author": "Shelley Vohr <shelley.vohr@gmail.com>",
   "license": "ISC",
-  "repository": "https://github.com/codebytere/trop.git",
+  "repository": "https://github.com/electron/trop.git",
   "private": true,
   "scripts": {
     "build": "tsc",
