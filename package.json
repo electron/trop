@@ -20,6 +20,7 @@
     "@types/lru-cache": "^5.1.0",
     "config-yml": "^0.10.2",
     "fs-extra": "^7.0.0",
+    "global-agent": "^3.0.0",
     "node-fetch": "^2.6.7",
     "probot": "^12.2.8",
     "prom-client": "^13.1.0",
