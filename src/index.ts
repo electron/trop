@@ -30,6 +30,10 @@ import {
 import { register } from './utils/prom';
 import { SimpleWebHookRepoContext, WebHookPR, WebHookPRContext } from './types';
 
+// Built in fetch doesn't support global-agent...
+// @ts-ignore
+delete globalThis.fetch;
+
 const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   getRouter?.('/metrics').get('/', (req, res) => {
     register
