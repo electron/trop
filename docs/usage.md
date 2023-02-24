@@ -6,10 +6,6 @@ Welcome! We're glad you want to try out `trop`.
 
 `trop` automates backporting PRs to versioned release branches.
 
-#### You Will Need:
-
-1. A `.github/config.yml` file. See [this example](.example.config).
-
 #### Using `trop`:
 
 **Automatically With Labels**:
