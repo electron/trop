@@ -439,7 +439,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
 
       await updateBackportInformationCheck(context, backportCheck, {
         title: 'Backport Information Provided',
-        summary: 'This PR contains the required backport information.',
+        summary: 'This PR contains the required  backport information.',
         conclusion: CheckRunStatus.SUCCESS,
       });
     },
