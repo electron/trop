@@ -414,6 +414,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         (prLabel) =>
           prLabel.name.startsWith(PRStatus.TARGET) ||
           prLabel.name.startsWith(PRStatus.IN_FLIGHT) ||
+          prLabel.name.startsWith(PRStatus.NEEDS_MANUAL) ||
           prLabel.name.startsWith(PRStatus.MERGED),
       );
 
@@ -438,7 +439,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
 
       await updateBackportInformationCheck(context, backportCheck, {
         title: 'Backport Information Provided',
-        summary: 'This PR contains the required  backport information.',
+        summary: 'This PR contains the required backport information.',
         conclusion: CheckRunStatus.SUCCESS,
       });
     },
