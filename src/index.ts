@@ -414,6 +414,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         (prLabel) =>
           prLabel.name.startsWith(PRStatus.TARGET) ||
           prLabel.name.startsWith(PRStatus.IN_FLIGHT) ||
+          prLabel.name.startsWith(PRStatus.NEEDS_MANUAL) ||
           prLabel.name.startsWith(PRStatus.MERGED),
       );
 
