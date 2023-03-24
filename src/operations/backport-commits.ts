@@ -77,7 +77,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
   for (const patch of options.patches) {
     try {
       await fs.writeFile(patchPath, patch, 'utf8');
-      await git.raw(['am', '-3', patchPath]);
+      await git.raw(['am', '-3', '--keep-cr', patchPath]);
     } catch (error) {
       log(
         'backportCommitsToBranch',
