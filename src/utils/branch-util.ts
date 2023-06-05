@@ -51,9 +51,15 @@ export async function getSupportedBranches(
     });
 
   const values = Object.values(filtered);
-  return values
+  const supported = values
     .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
     .slice(-NUM_SUPPORTED_VERSIONS);
+  // TODO: We're supporting Electron 22 until Oct. 10, 2023.
+  // Remove this hardcoded value at that time.
+  if (!supported.includes('22-x-y')) {
+    supported.unshift('22-x-y');
+  }
+  return supported;
 }
 
 /**
