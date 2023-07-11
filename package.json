@@ -16,8 +16,6 @@
     "prepare": "husky install"
   },
   "dependencies": {
-    "@types/ioredis": "^4.14.2",
-    "@types/lru-cache": "^5.1.0",
     "config-yml": "^0.10.2",
     "fs-extra": "^7.0.0",
     "global-agent": "^3.0.0",
