@@ -16,7 +16,6 @@
     "prepare": "husky install"
   },
   "dependencies": {
-    "config-yml": "^0.10.2",
     "fs-extra": "^7.0.0",
     "global-agent": "^3.0.0",
     "node-fetch": "^2.6.7",
@@ -24,7 +23,8 @@
     "prom-client": "^13.1.0",
     "queue": "^4.5.0",
     "simple-git": "3.16.0",
-    "what-the-diff": "^0.4.0"
+    "what-the-diff": "^0.4.0",
+    "yaml": "^2.3.1"
   },
   "devDependencies": {
     "@types/bunyan": "^1.8.5",
