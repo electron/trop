@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "author": "Shelley Vohr <shelley.vohr@gmail.com>",
-  "license": "ISC",
+  "license": "MIT",
   "repository": "https://github.com/electron/trop.git",
   "private": true,
   "scripts": {
