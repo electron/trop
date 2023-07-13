@@ -59,18 +59,21 @@ export const labelClosedPR = async (
 
   if (change === PRChange.CLOSE) {
     const targetLabel = PRStatus.TARGET + targetBranch;
-    if (await labelUtils.labelExistsOnPR(context, pr.number, targetLabel)) {
-      await labelUtils.removeLabel(context, pr.number, targetLabel);
-    }
+    await labelUtils.removeLabel(context, pr.number, targetLabel);
   }
 
   const backportNumbers = getPRNumbersFromPRBody(pr);
   for (const prNumber of backportNumbers) {
     const labelToRemove = PRStatus.IN_FLIGHT + targetBranch;
 
+    // Add merged label to the original PR. If this is an intermediary PR,
+    // remove target labels from the current PR.
     if (change === PRChange.MERGE) {
-      const labelToAdd = PRStatus.MERGED + targetBranch;
-      await labelUtils.addLabels(context, prNumber, [labelToAdd]);
+      const mergedLabel = PRStatus.MERGED + targetBranch;
+      const targetLabel = PRStatus.TARGET + targetBranch;
+
+      await labelUtils.addLabels(context, prNumber, [mergedLabel]);
+      await labelUtils.removeLabel(context, pr.number, targetLabel);
     }
 
     await labelUtils.removeLabel(context, prNumber, labelToRemove);

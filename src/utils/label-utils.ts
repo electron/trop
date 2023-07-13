@@ -52,8 +52,9 @@ export const removeLabel = async (
     `Removing ${labelToRemove} from PR #${prNumber}`,
   );
 
-  // If the issue does not have the label, don't try remove it
-  if (!(await labelExistsOnPR(context, prNumber, labelToRemove))) return;
+  // If the issue does not have the label, don't try remove it.
+  const hasLabel = await labelExistsOnPR(context, prNumber, labelToRemove);
+  if (!hasLabel) return;
 
   return context.octokit.issues.removeLabel(
     context.repo({
