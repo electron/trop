@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 import * as fs from 'fs-extra';
-import { IQueue } from 'queue';
+import Queue from 'queue';
 import simpleGit from 'simple-git';
 
 import queue from './Queue';
@@ -29,7 +29,6 @@ import {
 } from './types';
 import { Context, Probot } from 'probot';
 
-const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
 const backportViaAllHisto = new client.Histogram({
@@ -116,8 +115,7 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
     await context.octokit.issues.createComment(
       context.repo({
         issue_number: opts.pr.number,
-        body:
-          'This PR has exceeded the automatic backport commit limit \
+        body: 'This PR has exceeded the automatic backport commit limit \
 and must be performed manually.',
       }),
     );
@@ -132,7 +130,7 @@ and must be performed manually.',
   );
 
   const patches: string[] = new Array(commits.length).fill('');
-  const q = makeQueue({ concurrency: 5 });
+  const q = new Queue({ concurrency: 5 });
   q.stop();
 
   for (const [i, commit] of commits.entries()) {
@@ -357,9 +355,8 @@ const checkUserHasWriteAccess = async (
   );
 
   const params = context.repo({ username: user });
-  const {
-    data: userInfo,
-  } = await context.octokit.repos.getCollaboratorPermissionLevel(params);
+  const { data: userInfo } =
+    await context.octokit.repos.getCollaboratorPermissionLevel(params);
 
   // Possible values for the permission key: 'admin', 'write', 'read', 'none'.
   // In order for the user's review to count, they must be at least 'write'.
