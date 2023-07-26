@@ -24,6 +24,7 @@ import { TryBackportOptions } from './interfaces';
 import { client, register } from './utils/prom';
 import {
   SimpleWebHookRepoContext,
+  WebHookIssueContext,
   WebHookPR,
   WebHookRepoContext,
 } from './types';
@@ -251,7 +252,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
 };
 
 export const isAuthorizedUser = async (
-  context: Context<'issue_comment'>,
+  context: WebHookIssueContext,
   username: string,
 ) => {
   const { data } = await context.octokit.repos.getCollaboratorPermissionLevel(
