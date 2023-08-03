@@ -9,14 +9,21 @@ export type WebHookPRContext = Context<
   | 'pull_request.labeled'
   | 'pull_request.unlabeled'
 >;
+
+export type WebHookIssueContext = Context<'issue_comment.created'>;
+
 export type SimpleWebHookRepoContext = Pick<
   WebHookRepoContext,
   'octokit' | 'repo' | 'payload'
 >;
+
 export type WebHookRepoContext = Omit<WebHookPRContext, 'payload'> & {
   payload: Omit<
     WebHookPRContext['payload'],
     'pull_request' | 'number' | 'action'
   >;
 };
+
 export type WebHookPR = WebHookPRContext['payload']['pull_request'];
+
+export type WebHookIssueComment = WebHookIssueContext['payload']['comment'];

@@ -1,4 +1,4 @@
-import * as config from 'config-yml';
+import { parse } from 'yaml';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -44,8 +44,12 @@ export const initRepo = async ({ slug, accessToken }: InitRepoOptions) => {
   }
 
   await git.pull();
-  await git.addConfig('user.email', config.tropEmail || 'trop@example.com');
-  await git.addConfig('user.name', config.tropName || 'Trop Bot');
+
+  const config = fs.readFileSync('./config.yml', 'utf8');
+  const { tropEmail, tropName } = parse(config);
+  await git.addConfig('user.email', tropEmail || 'trop@example.com');
+  await git.addConfig('user.name', tropName || 'Trop Bot');
+
   await git.addConfig('commit.gpgsign', 'false');
   return { dir };
 };

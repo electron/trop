@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 import * as fs from 'fs-extra';
-import { IQueue } from 'queue';
+import Queue from 'queue';
 import simpleGit from 'simple-git';
 
 import queue from './Queue';
@@ -24,12 +24,12 @@ import { TryBackportOptions } from './interfaces';
 import { client, register } from './utils/prom';
 import {
   SimpleWebHookRepoContext,
+  WebHookIssueContext,
   WebHookPR,
   WebHookRepoContext,
 } from './types';
 import { Context, Probot } from 'probot';
 
-const makeQueue: IQueue = require('queue');
 const { parse: parseDiff } = require('what-the-diff');
 
 const backportViaAllHisto = new client.Histogram({
@@ -59,18 +59,21 @@ export const labelClosedPR = async (
 
   if (change === PRChange.CLOSE) {
     const targetLabel = PRStatus.TARGET + targetBranch;
-    if (await labelUtils.labelExistsOnPR(context, pr.number, targetLabel)) {
-      await labelUtils.removeLabel(context, pr.number, targetLabel);
-    }
+    await labelUtils.removeLabel(context, pr.number, targetLabel);
   }
 
   const backportNumbers = getPRNumbersFromPRBody(pr);
   for (const prNumber of backportNumbers) {
     const labelToRemove = PRStatus.IN_FLIGHT + targetBranch;
 
+    // Add merged label to the original PR. If this is an intermediary PR,
+    // remove target labels from the current PR.
     if (change === PRChange.MERGE) {
-      const labelToAdd = PRStatus.MERGED + targetBranch;
-      await labelUtils.addLabels(context, prNumber, [labelToAdd]);
+      const mergedLabel = PRStatus.MERGED + targetBranch;
+      const targetLabel = PRStatus.TARGET + targetBranch;
+
+      await labelUtils.addLabels(context, prNumber, [mergedLabel]);
+      await labelUtils.removeLabel(context, pr.number, targetLabel);
     }
 
     await labelUtils.removeLabel(context, prNumber, labelToRemove);
@@ -113,8 +116,7 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
     await context.octokit.issues.createComment(
       context.repo({
         issue_number: opts.pr.number,
-        body:
-          'This PR has exceeded the automatic backport commit limit \
+        body: 'This PR has exceeded the automatic backport commit limit \
 and must be performed manually.',
       }),
     );
@@ -129,7 +131,7 @@ and must be performed manually.',
   );
 
   const patches: string[] = new Array(commits.length).fill('');
-  const q = makeQueue({ concurrency: 5 });
+  const q = new Queue({ concurrency: 5 });
   q.stop();
 
   for (const [i, commit] of commits.entries()) {
@@ -250,7 +252,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
 };
 
 export const isAuthorizedUser = async (
-  context: Context<'issue_comment'>,
+  context: WebHookIssueContext,
   username: string,
 ) => {
   const { data } = await context.octokit.repos.getCollaboratorPermissionLevel(
@@ -354,9 +356,8 @@ const checkUserHasWriteAccess = async (
   );
 
   const params = context.repo({ username: user });
-  const {
-    data: userInfo,
-  } = await context.octokit.repos.getCollaboratorPermissionLevel(params);
+  const { data: userInfo } =
+    await context.octokit.repos.getCollaboratorPermissionLevel(params);
 
   // Possible values for the permission key: 'admin', 'write', 'read', 'none'.
   // In order for the user's review to count, they must be at least 'write'.

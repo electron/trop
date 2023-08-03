@@ -12,6 +12,12 @@
 ## Setup
 
 ```sh
+# Clone the trop repository locally
+git clone https://github.com/electron/trop.git
+
+# Change directory to where trop has been cloned
+cd trop
+
 # Install dependencies
 npm install
 

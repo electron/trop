@@ -1,4 +1,4 @@
-import { ApplicationFunction, Context } from 'probot';
+import { ApplicationFunction } from 'probot';
 
 import {
   backportImpl,
@@ -28,7 +28,12 @@ import {
   updateBackportValidityCheck,
 } from './utils/checks-util';
 import { register } from './utils/prom';
-import { SimpleWebHookRepoContext, WebHookPR, WebHookPRContext } from './types';
+import {
+  SimpleWebHookRepoContext,
+  WebHookIssueContext,
+  WebHookPR,
+  WebHookPRContext,
+} from './types';
 
 // Built in fetch doesn't support global-agent...
 // @ts-ignore
@@ -414,6 +419,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         (prLabel) =>
           prLabel.name.startsWith(PRStatus.TARGET) ||
           prLabel.name.startsWith(PRStatus.IN_FLIGHT) ||
+          prLabel.name.startsWith(PRStatus.NEEDS_MANUAL) ||
           prLabel.name.startsWith(PRStatus.MERGED),
       );
 
@@ -445,8 +451,9 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   );
 
   // Backport pull requests to labeled targets when PR is merged.
-  robot.on('pull_request.closed', async (context) => {
-    const pr = context.payload.pull_request;
+  robot.on('pull_request.closed', async (context: WebHookPRContext) => {
+    const { pull_request: pr } = context.payload;
+
     const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
     if (pr.merged) {
       if (oldPRNumbers.length > 0) {
@@ -492,7 +499,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   const TROP_COMMAND_PREFIX = '/trop ';
 
   // Manually trigger backporting process on trigger comment phrase.
-  robot.on('issue_comment.created', async (context) => {
+  robot.on('issue_comment.created', async (context: WebHookIssueContext) => {
     const { issue, comment } = context.payload;
 
     const isPullRequest = (i: { number: number; html_url: string }) =>
@@ -533,8 +540,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             await context.octokit.issues.createComment(
               context.repo({
                 issue_number: issue.number,
-                body:
-                  'This PR has not been merged yet, and cannot be backported.',
+                body: 'This PR has not been merged yet, and cannot be backported.',
               }),
             );
             return false;
@@ -553,8 +559,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
           ).data as WebHookPR;
           await context.octokit.issues.createComment(
             context.repo({
-              body:
-                'The backport process for this PR has been manually initiated - here we go! :D',
+              body: 'The backport process for this PR has been manually initiated - here we go! :D',
               issue_number: issue.number,
             }),
           );
