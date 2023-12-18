@@ -3,11 +3,12 @@
 [fork]: /fork
 [pr]: /compare
 [style]: https://standardjs.com/
-[code-of-conduct]: CODE_OF_CONDUCT.md
 
 Hi there! We're thrilled that you'd like to contribute to this project. Your help is essential for keeping it great.
 
-Please note that this project is released with a [Contributor Code of Conduct][code-of-conduct]. By participating in this project you agree to abide by its terms.
+This project adheres to the Contributor Covenant
+[code of conduct](https://github.com/electron/electron/blob/main/CODE_OF_CONDUCT.md).
+By participating, you are expected to uphold this code.
 
 ## Submitting a pull request
 
