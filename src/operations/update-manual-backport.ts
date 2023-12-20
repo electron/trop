@@ -113,13 +113,14 @@ please check out #${pr.number}`;
 
     // TODO(codebytere): Once probot updates to @octokit/rest@16 we can use .paginate to
     // get all the comments properly, for now 100 should do
-    const { data: existingComments } =
-      await context.octokit.issues.listComments(
-        context.repo({
-          issue_number: oldPRNumber,
-          per_page: 100,
-        }),
-      );
+    const {
+      data: existingComments,
+    } = await context.octokit.issues.listComments(
+      context.repo({
+        issue_number: oldPRNumber,
+        per_page: 100,
+      }),
+    );
 
     // We should only comment if there is not a previous existing comment
     const shouldComment = !existingComments.some(

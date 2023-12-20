@@ -118,7 +118,8 @@ describe('trop', () => {
             data: [
               {
                 id: 208045946,
-                url: 'https://api.github.com/repos/octocat/Hello-World/labels/bug',
+                url:
+                  'https://api.github.com/repos/octocat/Hello-World/labels/bug',
                 name: 'bug',
                 description: "Something isn't working",
                 color: 'f29513',
@@ -243,9 +244,8 @@ describe('trop', () => {
 
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportInformationCheck as jest.Mock
-      ).mock.calls[0][2];
+      const updatePayload = (checkUtils.updateBackportInformationCheck as jest.Mock)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Conflicting Backport Information',
@@ -268,9 +268,8 @@ describe('trop', () => {
 
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportInformationCheck as jest.Mock
-      ).mock.calls[0][2];
+      const updatePayload = (checkUtils.updateBackportInformationCheck as jest.Mock)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Backport Information Provided',
@@ -292,9 +291,8 @@ describe('trop', () => {
 
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportInformationCheck as jest.Mock
-      ).mock.calls[0][2];
+      const updatePayload = (checkUtils.updateBackportInformationCheck as jest.Mock)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Backport Information Provided',
