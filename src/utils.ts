@@ -524,12 +524,14 @@ export const backportImpl = async (
         end();
       }
 
-      console.log({
-        msg: 'backport-result',
-        pullRequest: pr.number,
-        backportPurpose: purpose,
-        success,
-      });
+      console.log(
+        JSON.stringify({
+          msg: 'backport-result',
+          pullRequest: pr.number,
+          backportPurpose: purpose,
+          success,
+        }),
+      );
 
       // Throw if neither succeeded - if we don't we
       // never enter the ErrorExecutor and the check hangs.
