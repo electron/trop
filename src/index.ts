@@ -540,8 +540,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             await context.octokit.issues.createComment(
               context.repo({
                 issue_number: issue.number,
-                body:
-                  'This PR has not been merged yet, and cannot be backported.',
+                body: 'This PR has not been merged yet, and cannot be backported.',
               }),
             );
             return false;
@@ -560,8 +559,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
           ).data as WebHookPR;
           await context.octokit.issues.createComment(
             context.repo({
-              body:
-                'The backport process for this PR has been manually initiated - here we go! :D',
+              body: 'The backport process for this PR has been manually initiated - here we go! :D',
               issue_number: issue.number,
             }),
           );

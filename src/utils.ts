@@ -116,8 +116,7 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
     await context.octokit.issues.createComment(
       context.repo({
         issue_number: opts.pr.number,
-        body:
-          'This PR has exceeded the automatic backport commit limit \
+        body: 'This PR has exceeded the automatic backport commit limit \
 and must be performed manually.',
       }),
     );
@@ -357,9 +356,8 @@ const checkUserHasWriteAccess = async (
   );
 
   const params = context.repo({ username: user });
-  const {
-    data: userInfo,
-  } = await context.octokit.repos.getCollaboratorPermissionLevel(params);
+  const { data: userInfo } =
+    await context.octokit.repos.getCollaboratorPermissionLevel(params);
 
   // Possible values for the permission key: 'admin', 'write', 'read', 'none'.
   // In order for the user's review to count, they must be at least 'write'.
