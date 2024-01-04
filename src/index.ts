@@ -20,7 +20,7 @@ import {
   backportToBranch,
 } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
-import { getSupportedBranches } from './utils/branch-util';
+import { getSupportedBranches, isBranchSupported } from './utils/branch-util';
 import {
   getBackportInformationCheck,
   queueBackportInformationCheck,
@@ -59,10 +59,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     change: PRChange,
   ) => {
     for (const label of pr.labels) {
-      const targetBranch = label.name.match(
-        /^(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))$/,
-      );
-      if (targetBranch && targetBranch[0]) {
+      if (isBranchSupported(label.name)) {
         await labelClosedPR(context, pr, label.name, change);
       }
     }
@@ -243,10 +240,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
               label.name.startsWith(status),
             )
           ) {
-            const targetBranch = label!.name.match(
-              /^(\d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))$/,
-            );
-            if (targetBranch?.[0] && targetBranch?.[0] === pr.base.ref) {
+            if (isBranchSupported(label!.name) && label!.name === pr.base.ref) {
               robot.log(
                 `#${pr.number} is trying to backport to itself - this is not allowed`,
               );
@@ -427,7 +421,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         await updateBackportInformationCheck(context, backportCheck, {
           title: 'Conflicting Backport Information',
           summary:
-            'The PR has a "no-backport" and at least one "target/x-y-z" label. Impossible to determine backport action.',
+            'The PR has a "no-backport" and at least one "target/<branch>" label. Impossible to determine backport action.',
           conclusion: CheckRunStatus.FAILURE,
         });
 

@@ -45,4 +45,6 @@ and update the labels appropriately.
 
 * `BOT_USER_NAME` - the username if your bot (e.g `trop[bot]`)
 * `SKIP_CHECK_LABEL` - see [skipping manual backports](./manual-backports.md#skipping-backport-checks)
-* `NUM_SUPPORTED_VERSIONS` - trop assumes numeric branch prefixes (e.g `8-x-y`, 9-x-y) and can automatically backport to the 4 most recent branches by default.
+* `NUM_SUPPORTED_VERSIONS` - automatic backports to stable branches further than this many back will be skipped. Defaults to 3.
+* `NO_EOL_SUPPORT` - if set to `1`, manual backports to stable branches older than `NUM_SUPPORTED_VERSIONS` will also be disallowed.
+* `SUPPORTED_BRANCH_PATTERN` - regex to define what a "stable branch" is. Defaults to `^(\d+)-(?:(\d+)-x|x-y)$`, which matches branches like `8-x-y` or `5-1-x`. Regex groups will be used for sorting, to determine which branch is "older" than another. Numeric groups (matching `/^\d+$/`) will be compared numerically, otherwise groups will be compared lexically. The first group is treated as the major version. There must be at least one group.
