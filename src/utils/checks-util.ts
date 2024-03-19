@@ -1,6 +1,10 @@
 import { CheckRunStatus } from '../enums';
-import { BACKPORT_INFORMATION_CHECK } from '../constants';
-import { WebHookPRContext } from '../types';
+import { BACKPORT_INFORMATION_CHECK, CHECK_PREFIX } from '../constants';
+import {
+  SimpleWebHookRepoContext,
+  WebHookPR,
+  WebHookPRContext,
+} from '../types';
 
 export async function updateBackportValidityCheck(
   context: WebHookPRContext,
@@ -87,4 +91,21 @@ export async function queueBackportInformationCheck(context: WebHookPRContext) {
       },
     }),
   );
+}
+
+export async function getCheckRun(
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
+  targetBranch: string,
+) {
+  const allChecks = await context.octokit.checks.listForRef(
+    context.repo({
+      ref: pr.head.sha,
+      per_page: 100,
+    }),
+  );
+
+  return allChecks.data.check_runs.find((run) => {
+    return run.name === `${CHECK_PREFIX}${targetBranch}`;
+  });
 }
