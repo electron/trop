@@ -1,6 +1,6 @@
 # Manual Backports
 
-When `trop` fails to backport your PR (trust us it tried its best) you need to backport the PR manually. You can do this by cherry-picking the commits in the PR yourself locally and pushing up a new branch.
+When `trop` fails to backport your PR (trust us it tried its best) you need to backport the PR manually. You can do this by cherry-picking the commits in the PR yourself locally and pushing up a new branch or using a [`build-tools` command](#build-tools-backport-command).
 
 When you create PR for a manual backport, the body of the backport PR must contain: 
 
@@ -22,6 +22,10 @@ Backport of https://github.com/electron/electron/pull/21813
 
 If you raise a PR to a branch that isn't `main` or a release branch without including a valid reference as above, `trop` will create a
 "failed" check on that PR to prevent it being merged.
+
+## Build Tools Backport Command
+
+You can use the `e backport <PR>` command to backport PRs. [This command](https://github.com/electron/build-tools?tab=readme-ov-file#e-backport) manually backport PRs by automating the steps above.
 
 ## Skipping Backport Checks
 
