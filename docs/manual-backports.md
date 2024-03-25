@@ -25,7 +25,7 @@ If you raise a PR to a branch that isn't `main` or a release branch without incl
 
 ## Build Tools Backport Command
 
-You can use the `e backport <PR>` command to backport PRs. [This command](https://github.com/electron/build-tools?tab=readme-ov-file#e-backport) manually backport PRs by automating the steps above.
+You can use the `e backport <PR>` command to backport PRs. [This command](https://github.com/electron/build-tools?tab=readme-ov-file#e-backport-pr) manually backports PRs by automating the steps above.
 
 ## Skipping Backport Checks
 
