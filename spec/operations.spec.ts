@@ -5,6 +5,9 @@ import * as path from 'path';
 import simpleGit from 'simple-git';
 import { initRepo } from '../src/operations/init-repo';
 import { setupRemotes } from '../src/operations/setup-remotes';
+import { tagBackportReviewers } from '../src/utils';
+import { PRChange } from '../src/enums';
+import { updateManualBackport } from '../src/operations/update-manual-backport';
 
 let dirObject: { dir?: string } | null = null;
 
@@ -12,6 +15,22 @@ const saveDir = (o: { dir: string }) => {
   dirObject = o;
   return o.dir;
 };
+
+const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
+const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.json');
+const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
+
+jest.mock('../src/utils', () => ({
+  tagBackportReviewers: jest.fn().mockReturnValue(Promise.resolve()),
+  isSemverMinorPR: jest.fn().mockReturnValue(false),
+}));
+
+jest.mock('../src/utils/label-utils', () => ({
+  labelExistsOnPR: jest.fn().mockResolvedValue(true),
+  getSemverLabel: jest.fn().mockResolvedValue(false),
+  addLabels: jest.fn(),
+  removeLabel: jest.fn(),
+}));
 
 describe('runner', () => {
   jest.setTimeout(30000);
@@ -99,6 +118,48 @@ describe('runner', () => {
           ).toBeTruthy();
         }
       }
+    });
+  });
+
+  describe('updateManualBackport()', () => {
+    let context: any;
+    let octokit = {
+      pulls: {
+        get: jest.fn().mockReturnValue(Promise.resolve({})),
+      },
+      issues: {
+        createComment: jest.fn().mockReturnValue(Promise.resolve({})),
+        listComments: jest.fn().mockReturnValue(Promise.resolve({ data: [] })),
+      },
+    };
+
+    it('tags reviewers on manual backport creation', async () => {
+      context = {
+        ...backportPROpenedEvent,
+        octokit,
+        repo: jest.fn(),
+      };
+      await updateManualBackport(context, PRChange.OPEN, 1234);
+      expect(tagBackportReviewers).toHaveBeenCalled();
+    });
+
+    it('does not tag reviewers on merged PRs', async () => {
+      context = {
+        ...backportPRMergedEvent,
+        octokit,
+        repo: jest.fn(),
+      };
+      await updateManualBackport(context, PRChange.MERGE, 1234);
+      expect(tagBackportReviewers).not.toHaveBeenCalled();
+    });
+    it('does not tag reviewers on closed PRs', async () => {
+      context = {
+        ...backportPRClosedEvent,
+        octokit,
+        repo: jest.fn(),
+      };
+      await updateManualBackport(context, PRChange.CLOSE, 1234);
+      expect(tagBackportReviewers).not.toHaveBeenCalled();
     });
   });
 });

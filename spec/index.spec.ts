@@ -392,6 +392,12 @@ Notes: <!-- One-line Change Summary Here-->`,
         head: {
           ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg',
         },
+        base: {
+          ref: 'main',
+          repo: {
+            default_branch: 'main',
+          },
+        },
         labels: [
           {
             color: 'ededed',
@@ -428,6 +434,12 @@ Notes: <!-- One-line Change Summary Here-->`,
         created_at: '2018-11-01T17:29:51Z',
         head: {
           ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg',
+        },
+        base: {
+          ref: 'main',
+          repo: {
+            default_branch: 'main',
+          },
         },
         labels: [
           {
