@@ -17,8 +17,8 @@ const saveDir = (o: { dir: string }) => {
   return o.dir;
 };
 
-const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
 const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.json');
+const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 
 jest.mock('../src/utils', () => ({
@@ -122,7 +122,7 @@ describe('runner', () => {
     });
   });
 
-  describe.only('updateManualBackport()', () => {
+  describe('updateManualBackport()', () => {
     let context: any;
     const octokit = {
       pulls: {

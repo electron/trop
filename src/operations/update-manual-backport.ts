@@ -5,8 +5,8 @@ import {
 } from '../constants';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPRContext } from '../types';
-import * as labelUtils from '../utils/label-utils';
 import { isSemverMinorPR, tagBackportReviewers } from '../utils';
+import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 
 /**
