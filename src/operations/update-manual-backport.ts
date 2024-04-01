@@ -6,7 +6,7 @@ import {
   BACKPORT_REQUESTED_LABEL,
   SKIP_CHECK_LABEL,
 } from '../constants';
-import { isSemverMinorPR } from '../utils';
+import { tagBackportReviewers, isSemverMinorPR } from '../utils';
 import { WebHookPRContext } from '../types';
 
 /**
@@ -135,6 +135,13 @@ please check out #${pr.number}`;
         }),
       );
     }
+
+    // Tag default reviewers to manual backport
+    await tagBackportReviewers({
+      context,
+      user: pr.user.login,
+      targetPrNumber: pr.number,
+    });
   } else if (type === PRChange.MERGE) {
     log(
       'updateManualBackport',
