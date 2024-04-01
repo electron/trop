@@ -123,7 +123,6 @@ describe('runner', () => {
   });
 
   describe('updateManualBackport()', () => {
-    let context: any;
     const octokit = {
       pulls: {
         get: jest.fn().mockReturnValue(Promise.resolve({})),
@@ -135,7 +134,7 @@ describe('runner', () => {
     };
 
     it('tags reviewers on manual backport creation', async () => {
-      context = {
+      const context = {
         ...backportPROpenedEvent,
         octokit,
         repo: jest.fn(),
@@ -149,7 +148,7 @@ describe('runner', () => {
     });
 
     it('does not tag reviewers on merged PRs', async () => {
-      context = {
+      const context = {
         ...backportPRMergedEvent,
         octokit,
         repo: jest.fn(),
@@ -159,7 +158,7 @@ describe('runner', () => {
     });
 
     it('does not tag reviewers on closed PRs', async () => {
-      context = {
+      const context = {
         ...backportPRClosedEvent,
         octokit,
         repo: jest.fn(),
