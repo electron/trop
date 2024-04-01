@@ -399,20 +399,24 @@ const createBackportComment = async (
 
 export const tagBackportReviewers = async ({
   context,
-  user,
   targetPrNumber,
+  user,
 }: {
   context: SimpleWebHookRepoContext;
-  user: string;
   targetPrNumber: number;
+  user?: string;
 }) => {
   const reviewers = [];
-  const hasWrite = await checkUserHasWriteAccess(context, user);
-  // Optionally request a default review team for backports.
-  // If the PR author has write access, also request their review.
-  if (hasWrite) reviewers.push(user);
+
   if (DEFAULT_BACKPORT_REVIEW_TEAM) {
     reviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
+  }
+
+  if (user) {
+    const hasWrite = await checkUserHasWriteAccess(context, user);
+    // Optionally request a default review team for backports.
+    // If the PR author has write access, also request their review.
+    if (hasWrite) reviewers.push(user);
   }
 
   if (reviewers.length > 0) {
@@ -591,8 +595,8 @@ export const backportImpl = async (
 
         await tagBackportReviewers({
           context,
-          user: pr.user.login,
           targetPrNumber: newPr.number,
+          user: pr.user.login,
         });
 
         log(

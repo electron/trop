@@ -1,13 +1,13 @@
-import * as labelUtils from '../utils/label-utils';
-import { log } from '../utils/log-util';
-import { PRChange, PRStatus, LogLevel } from '../enums';
 import {
   BACKPORT_LABEL,
   BACKPORT_REQUESTED_LABEL,
   SKIP_CHECK_LABEL,
 } from '../constants';
-import { tagBackportReviewers, isSemverMinorPR } from '../utils';
+import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPRContext } from '../types';
+import * as labelUtils from '../utils/label-utils';
+import { isSemverMinorPR, tagBackportReviewers } from '../utils';
+import { log } from '../utils/log-util';
 
 /**
  * Updates the labels on a backport's original PR as well as comments with links
@@ -139,7 +139,6 @@ please check out #${pr.number}`;
     // Tag default reviewers to manual backport
     await tagBackportReviewers({
       context,
-      user: pr.user.login,
       targetPrNumber: pr.number,
     });
   } else if (type === PRChange.MERGE) {

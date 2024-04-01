@@ -4,6 +4,7 @@
     "action": "opened",
     "number": 7,
     "pull_request": {
+      "number": 7,
       "url": "my_cool_url",
       "title": "CHANGE README",
       "merged": true,

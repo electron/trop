@@ -3,8 +3,6 @@ import * as sinon from 'sinon';
 
 import { ExecutionQueue } from '../src/Queue';
 
-const noop = async () => {};
-
 const waitForEvent = (emitter: EventEmitter, event: string) => {
   return new Promise<void>((resolve) => {
     emitter.once(event, resolve);

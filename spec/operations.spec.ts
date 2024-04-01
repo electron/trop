@@ -3,11 +3,12 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
+
+import { PRChange } from '../src/enums';
 import { initRepo } from '../src/operations/init-repo';
 import { setupRemotes } from '../src/operations/setup-remotes';
-import { tagBackportReviewers } from '../src/utils';
-import { PRChange } from '../src/enums';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
+import { tagBackportReviewers } from '../src/utils';
 
 let dirObject: { dir?: string } | null = null;
 
@@ -121,9 +122,9 @@ describe('runner', () => {
     });
   });
 
-  describe('updateManualBackport()', () => {
+  describe.only('updateManualBackport()', () => {
     let context: any;
-    let octokit = {
+    const octokit = {
       pulls: {
         get: jest.fn().mockReturnValue(Promise.resolve({})),
       },
@@ -141,6 +142,10 @@ describe('runner', () => {
       };
       await updateManualBackport(context, PRChange.OPEN, 1234);
       expect(tagBackportReviewers).toHaveBeenCalled();
+      expect(tagBackportReviewers).toHaveBeenCalledWith({
+        context,
+        targetPrNumber: 7,
+      });
     });
 
     it('does not tag reviewers on merged PRs', async () => {
@@ -152,6 +157,7 @@ describe('runner', () => {
       await updateManualBackport(context, PRChange.MERGE, 1234);
       expect(tagBackportReviewers).not.toHaveBeenCalled();
     });
+
     it('does not tag reviewers on closed PRs', async () => {
       context = {
         ...backportPRClosedEvent,
