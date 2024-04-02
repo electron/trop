@@ -745,7 +745,7 @@ export const backportImpl = async (
           context.repo({
             issue_number: pr.number,
             body: `I was unable to backport this PR to "${targetBranch}" cleanly;
-   you will need to perform this backport manually.`,
+   you will need to perform this [backport manually](https://github.com/electron/trop/blob/main/docs/manual-backports.md#manual-backports).`,
           }),
         );
 
