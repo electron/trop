@@ -397,6 +397,38 @@ const createBackportComment = async (
   return body;
 };
 
+export const tagBackportReviewers = async ({
+  context,
+  targetPrNumber,
+  user,
+}: {
+  context: SimpleWebHookRepoContext;
+  targetPrNumber: number;
+  user?: string;
+}) => {
+  const reviewers = [];
+
+  if (DEFAULT_BACKPORT_REVIEW_TEAM) {
+    reviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
+  }
+
+  if (user) {
+    const hasWrite = await checkUserHasWriteAccess(context, user);
+    // Optionally request a default review team for backports.
+    // If the PR author has write access, also request their review.
+    if (hasWrite) reviewers.push(user);
+  }
+
+  if (reviewers.length > 0) {
+    await context.octokit.pulls.requestReviewers(
+      context.repo({
+        pull_number: targetPrNumber,
+        reviewers,
+      }),
+    );
+  }
+};
+
 export const backportImpl = async (
   robot: Probot,
   context: SimpleWebHookRepoContext,
@@ -561,24 +593,11 @@ export const backportImpl = async (
           }),
         );
 
-        const reviewers = [];
-        const hasWrite = await checkUserHasWriteAccess(context, pr.user.login);
-
-        // Optionally request a default review team for backports.
-        // If the PR author has write access, also request their review.
-        if (hasWrite) reviewers.push(pr.user.login);
-        if (DEFAULT_BACKPORT_REVIEW_TEAM) {
-          reviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
-        }
-
-        if (reviewers.length > 0) {
-          await context.octokit.pulls.requestReviewers(
-            context.repo({
-              pull_number: newPr.number,
-              reviewers,
-            }),
-          );
-        }
+        await tagBackportReviewers({
+          context,
+          targetPrNumber: newPr.number,
+          user: pr.user.login,
+        });
 
         log(
           'backportImpl',
