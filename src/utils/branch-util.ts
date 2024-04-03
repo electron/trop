@@ -5,6 +5,64 @@ import { log } from './log-util';
 import { LogLevel } from '../enums';
 import { WebHookRepoContext } from '../types';
 
+const SUPPORTED_BRANCH_PATTERN = new RegExp(
+  getEnvVar('SUPPORTED_BRANCH_PATTERN', '^(\\d+)-(?:(\\d+)-x|x-y)$'),
+);
+
+export class BranchMatcher {
+  branchPattern: RegExp;
+  numSupportedVersions: number;
+
+  constructor(branchPattern: RegExp, numSupportedVersions: number) {
+    this.branchPattern = branchPattern;
+    this.numSupportedVersions = numSupportedVersions;
+  }
+
+  isBranchSupported(branchName: string): boolean {
+    return this.branchPattern.test(branchName);
+  }
+
+  getSupportedBranches(allBranches: string[]): string[] {
+    const releaseBranches = allBranches.filter((branch) =>
+      this.isBranchSupported(branch),
+    );
+    console.log(allBranches, releaseBranches);
+    const filtered: Record<string, string> = {};
+    releaseBranches.sort((a, b) => {
+      const [, ...aParts] = this.branchPattern.exec(a)!;
+      const [, ...bParts] = this.branchPattern.exec(b)!;
+      for (let i = 0; i < aParts.length; i += 1) {
+        if (aParts[i] === bParts[i]) continue;
+        return comparePart(aParts[i], bParts[i]);
+      }
+      return 0;
+    });
+    for (const branch of releaseBranches)
+      filtered[this.branchPattern.exec(branch)![1]] = branch;
+
+    const values = Object.values(filtered);
+    return values.sort(comparePart).slice(-this.numSupportedVersions);
+  }
+}
+
+const branchMatcher = new BranchMatcher(
+  SUPPORTED_BRANCH_PATTERN,
+  NUM_SUPPORTED_VERSIONS,
+);
+
+export const isBranchSupported =
+  branchMatcher.isBranchSupported.bind(branchMatcher);
+
+function comparePart(a: string, b: string): number {
+  if (a == null && b != null) return 1;
+  if (b == null) return -1;
+  if (/^\d+$/.test(a)) {
+    return parseInt(a, 10) - parseInt(b, 10);
+  } else {
+    return a.localeCompare(b);
+  }
+}
+
 /**
  * Fetches an array of the currently supported branches for a repository.
  *
@@ -20,51 +78,17 @@ export async function getSupportedBranches(
     'Fetching supported branches for this repository',
   );
 
-  const SUPPORTED_BRANCH_ENV_PATTERN = getEnvVar(
-    'SUPPORTED_BRANCH_PATTERN',
-    '^(d)+-(?:(?:[0-9]+-x$)|(?:x+-y$))$',
-  );
-  const SUPPORTED_BRANCH_PATTERN = new RegExp(SUPPORTED_BRANCH_ENV_PATTERN);
-
   const { data: branches } = await context.octokit.repos.listBranches(
     context.repo({
       protected: true,
     }),
   );
 
-  const releaseBranches = branches.filter((branch) =>
-    branch.name.match(SUPPORTED_BRANCH_PATTERN),
-  );
-  const filtered: Record<string, string> = {};
-  releaseBranches
-    .sort((a, b) => {
-      const aParts = a.name.split('-');
-      const bParts = b.name.split('-');
-      for (let i = 0; i < aParts.length; i += 1) {
-        if (aParts[i] === bParts[i]) continue;
-        return parseInt(aParts[i], 10) - parseInt(bParts[i], 10);
-      }
-      return 0;
-    })
-    .forEach((branch) => {
-      return (filtered[branch.name.split('-')[0]] = branch.name);
-    });
-
-  const values = Object.values(filtered);
-  const supported = values
-    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
-    .slice(-NUM_SUPPORTED_VERSIONS);
-  // TODO: We're supporting Electron 22 until Oct. 10, 2023.
-  // Remove this hardcoded value at that time.
-  if (!supported.includes('22-x-y')) {
-    supported.unshift('22-x-y');
-  }
-  return supported;
+  return branchMatcher.getSupportedBranches(branches.map((b) => b.name));
 }
 
 /**
  * @returns A scoped Regex matching the backport pattern present in PR bodies.
  */
-export const getBackportPattern = () => {
-  return /(?:^|\n)(?:manual |manually )?backport (?:of )?(?:#(\d+)|https:\/\/github.com\/.*\/pull\/(\d+))/gim;
-};
+export const getBackportPattern = () =>
+  /(?:^|\n)(?:manual |manually )?backport (?:of )?(?:#(\d+)|https:\/\/github.com\/.*\/pull\/(\d+))/gim;

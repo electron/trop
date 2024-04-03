@@ -87,7 +87,7 @@ export async function queueBackportInformationCheck(context: WebHookPRContext) {
       output: {
         title: 'Needs Backport Information',
         summary:
-          'This PR requires backport information. It should have a "no-backport" or a "target/x-y-z" label.',
+          'This PR requires backport information. It should have a "no-backport" or a "target/<branch>" label.',
       },
     }),
   );

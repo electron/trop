@@ -397,6 +397,38 @@ const createBackportComment = async (
   return body;
 };
 
+export const tagBackportReviewers = async ({
+  context,
+  targetPrNumber,
+  user,
+}: {
+  context: SimpleWebHookRepoContext;
+  targetPrNumber: number;
+  user?: string;
+}) => {
+  const reviewers = [];
+
+  if (DEFAULT_BACKPORT_REVIEW_TEAM) {
+    reviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
+  }
+
+  if (user) {
+    const hasWrite = await checkUserHasWriteAccess(context, user);
+    // Optionally request a default review team for backports.
+    // If the PR author has write access, also request their review.
+    if (hasWrite) reviewers.push(user);
+  }
+
+  if (reviewers.length > 0) {
+    await context.octokit.pulls.requestReviewers(
+      context.repo({
+        pull_number: targetPrNumber,
+        reviewers,
+      }),
+    );
+  }
+};
+
 export const backportImpl = async (
   robot: Probot,
   context: SimpleWebHookRepoContext,
@@ -507,6 +539,15 @@ export const backportImpl = async (
         end();
       }
 
+      console.log(
+        JSON.stringify({
+          msg: 'backport-result',
+          pullRequest: pr.number,
+          backportPurpose: purpose,
+          success,
+        }),
+      );
+
       // Throw if neither succeeded - if we don't we
       // never enter the ErrorExecutor and the check hangs.
       if (!success) {
@@ -537,24 +578,11 @@ export const backportImpl = async (
           }),
         );
 
-        const reviewers = [];
-        const hasWrite = await checkUserHasWriteAccess(context, pr.user.login);
-
-        // Optionally request a default review team for backports.
-        // If the PR author has write access, also request their review.
-        if (hasWrite) reviewers.push(pr.user.login);
-        if (DEFAULT_BACKPORT_REVIEW_TEAM) {
-          reviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
-        }
-
-        if (reviewers.length > 0) {
-          await context.octokit.pulls.requestReviewers(
-            context.repo({
-              pull_number: newPr.number,
-              reviewers,
-            }),
-          );
-        }
+        await tagBackportReviewers({
+          context,
+          targetPrNumber: newPr.number,
+          user: pr.user.login,
+        });
 
         log(
           'backportImpl',
@@ -699,7 +727,7 @@ export const backportImpl = async (
           context.repo({
             issue_number: pr.number,
             body: `I was unable to backport this PR to "${targetBranch}" cleanly;
-   you will need to perform this backport manually.`,
+   you will need to perform this [backport manually](https://github.com/electron/trop/blob/main/docs/manual-backports.md#manual-backports).`,
           }),
         );
 
