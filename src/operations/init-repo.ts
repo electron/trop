@@ -65,15 +65,5 @@ export const initRepo = async ({
     await git.clone(cacheDir, '.');
   });
 
-  const pushUrl = githubUrl({ slug, accessToken });
-  await git.remote(['set-url', 'origin', pushUrl]);
-  await git.remote(['set-url', '--push', 'origin', pushUrl]);
-
-  const config = await fs.readFile('./config.yml', 'utf8');
-  const { tropEmail, tropName } = parse(config);
-  await git.addConfig('user.email', tropEmail || 'trop@example.com');
-  await git.addConfig('user.name', tropName || 'Trop Bot');
-
-  await git.addConfig('commit.gpgsign', 'false');
   return { dir };
 };
