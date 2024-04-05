@@ -5,7 +5,6 @@ import simpleGit from 'simple-git';
 
 import queue from './Queue';
 import {
-  CHECK_PREFIX,
   BACKPORT_REQUESTED_LABEL,
   DEFAULT_BACKPORT_REVIEW_TEAM,
   BACKPORT_LABEL,
@@ -18,6 +17,7 @@ import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
+import { getCheckRun } from './utils/checks-util';
 import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
 import { TryBackportOptions } from './interfaces';
@@ -464,36 +464,21 @@ export const backportImpl = async (
   const bp = `backport from PR #${pr.number} to "${targetBranch}"`;
   log('backportImpl', LogLevel.INFO, `Queuing ${bp} for "${slug}"`);
 
-  const getCheckRun = async () => {
-    const allChecks = await context.octokit.checks.listForRef(
-      context.repo({
-        ref: pr.head.sha,
-        per_page: 100,
-      }),
-    );
-
-    return allChecks.data.check_runs.find((run) => {
-      return run.name === `${CHECK_PREFIX}${targetBranch}`;
-    });
-  };
-
   let createdDir: string | null = null;
 
   queue.enterQueue(
     `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
-      if (purpose === BackportPurpose.Check) {
-        const checkRun = await getCheckRun();
-        if (checkRun) {
-          await context.octokit.checks.update(
-            context.repo({
-              check_run_id: checkRun.id,
-              name: checkRun.name,
-              status: 'in_progress' as 'in_progress',
-            }),
-          );
-        }
+      const checkRun = await getCheckRun(context, pr, targetBranch);
+      if (checkRun) {
+        await context.octokit.checks.update(
+          context.repo({
+            check_run_id: checkRun.id,
+            name: checkRun.name,
+            status: 'in_progress' as 'in_progress',
+          }),
+        );
       }
 
       const repoAccessToken = await getRepoToken(robot, context);
@@ -679,22 +664,19 @@ export const backportImpl = async (
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
 
-      if (purpose === BackportPurpose.Check) {
-        const checkRun = await getCheckRun();
-        if (checkRun) {
-          context.octokit.checks.update(
-            context.repo({
-              check_run_id: checkRun.id,
-              name: checkRun.name,
-              conclusion: 'success' as 'success',
-              completed_at: new Date().toISOString(),
-              output: {
-                title: 'Clean Backport',
-                summary: `This PR was checked and can be backported to "${targetBranch}" cleanly.`,
-              },
-            }),
-          );
-        }
+      if (checkRun) {
+        context.octokit.checks.update(
+          context.repo({
+            check_run_id: checkRun.id,
+            name: checkRun.name,
+            conclusion: 'success' as 'success',
+            completed_at: new Date().toISOString(),
+            output: {
+              title: 'Clean Backport',
+              summary: `This PR was checked and can be backported to "${targetBranch}" cleanly.`,
+            },
+          }),
+        );
       }
 
       await fs.remove(createdDir);
@@ -762,31 +744,29 @@ export const backportImpl = async (
         ]);
       }
 
-      if (purpose === BackportPurpose.Check) {
-        const checkRun = await getCheckRun();
-        if (checkRun) {
-          const mdSep = '``````````````````````````````';
-          const updateOpts = context.repo({
-            check_run_id: checkRun.id,
-            name: checkRun.name,
-            conclusion: 'neutral' as 'neutral',
-            completed_at: new Date().toISOString(),
-            output: {
-              title: 'Backport Failed',
-              summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
-              text: diff
-                ? `Failed Diff:\n\n${mdSep}diff\n${rawDiff}\n${mdSep}`
-                : undefined,
-              annotations: annotations ? annotations : undefined,
-            },
-          });
-          try {
-            await context.octokit.checks.update(updateOpts);
-          } catch (err) {
-            // A GitHub error occurred - try to mark it as a failure without annotations.
-            updateOpts.output!.annotations = undefined;
-            await context.octokit.checks.update(updateOpts);
-          }
+      const checkRun = await getCheckRun(context, pr, targetBranch);
+      if (checkRun) {
+        const mdSep = '``````````````````````````````';
+        const updateOpts = context.repo({
+          check_run_id: checkRun.id,
+          name: checkRun.name,
+          conclusion: 'neutral' as 'neutral',
+          completed_at: new Date().toISOString(),
+          output: {
+            title: 'Backport Failed',
+            summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
+            text: diff
+              ? `Failed Diff:\n\n${mdSep}diff\n${rawDiff}\n${mdSep}`
+              : undefined,
+            annotations: annotations ? annotations : undefined,
+          },
+        });
+        try {
+          await context.octokit.checks.update(updateOpts);
+        } catch (err) {
+          // A GitHub error occurred - try to mark it as a failure without annotations.
+          updateOpts.output!.annotations = undefined;
+          await context.octokit.checks.update(updateOpts);
         }
       }
     },

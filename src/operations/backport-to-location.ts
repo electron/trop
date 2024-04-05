@@ -1,9 +1,40 @@
+import { CHECK_PREFIX } from '../constants';
 import { PRStatus, BackportPurpose, LogLevel } from '../enums';
+import { getCheckRun } from '../utils/checks-util';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 import { backportImpl } from '../utils';
 import { Probot } from 'probot';
 import { SimpleWebHookRepoContext, WebHookPR } from '../types';
+
+const createOrUpdateCheckRun = async (
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
+  targetBranch: string,
+) => {
+  const check = await getCheckRun(context, pr, targetBranch);
+
+  if (check) {
+    if (check.conclusion === 'neutral') {
+      await context.octokit.checks.update(
+        context.repo({
+          name: check.name,
+          check_run_id: check.id,
+          status: 'queued' as 'queued',
+        }),
+      );
+    }
+  } else {
+    await context.octokit.checks.create(
+      context.repo({
+        name: `${CHECK_PREFIX}${targetBranch}`,
+        head_sha: pr.head.sha,
+        status: 'queued' as 'queued',
+        details_url: 'https://github.com/electron/trop',
+      }),
+    );
+  }
+};
 
 /**
  * Performs a backport to a specified label representing a branch.
@@ -43,6 +74,8 @@ export const backportToLabel = async (
     return;
   }
 
+  await createOrUpdateCheckRun(context, pr, targetBranch);
+
   const labelToRemove = label.name;
   const labelToAdd = label.name.replace(PRStatus.TARGET, PRStatus.IN_FLIGHT);
   await backportImpl(
@@ -74,6 +107,8 @@ export const backportToBranch = async (
     LogLevel.INFO,
     `Executing backport to branch '${targetBranch}'`,
   );
+
+  await createOrUpdateCheckRun(context, pr, targetBranch);
 
   const labelToRemove = undefined;
   const labelToAdd = PRStatus.IN_FLIGHT + targetBranch;
