@@ -407,9 +407,10 @@ export const tagBackportReviewers = async ({
   user?: string;
 }) => {
   const reviewers = [];
+  const teamReviewers = [];
 
   if (DEFAULT_BACKPORT_REVIEW_TEAM) {
-    reviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
+    teamReviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
   }
 
   if (user) {
@@ -419,11 +420,12 @@ export const tagBackportReviewers = async ({
     if (hasWrite) reviewers.push(user);
   }
 
-  if (reviewers.length > 0) {
+  if (Math.max(reviewers.length, teamReviewers.length) > 0) {
     await context.octokit.pulls.requestReviewers(
       context.repo({
         pull_number: targetPrNumber,
         reviewers,
+        team_reviewers: teamReviewers,
       }),
     );
   }
