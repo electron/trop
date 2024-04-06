@@ -411,7 +411,9 @@ export const tagBackportReviewers = async ({
 
   if (DEFAULT_BACKPORT_REVIEW_TEAM) {
     // Optionally request a default review team for backports.
-    teamReviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
+    // Use team slug value. i.e electron/wg-releases => wg-releases
+    const slug = DEFAULT_BACKPORT_REVIEW_TEAM.split('/')[1];
+    teamReviewers.push(slug);
   }
 
   if (user) {
