@@ -410,12 +410,12 @@ export const tagBackportReviewers = async ({
   const teamReviewers = [];
 
   if (DEFAULT_BACKPORT_REVIEW_TEAM) {
+    // Optionally request a default review team for backports.
     teamReviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
   }
 
   if (user) {
     const hasWrite = await checkUserHasWriteAccess(context, user);
-    // Optionally request a default review team for backports.
     // If the PR author has write access, also request their review.
     if (hasWrite) reviewers.push(user);
   }
