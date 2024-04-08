@@ -65,5 +65,10 @@ export const initRepo = async ({
     await git.clone(cacheDir, '.');
   });
 
+  const config = fs.readFileSync('./config.yml', 'utf8');
+  const { tropEmail, tropName } = parse(config);
+  await git.addConfig('user.email', tropEmail || 'trop@example.com');
+  await git.addConfig('user.name', tropName || 'Trop Bot');
+
   return { dir };
 };
