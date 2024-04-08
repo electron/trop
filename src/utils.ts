@@ -407,23 +407,29 @@ export const tagBackportReviewers = async ({
   user?: string;
 }) => {
   const reviewers = [];
+  const teamReviewers = [];
 
   if (DEFAULT_BACKPORT_REVIEW_TEAM) {
-    reviewers.push(DEFAULT_BACKPORT_REVIEW_TEAM);
+    // Optionally request a default review team for backports.
+    // Use team slug value. i.e electron/wg-releases => wg-releases
+    const slug =
+      DEFAULT_BACKPORT_REVIEW_TEAM.split('/')[1] ||
+      DEFAULT_BACKPORT_REVIEW_TEAM;
+    teamReviewers.push(slug);
   }
 
   if (user) {
     const hasWrite = await checkUserHasWriteAccess(context, user);
-    // Optionally request a default review team for backports.
     // If the PR author has write access, also request their review.
     if (hasWrite) reviewers.push(user);
   }
 
-  if (reviewers.length > 0) {
+  if (Math.max(reviewers.length, teamReviewers.length) > 0) {
     await context.octokit.pulls.requestReviewers(
       context.repo({
         pull_number: targetPrNumber,
         reviewers,
+        team_reviewers: teamReviewers,
       }),
     );
   }
