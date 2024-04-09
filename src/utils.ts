@@ -435,9 +435,7 @@ export const tagBackportReviewers = async ({
       );
     } catch (error) {
       console.error(
-        `Failed to request reviewers for PR #${targetPrNumber}. Reviewers: ${reviewers.join(
-          ', ',
-        )}, Team Reviewers: ${teamReviewers.join(', ')}. Error: ${error}`,
+        `Failed to request reviewers for PR #${targetPrNumber}: ${error}`,
       );
     }
   }
