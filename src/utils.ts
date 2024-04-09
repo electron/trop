@@ -434,8 +434,11 @@ export const tagBackportReviewers = async ({
         }),
       );
     } catch (error) {
-      console.error(
-        `Failed to request reviewers for PR #${targetPrNumber}: ${error}`,
+      log(
+        'tagBackportReviewers',
+        LogLevel.ERROR,
+        `Failed to request reviewers for PR #${targetPrNumber}`,
+        error,
       );
     }
   }
