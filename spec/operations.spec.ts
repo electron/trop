@@ -26,13 +26,10 @@ jest.mock('../src/constants', () => ({
   DEFAULT_BACKPORT_REVIEW_TEAM: 'electron/wg-releases',
 }));
 
-jest.mock('../src/utils', () => {
-  const actualUtils = jest.requireActual('../src/utils');
-  return {
-    ...actualUtils,
-    isSemverMinorPR: jest.fn().mockReturnValue(false),
-  };
-});
+jest.mock('../src/utils', () => ({
+  ...jest.requireActual('../src/utils'),
+  isSemverMinorPR: jest.fn().mockReturnValue(false),
+}));
 
 jest.mock('../src/utils/label-utils', () => ({
   labelExistsOnPR: jest.fn().mockResolvedValue(true),
