@@ -55,7 +55,7 @@ describe('utils', () => {
       });
     });
 
-    it('logs an error if tagBackportReviewers throws an error', async () => {
+    it('logs an error if requestReviewers throws an error', async () => {
       const error = new Error('Request failed');
       context.octokit.pulls.requestReviewers = jest
         .fn()
