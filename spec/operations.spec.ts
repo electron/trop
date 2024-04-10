@@ -21,11 +21,6 @@ const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.j
 const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 
-jest.mock('../src/constants', () => ({
-  ...jest.requireActual('../src/constants'),
-  DEFAULT_BACKPORT_REVIEW_TEAM: 'electron/wg-releases',
-}));
-
 jest.mock('../src/utils', () => ({
   tagBackportReviewers: jest.fn().mockReturnValue(Promise.resolve()),
   isSemverMinorPR: jest.fn().mockReturnValue(false),
@@ -138,12 +133,11 @@ describe('runner', () => {
       },
     };
 
-    const mockContext = { octokit, repo: jest.fn() };
-
     it('tags reviewers on manual backport creation', async () => {
       const context = {
         ...backportPROpenedEvent,
-        ...mockContext,
+        octokit,
+        repo: jest.fn(),
       };
       await updateManualBackport(context, PRChange.OPEN, 1234);
       expect(tagBackportReviewers).toHaveBeenCalled();
@@ -156,7 +150,8 @@ describe('runner', () => {
     it('does not tag reviewers on merged PRs', async () => {
       const context = {
         ...backportPRMergedEvent,
-        ...mockContext,
+        octokit,
+        repo: jest.fn(),
       };
       await updateManualBackport(context, PRChange.MERGE, 1234);
       expect(tagBackportReviewers).not.toHaveBeenCalled();
@@ -165,7 +160,8 @@ describe('runner', () => {
     it('does not tag reviewers on closed PRs', async () => {
       const context = {
         ...backportPRClosedEvent,
-        ...mockContext,
+        octokit,
+        repo: jest.fn(),
       };
       await updateManualBackport(context, PRChange.CLOSE, 1234);
       expect(tagBackportReviewers).not.toHaveBeenCalled();
