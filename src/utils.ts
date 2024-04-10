@@ -425,13 +425,22 @@ export const tagBackportReviewers = async ({
   }
 
   if (Math.max(reviewers.length, teamReviewers.length) > 0) {
-    await context.octokit.pulls.requestReviewers(
-      context.repo({
-        pull_number: targetPrNumber,
-        reviewers,
-        team_reviewers: teamReviewers,
-      }),
-    );
+    try {
+      await context.octokit.pulls.requestReviewers(
+        context.repo({
+          pull_number: targetPrNumber,
+          reviewers,
+          team_reviewers: teamReviewers,
+        }),
+      );
+    } catch (error) {
+      log(
+        'tagBackportReviewers',
+        LogLevel.ERROR,
+        `Failed to request reviewers for PR #${targetPrNumber}`,
+        error,
+      );
+    }
   }
 };
 
