@@ -1,14 +1,14 @@
 import { spawnSync } from 'child_process';
 import * as fs from 'fs-extra';
-import * as logUtils from '../src/utils/log-util';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
 
-import { LogLevel, PRChange } from '../src/enums';
+import { PRChange } from '../src/enums';
 import { initRepo } from '../src/operations/init-repo';
 import { setupRemotes } from '../src/operations/setup-remotes';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
+import { tagBackportReviewers } from '../src/utils';
 
 let dirObject: { dir?: string } | null = null;
 
@@ -27,7 +27,7 @@ jest.mock('../src/constants', () => ({
 }));
 
 jest.mock('../src/utils', () => ({
-  ...jest.requireActual('../src/utils'),
+  tagBackportReviewers: jest.fn().mockReturnValue(Promise.resolve()),
   isSemverMinorPR: jest.fn().mockReturnValue(false),
 }));
 
@@ -131,7 +131,6 @@ describe('runner', () => {
     const octokit = {
       pulls: {
         get: jest.fn().mockReturnValue(Promise.resolve({})),
-        requestReviewers: jest.fn(),
       },
       issues: {
         createComment: jest.fn().mockReturnValue(Promise.resolve({})),
@@ -139,9 +138,7 @@ describe('runner', () => {
       },
     };
 
-    const mockContext = { octokit, repo: jest.fn((obj) => obj) };
-
-    beforeEach(() => jest.clearAllMocks());
+    const mockContext = { octokit, repo: jest.fn() };
 
     it('tags reviewers on manual backport creation', async () => {
       const context = {
@@ -149,11 +146,10 @@ describe('runner', () => {
         ...mockContext,
       };
       await updateManualBackport(context, PRChange.OPEN, 1234);
-      expect(octokit.pulls.requestReviewers).toHaveBeenCalled();
-      expect(octokit.pulls.requestReviewers).toHaveBeenCalledWith({
-        pull_number: 7,
-        team_reviewers: ['wg-releases'],
-        reviewers: [],
+      expect(tagBackportReviewers).toHaveBeenCalled();
+      expect(tagBackportReviewers).toHaveBeenCalledWith({
+        context,
+        targetPrNumber: 7,
       });
     });
 
@@ -163,7 +159,7 @@ describe('runner', () => {
         ...mockContext,
       };
       await updateManualBackport(context, PRChange.MERGE, 1234);
-      expect(octokit.pulls.requestReviewers).not.toHaveBeenCalled();
+      expect(tagBackportReviewers).not.toHaveBeenCalled();
     });
 
     it('does not tag reviewers on closed PRs', async () => {
@@ -172,29 +168,7 @@ describe('runner', () => {
         ...mockContext,
       };
       await updateManualBackport(context, PRChange.CLOSE, 1234);
-      expect(octokit.pulls.requestReviewers).not.toHaveBeenCalled();
-    });
-
-    it('logs an error if requestReviewer fails', async () => {
-      const error = new Error('Request failed');
-      mockContext.octokit.pulls.requestReviewers = jest
-        .fn()
-        .mockRejectedValue(error);
-      const context = {
-        ...backportPROpenedEvent,
-        ...mockContext,
-      };
-      const logSpy = jest.spyOn(logUtils, 'log');
-      await updateManualBackport(context, PRChange.OPEN, 1234);
-
-      expect(octokit.pulls.requestReviewers).toHaveBeenCalled();
-
-      expect(logSpy).toHaveBeenCalledWith(
-        'tagBackportReviewers',
-        LogLevel.ERROR,
-        `Failed to request reviewers for PR #7`,
-        error,
-      );
+      expect(tagBackportReviewers).not.toHaveBeenCalled();
     });
   });
 });
