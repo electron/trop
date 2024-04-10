@@ -1,14 +1,14 @@
 import { spawnSync } from 'child_process';
 import * as fs from 'fs-extra';
+import * as logUtils from '../src/utils/log-util';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
 
-import { PRChange } from '../src/enums';
+import { LogLevel, PRChange } from '../src/enums';
 import { initRepo } from '../src/operations/init-repo';
 import { setupRemotes } from '../src/operations/setup-remotes';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
-import { tagBackportReviewers } from '../src/utils';
 
 let dirObject: { dir?: string } | null = null;
 
@@ -21,10 +21,18 @@ const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.j
 const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 
-jest.mock('../src/utils', () => ({
-  tagBackportReviewers: jest.fn().mockReturnValue(Promise.resolve()),
-  isSemverMinorPR: jest.fn().mockReturnValue(false),
+jest.mock('../src/constants', () => ({
+  ...jest.requireActual('../src/constants'),
+  DEFAULT_BACKPORT_REVIEW_TEAM: 'electron/wg-releases',
 }));
+
+jest.mock('../src/utils', () => {
+  const actualUtils = jest.requireActual('../src/utils');
+  return {
+    ...actualUtils,
+    isSemverMinorPR: jest.fn().mockReturnValue(false),
+  };
+});
 
 jest.mock('../src/utils/label-utils', () => ({
   labelExistsOnPR: jest.fn().mockResolvedValue(true),
@@ -126,6 +134,7 @@ describe('runner', () => {
     const octokit = {
       pulls: {
         get: jest.fn().mockReturnValue(Promise.resolve({})),
+        requestReviewers: jest.fn(),
       },
       issues: {
         createComment: jest.fn().mockReturnValue(Promise.resolve({})),
@@ -133,38 +142,62 @@ describe('runner', () => {
       },
     };
 
+    const mockContext = { octokit, repo: jest.fn((obj) => obj) };
+
+    beforeEach(() => jest.clearAllMocks());
+
     it('tags reviewers on manual backport creation', async () => {
       const context = {
         ...backportPROpenedEvent,
-        octokit,
-        repo: jest.fn(),
+        ...mockContext,
       };
       await updateManualBackport(context, PRChange.OPEN, 1234);
-      expect(tagBackportReviewers).toHaveBeenCalled();
-      expect(tagBackportReviewers).toHaveBeenCalledWith({
-        context,
-        targetPrNumber: 7,
+      expect(octokit.pulls.requestReviewers).toHaveBeenCalled();
+      expect(octokit.pulls.requestReviewers).toHaveBeenCalledWith({
+        pull_number: 7,
+        team_reviewers: ['wg-releases'],
+        reviewers: [],
       });
     });
 
     it('does not tag reviewers on merged PRs', async () => {
       const context = {
         ...backportPRMergedEvent,
-        octokit,
-        repo: jest.fn(),
+        ...mockContext,
       };
       await updateManualBackport(context, PRChange.MERGE, 1234);
-      expect(tagBackportReviewers).not.toHaveBeenCalled();
+      expect(octokit.pulls.requestReviewers).not.toHaveBeenCalled();
     });
 
     it('does not tag reviewers on closed PRs', async () => {
       const context = {
         ...backportPRClosedEvent,
-        octokit,
-        repo: jest.fn(),
+        ...mockContext,
       };
       await updateManualBackport(context, PRChange.CLOSE, 1234);
-      expect(tagBackportReviewers).not.toHaveBeenCalled();
+      expect(octokit.pulls.requestReviewers).not.toHaveBeenCalled();
+    });
+
+    it('logs an error if requestReviewer fails', async () => {
+      const error = new Error('Request failed');
+      mockContext.octokit.pulls.requestReviewers = jest
+        .fn()
+        .mockRejectedValue(error);
+      const context = {
+        ...backportPROpenedEvent,
+        ...mockContext,
+      };
+      const logSpy = jest.spyOn(logUtils, 'log');
+      await updateManualBackport(context, PRChange.OPEN, 1234);
+
+      expect(octokit.pulls.requestReviewers).toHaveBeenCalled();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        'tagBackportReviewers',
+        LogLevel.ERROR,
+        `Failed to request reviewers for PR #7`,
+        error,
+      );
     });
   });
 });
