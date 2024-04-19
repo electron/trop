@@ -12,7 +12,7 @@ const createOrUpdateCheckRun = async (
   pr: WebHookPR,
   targetBranch: string,
 ) => {
-  const check = await getCheckRun(context, pr, targetBranch);
+  let check = await getCheckRun(context, pr, targetBranch);
 
   if (check) {
     if (check.conclusion === 'neutral') {
@@ -25,7 +25,7 @@ const createOrUpdateCheckRun = async (
       );
     }
   } else {
-    await context.octokit.checks.create(
+    const response = await context.octokit.checks.create(
       context.repo({
         name: `${CHECK_PREFIX}${targetBranch}`,
         head_sha: pr.head.sha,
@@ -33,7 +33,11 @@ const createOrUpdateCheckRun = async (
         details_url: 'https://github.com/electron/trop',
       }),
     );
+
+    check = response.data;
   }
+
+  return check;
 };
 
 /**
@@ -74,7 +78,7 @@ export const backportToLabel = async (
     return;
   }
 
-  await createOrUpdateCheckRun(context, pr, targetBranch);
+  const checkRun = await createOrUpdateCheckRun(context, pr, targetBranch);
 
   const labelToRemove = label.name;
   const labelToAdd = label.name.replace(PRStatus.TARGET, PRStatus.IN_FLIGHT);
@@ -84,6 +88,7 @@ export const backportToLabel = async (
     pr,
     targetBranch,
     BackportPurpose.ExecuteBackport,
+    checkRun,
     labelToRemove,
     labelToAdd,
   );
@@ -108,7 +113,7 @@ export const backportToBranch = async (
     `Executing backport to branch '${targetBranch}'`,
   );
 
-  await createOrUpdateCheckRun(context, pr, targetBranch);
+  const checkRun = await createOrUpdateCheckRun(context, pr, targetBranch);
 
   const labelToRemove = undefined;
   const labelToAdd = PRStatus.IN_FLIGHT + targetBranch;
@@ -118,6 +123,7 @@ export const backportToBranch = async (
     pr,
     targetBranch,
     BackportPurpose.ExecuteBackport,
+    checkRun,
     labelToRemove,
     labelToAdd,
   );
