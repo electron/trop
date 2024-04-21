@@ -1,8 +1,14 @@
-import * as logUtils from '../src/utils/log-util';
 import { LogLevel } from '../src/enums';
-import { tagBackportReviewers } from '../src/utils';
+import {
+  tagBackportReviewers,
+  updateManualBackportReleaseNotes,
+} from '../src/utils';
+import * as utils from '../src/utils';
+import * as logUtils from '../src/utils/log-util';
 
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
+const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
+const PROpenedEvent = require('./fixtures/pull_request.opened.json');
 
 jest.mock('../src/constants', () => ({
   ...jest.requireActual('../src/constants'),
@@ -72,6 +78,55 @@ describe('utils', () => {
         `Failed to request reviewers for PR #1234`,
         error,
       );
+    });
+  });
+
+  describe('updateManualBackportReleaseNotes', () => {
+    const octokit = {
+      pulls: {
+        update: jest.fn(),
+        get: jest.fn(),
+      },
+    };
+
+    const context = {
+      octokit,
+      repo: jest.fn((obj) => obj),
+      ...backportPROpenedEvent,
+    };
+
+    const backportPRMissingReleaseNotes =
+      backportPROpenedEvent.payload.pull_request;
+    const backportPRWithReleaseNotes =
+      backportPRMergedEvent.payload.pull_request;
+    const originalPRWithReleaseNotes = PROpenedEvent.payload.pull_request;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    it('should not update backport PR if release notes match original PR', async () => {
+      await updateManualBackportReleaseNotes(
+        context,
+        backportPRWithReleaseNotes,
+        originalPRWithReleaseNotes,
+      );
+
+      expect(context.octokit.pulls.update).not.toHaveBeenCalled();
+    });
+
+    it('should update backport PR if release notes do not match original PR', async () => {
+      jest.spyOn(utils, 'getOriginalBackportNumber').mockResolvedValue(1234);
+      await updateManualBackportReleaseNotes(
+        context,
+        backportPRMissingReleaseNotes,
+        originalPRWithReleaseNotes,
+      );
+
+      expect(context.octokit.pulls.update).toHaveBeenCalledWith({
+        pull_number: 7,
+        body: 'Backport of #1234\n\nSee that PR for details.\n\n\nNotes: new cool stuff added',
+      });
     });
   });
 });

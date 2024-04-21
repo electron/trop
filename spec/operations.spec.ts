@@ -24,6 +24,7 @@ const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.j
 jest.mock('../src/utils', () => ({
   tagBackportReviewers: jest.fn().mockReturnValue(Promise.resolve()),
   isSemverMinorPR: jest.fn().mockReturnValue(false),
+  updateManualBackportReleaseNotes: jest.fn(),
 }));
 
 jest.mock('../src/utils/label-utils', () => ({

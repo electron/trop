@@ -430,7 +430,7 @@ Notes: <!-- One-line Change Summary Here-->`,
       const pr = {
         body: `Backport of #14
 See that PR for details.
-Notes: <!-- One-line Change Summary Here-->`,
+Notes: new cool stuff added`,
         created_at: '2018-11-01T17:29:51Z',
         head: {
           ref: '123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg',
