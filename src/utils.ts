@@ -8,6 +8,7 @@ import {
   BACKPORT_REQUESTED_LABEL,
   DEFAULT_BACKPORT_REVIEW_TEAM,
   BACKPORT_LABEL,
+  BACKPORT_APPROVED_LABEL,
 } from './constants';
 import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
@@ -640,14 +641,12 @@ export const backportImpl = async (
 
         const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];
 
-        if (await isSemverMinorPR(context, pr)) {
-          log(
-            'backportImpl',
-            LogLevel.INFO,
-            `Determined that ${pr.number} is semver-minor`,
-          );
-          labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
-        }
+        await handleSemverMinorBackportLabel(
+          context,
+          pr,
+          labelsToAdd,
+          'backportImpl',
+        );
 
         const semverLabel = labelUtils.getSemverLabel(pr);
         if (semverLabel) {
@@ -786,4 +785,31 @@ export const backportImpl = async (
       }
     },
   );
+};
+
+export const handleSemverMinorBackportLabel = async (
+  context: SimpleWebHookRepoContext,
+  pr: WebHookPR,
+  labelsToAdd: string[],
+  functionName: string,
+) => {
+  if (!(await isSemverMinorPR(context, pr))) {
+    return;
+  }
+
+  log(
+    functionName,
+    LogLevel.INFO,
+    `Determined that ${pr.number} is semver-minor`,
+  );
+  // Check to see if backport has already been approved.
+  const hasApprovedLabel = await labelUtils.labelExistsOnPR(
+    context,
+    pr.number,
+    BACKPORT_APPROVED_LABEL,
+  );
+
+  if (!hasApprovedLabel) {
+    labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
+  }
 };

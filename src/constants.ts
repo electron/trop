@@ -25,5 +25,7 @@ export const SKIP_CHECK_LABEL =
 export const BACKPORT_REQUESTED_LABEL =
   process.env.BACKPORT_REQUESTED_LABEL || 'backport/requested 🗳';
 
+export const BACKPORT_APPROVED_LABEL = 'backport/approved ✅';
+
 export const DEFAULT_BACKPORT_REVIEW_TEAM =
   process.env.DEFAULT_BACKPORT_REVIEW_TEAM;
