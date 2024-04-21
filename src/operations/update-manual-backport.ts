@@ -1,4 +1,4 @@
-import { BACKPORT_LABEL, SKIP_CHECK_LABEL } from '../constants';
+import { BACKPORT_LABEL, BACKPORT_REVIEW_LABELS } from '../constants';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPRContext } from '../types';
 import { handleSemverMinorBackportLabel, tagBackportReviewers } from '../utils';
@@ -55,7 +55,7 @@ export const updateManualBackport = async (
     const skipCheckLabelExists = await labelUtils.labelExistsOnPR(
       context,
       pr.number,
-      SKIP_CHECK_LABEL,
+      BACKPORT_REVIEW_LABELS.SKIP,
     );
     if (!skipCheckLabelExists) {
       newPRLabelsToAdd.push(BACKPORT_LABEL);

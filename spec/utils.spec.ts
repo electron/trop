@@ -1,4 +1,4 @@
-import { BACKPORT_REQUESTED_LABEL } from '../src/constants';
+import { BACKPORT_REVIEW_LABELS } from '../src/constants';
 import { LogLevel } from '../src/enums';
 import {
   handleSemverMinorBackportLabel,
@@ -104,10 +104,10 @@ describe('utils', () => {
         labelsToAdd,
         'testFunction',
       );
-      expect(labelsToAdd).toContain(BACKPORT_REQUESTED_LABEL);
+      expect(labelsToAdd).toContain(BACKPORT_REVIEW_LABELS.REQUESTED);
     });
 
-    it('should not add BACKPORT_REQUESTED_LABEL if PR is not semver minor', async () => {
+    it('should not add BACKPORT_REVIEW_LABELS.REQUESTED if PR is not semver minor', async () => {
       jest.spyOn(utils, 'isSemverMinorPR').mockResolvedValue(false);
 
       await handleSemverMinorBackportLabel(
@@ -117,7 +117,7 @@ describe('utils', () => {
         'testFunction',
       );
 
-      expect(labelsToAdd).not.toContain(BACKPORT_REQUESTED_LABEL);
+      expect(labelsToAdd).not.toContain(BACKPORT_REVIEW_LABELS.REQUESTED);
     });
 
     it('should not add BACKPORT_REQUESTED_LABEL if PR is already approved', async () => {
@@ -133,7 +133,7 @@ describe('utils', () => {
         'testFunction',
       );
 
-      expect(labelsToAdd).not.toContain(BACKPORT_REQUESTED_LABEL);
+      expect(labelsToAdd).not.toContain(BACKPORT_REVIEW_LABELS.REQUESTED);
     });
   });
 });

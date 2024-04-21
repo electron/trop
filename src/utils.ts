@@ -5,10 +5,9 @@ import simpleGit from 'simple-git';
 
 import queue from './Queue';
 import {
-  BACKPORT_REQUESTED_LABEL,
-  DEFAULT_BACKPORT_REVIEW_TEAM,
   BACKPORT_LABEL,
-  BACKPORT_APPROVED_LABEL,
+  BACKPORT_REVIEW_LABELS,
+  DEFAULT_BACKPORT_REVIEW_TEAM,
 } from './constants';
 import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
@@ -806,11 +805,11 @@ export const handleSemverMinorBackportLabel = async (
   const hasApprovedLabel = await labelUtils.labelExistsOnPR(
     context,
     pr.number,
-    BACKPORT_APPROVED_LABEL,
+    BACKPORT_REVIEW_LABELS.APPROVED,
   );
 
   if (!hasApprovedLabel) {
-    labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
+    labelsToAdd.push(BACKPORT_REVIEW_LABELS.REQUESTED);
     return;
   }
 

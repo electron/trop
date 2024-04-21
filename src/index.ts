@@ -11,7 +11,11 @@ import {
   labelExistsOnPR,
   removeLabel,
 } from './utils/label-utils';
-import { CHECK_PREFIX, NO_BACKPORT_LABEL, SKIP_CHECK_LABEL } from './constants';
+import {
+  BACKPORT_REVIEW_LABELS,
+  CHECK_PREFIX,
+  NO_BACKPORT_LABEL,
+} from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
 import { Label } from '@octokit/webhooks-types';
@@ -251,9 +255,11 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
 
         // If a branch is targeting something that isn't main it might not be a backport;
         // allow for a label to skip backport validity check for these branches.
-        if (await labelExistsOnPR(context, pr.number, SKIP_CHECK_LABEL)) {
+        if (
+          await labelExistsOnPR(context, pr.number, BACKPORT_REVIEW_LABELS.SKIP)
+        ) {
           robot.log(
-            `#${pr.number} is labeled with ${SKIP_CHECK_LABEL} - skipping backport validation check`,
+            `#${pr.number} is labeled with ${BACKPORT_REVIEW_LABELS.SKIP} - skipping backport validation check`,
           );
           await updateBackportValidityCheck(context, checkRun, {
             title: 'Backport Check Skipped',
