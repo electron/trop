@@ -22,8 +22,9 @@ const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.j
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 
 jest.mock('../src/utils', () => ({
-  tagBackportReviewers: jest.fn().mockReturnValue(Promise.resolve()),
+  tagBackportReviewers: jest.fn(),
   isSemverMinorPR: jest.fn().mockReturnValue(false),
+  handleSemverMinorBackportLabel: jest.fn(),
 }));
 
 jest.mock('../src/utils/label-utils', () => ({
