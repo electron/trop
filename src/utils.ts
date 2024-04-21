@@ -811,5 +811,12 @@ export const handleSemverMinorBackportLabel = async (
 
   if (!hasApprovedLabel) {
     labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
+    return;
   }
+
+  log(
+    functionName,
+    LogLevel.WARN,
+    `The backport for ${pr.number} has already been approved. No requested label added.`,
+  );
 };
