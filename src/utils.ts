@@ -29,7 +29,7 @@ import {
   WebHookPR,
   WebHookRepoContext,
 } from './types';
-import { Context, Probot } from 'probot';
+import { Probot } from 'probot';
 
 const { parse: parseDiff } = require('what-the-diff');
 
@@ -298,7 +298,7 @@ export const getPRNumbersFromPRBody = (pr: WebHookPR, checkNotBot = false) => {
  * @param context Context
  * @param pr Pull Request
  */
-const getOriginalBackportNumber = async (
+export const getOriginalBackportNumber = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
 ) => {
@@ -365,6 +365,23 @@ const checkUserHasWriteAccess = async (
   return ['write', 'admin'].includes(userInfo.permission);
 };
 
+const getReleaseNotes = (pr: Pick<WebHookPR, 'body'>) => {
+  const onelineMatch = pr.body?.match(
+    /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi,
+  );
+  const multilineMatch = pr.body?.match(
+    /(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/gi,
+  );
+
+  if (onelineMatch && onelineMatch[0]) {
+    return `\n\n${onelineMatch[0]}`;
+  } else if (multilineMatch && multilineMatch[0]) {
+    return `\n\n${multilineMatch[0]}`;
+  } else {
+    return '\n\nNotes: no-notes';
+  }
+};
+
 const createBackportComment = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
@@ -377,23 +394,9 @@ const createBackportComment = async (
     `Creating backport comment for #${prNumber}`,
   );
 
-  let body = `Backport of #${prNumber}\n\nSee that PR for details.`;
-
-  const onelineMatch = pr.body?.match(
-    /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi,
-  );
-  const multilineMatch = pr.body?.match(
-    /(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/gi,
-  );
-
+  const releaseNotes = getReleaseNotes(pr);
   // attach release notes to backport PR body
-  if (onelineMatch && onelineMatch[0]) {
-    body += `\n\n${onelineMatch[0]}`;
-  } else if (multilineMatch && multilineMatch[0]) {
-    body += `\n\n${multilineMatch[0]}`;
-  } else {
-    body += '\n\nNotes: no-notes';
-  }
+  const body = `Backport of #${prNumber}\n\nSee that PR for details.${releaseNotes}`;
 
   return body;
 };
@@ -796,5 +799,32 @@ export const backportImpl = async (
         await context.octokit.checks.update(updateOpts);
       }
     },
+  );
+};
+
+export const updateManualBackportReleaseNotes = async (
+  context: SimpleWebHookRepoContext,
+  backportPr: WebHookPR,
+  originalPr: WebHookPR,
+) => {
+  const backportPRReleaseNotes = getReleaseNotes(backportPr);
+  const originalPRReleaseNotes = getReleaseNotes(originalPr);
+  // If release notes match, do nothing
+  if (backportPRReleaseNotes === originalPRReleaseNotes) {
+    return;
+  }
+
+  log(
+    'updateManualBackport',
+    LogLevel.WARN,
+    `Manual backport does not match the release notes of the original PR.`,
+  );
+
+  // Update backport PR with new description that includes matching release notes to original PR
+  await context.octokit.pulls.update(
+    context.repo({
+      pull_number: backportPr.number,
+      body: await createBackportComment(context, originalPr),
+    }),
   );
 };
