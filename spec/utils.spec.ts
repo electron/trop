@@ -1,7 +1,6 @@
-import { BACKPORT_REVIEW_LABELS } from '../src/constants';
 import { LogLevel } from '../src/enums';
 import {
-  handleSemverMinorBackportLabel,
+  needsSemverMinorBackportLabel,
   tagBackportReviewers,
 } from '../src/utils';
 import * as utils from '../src/utils';
@@ -81,7 +80,7 @@ describe('utils', () => {
     });
   });
 
-  describe('handleSemverMinorBackportLabel()', () => {
+  describe('needsSemverMinorBackportLabel()', () => {
     const context = {
       octokit: {},
       repo: {},
@@ -94,46 +93,26 @@ describe('utils', () => {
       labelsToAdd = [];
     });
 
-    it('should add BACKPORT_REQUESTED_LABEL if PR is semver minor and not already approved', async () => {
+    it('should should return true if PR is semver minor and not already approved', async () => {
       jest.spyOn(labelUtils, 'labelExistsOnPR').mockResolvedValue(false);
       jest.spyOn(utils, 'isSemverMinorPR').mockResolvedValue(true);
 
-      await handleSemverMinorBackportLabel(
-        context,
-        pr,
-        labelsToAdd,
-        'testFunction',
-      );
-      expect(labelsToAdd).toContain(BACKPORT_REVIEW_LABELS.REQUESTED);
+      expect(await needsSemverMinorBackportLabel(context, pr)).toBe(true);
     });
 
-    it('should not add BACKPORT_REVIEW_LABELS.REQUESTED if PR is not semver minor', async () => {
+    it('should return false if PR is not semver minor', async () => {
       jest.spyOn(utils, 'isSemverMinorPR').mockResolvedValue(false);
 
-      await handleSemverMinorBackportLabel(
-        context,
-        pr,
-        labelsToAdd,
-        'testFunction',
-      );
-
-      expect(labelsToAdd).not.toContain(BACKPORT_REVIEW_LABELS.REQUESTED);
+      expect(await needsSemverMinorBackportLabel(context, pr)).toBe(false);
     });
 
-    it('should not add BACKPORT_REQUESTED_LABEL if PR is already approved', async () => {
+    it('should return false if PR is already approved', async () => {
       jest.spyOn(utils, 'isSemverMinorPR').mockResolvedValue(true);
 
       // Mocking labelExistsOnPR to return true (indicating backport is already approved)
       jest.spyOn(labelUtils, 'labelExistsOnPR').mockResolvedValue(true);
 
-      await handleSemverMinorBackportLabel(
-        context,
-        pr,
-        labelsToAdd,
-        'testFunction',
-      );
-
-      expect(labelsToAdd).not.toContain(BACKPORT_REVIEW_LABELS.REQUESTED);
+      expect(await needsSemverMinorBackportLabel(context, pr)).toBe(false);
     });
   });
 });

@@ -1,7 +1,7 @@
 import { BACKPORT_LABEL, BACKPORT_REVIEW_LABELS } from '../constants';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPRContext } from '../types';
-import { handleSemverMinorBackportLabel, tagBackportReviewers } from '../utils';
+import { needsSemverMinorBackportLabel, tagBackportReviewers } from '../utils';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 
@@ -94,12 +94,15 @@ export const updateManualBackport = async (
       }
     }
 
-    await handleSemverMinorBackportLabel(
-      context,
-      pr,
-      newPRLabelsToAdd,
-      'updateManualBackport',
-    );
+    if (await needsSemverMinorBackportLabel(context, pr)) {
+      log(
+        'updateManualBackport',
+        LogLevel.INFO,
+        `Determined that ${pr.number} is semver-minor and needs backport review`,
+      );
+
+      newPRLabelsToAdd.push(BACKPORT_REVIEW_LABELS.REQUESTED);
+    }
 
     // We should only comment if there is not a previous existing comment
     const commentBody = `@${pr.user.login} has manually backported this PR to "${pr.base.ref}", \

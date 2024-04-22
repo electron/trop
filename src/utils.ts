@@ -640,12 +640,15 @@ export const backportImpl = async (
 
         const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];
 
-        await handleSemverMinorBackportLabel(
-          context,
-          pr,
-          labelsToAdd,
-          'backportImpl',
-        );
+        if (await needsSemverMinorBackportLabel(context, pr)) {
+          log(
+            'backportImpl',
+            LogLevel.INFO,
+            `Determined that ${pr.number} is semver-minor and needs backport review`,
+          );
+
+          labelsToAdd.push(BACKPORT_REVIEW_LABELS.REQUESTED);
+        }
 
         const semverLabel = labelUtils.getSemverLabel(pr);
         if (semverLabel) {
@@ -786,21 +789,14 @@ export const backportImpl = async (
   );
 };
 
-export const handleSemverMinorBackportLabel = async (
+export const needsSemverMinorBackportLabel = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
-  labelsToAdd: string[],
-  functionName: string,
 ) => {
   if (!(await isSemverMinorPR(context, pr))) {
-    return;
+    return false;
   }
 
-  log(
-    functionName,
-    LogLevel.INFO,
-    `Determined that ${pr.number} is semver-minor`,
-  );
   // Check to see if backport has already been approved.
   const hasApprovedLabel = await labelUtils.labelExistsOnPR(
     context,
@@ -808,14 +804,5 @@ export const handleSemverMinorBackportLabel = async (
     BACKPORT_REVIEW_LABELS.APPROVED,
   );
 
-  if (!hasApprovedLabel) {
-    labelsToAdd.push(BACKPORT_REVIEW_LABELS.REQUESTED);
-    return;
-  }
-
-  log(
-    functionName,
-    LogLevel.WARN,
-    `The backport for ${pr.number} has already been approved. No requested label added.`,
-  );
+  return !hasApprovedLabel;
 };
