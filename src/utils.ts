@@ -807,7 +807,6 @@ export const isValidManualBackportReleaseNotes = async (
   context: WebHookPRContext,
   oldPRs: WebHookPR[],
 ) => {
-  console.log(context, oldPRs);
   const backportPRReleaseNotes = getReleaseNotes(context.payload.pull_request);
   return oldPRs.some((pr) => getReleaseNotes(pr) === backportPRReleaseNotes);
 };
