@@ -793,6 +793,10 @@ export const needsSemverMinorBackportLabel = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
 ) => {
+  if (pr.merged) {
+    return false;
+  }
+
   if (!(await isSemverMinorPR(context, pr))) {
     return false;
   }

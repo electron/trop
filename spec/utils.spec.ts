@@ -8,6 +8,7 @@ import * as labelUtils from '../src/utils/label-utils';
 import * as logUtils from '../src/utils/log-util';
 
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
+const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.json');
 
 jest.mock('../src/constants', () => ({
   ...jest.requireActual('../src/constants'),
@@ -87,11 +88,6 @@ describe('utils', () => {
       ...backportPROpenedEvent,
     };
     const pr = context.payload.pull_request;
-    let labelsToAdd: string[];
-
-    beforeEach(() => {
-      labelsToAdd = [];
-    });
 
     it('should should return true if PR is semver minor and not already approved', async () => {
       jest.spyOn(labelUtils, 'labelExistsOnPR').mockResolvedValue(false);
@@ -113,6 +109,14 @@ describe('utils', () => {
       jest.spyOn(labelUtils, 'labelExistsOnPR').mockResolvedValue(true);
 
       expect(await needsSemverMinorBackportLabel(context, pr)).toBe(false);
+    });
+
+    it('should return false if PR is merged', async () => {
+      const closedPr = backportPRClosedEvent.payload.pull_request;
+
+      expect(await needsSemverMinorBackportLabel(context, closedPr)).toBe(
+        false,
+      );
     });
   });
 });
