@@ -16,7 +16,6 @@ import { log } from '../utils/log-util';
  * @param {Context} context - the context of the event that was triggered
  * @param {PRChange} type - the type of PR status change: either OPEN or CLOSE
  * @param {number} oldPRNumber - the number corresponding to the backport's original PR
- * @returns {Object} - an object containing the repo initialization directory
  */
 export const updateManualBackport = async (
   context: WebHookPRContext,
