@@ -1,7 +1,7 @@
 import { LogLevel } from '../src/enums';
 import {
   tagBackportReviewers,
-  updateManualBackportReleaseNotes,
+  isValidManualBackportReleaseNotes,
 } from '../src/utils';
 import * as utils from '../src/utils';
 import * as logUtils from '../src/utils/log-util';
@@ -9,6 +9,7 @@ import * as logUtils from '../src/utils/log-util';
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
 const PROpenedEvent = require('./fixtures/pull_request.opened.json');
+const PRClosedEvent = require('./fixtures/pull_request.closed.json');
 
 jest.mock('../src/constants', () => ({
   ...jest.requireActual('../src/constants'),
@@ -81,52 +82,50 @@ describe('utils', () => {
     });
   });
 
-  describe('updateManualBackportReleaseNotes', () => {
-    const octokit = {
-      pulls: {
-        update: jest.fn(),
-        get: jest.fn(),
-      },
-    };
-
-    const context = {
-      octokit,
-      repo: jest.fn((obj) => obj),
-      ...backportPROpenedEvent,
-    };
-
-    const backportPRMissingReleaseNotes =
-      backportPROpenedEvent.payload.pull_request;
-    const backportPRWithReleaseNotes =
-      backportPRMergedEvent.payload.pull_request;
+  describe('isValidManualBackportReleaseNotes', () => {
+    const backportPRMissingReleaseNotes = backportPROpenedEvent;
+    const backportPRWithReleaseNotes = backportPRMergedEvent;
     const originalPRWithReleaseNotes = PROpenedEvent.payload.pull_request;
+    const originalPRMissingReleaseNotes = PRClosedEvent.payload.pull_request;
+    const originalPRWithReleaseNotes2 =
+      backportPRMergedEvent.payload.pull_request;
 
-    beforeEach(() => {
-      jest.clearAllMocks();
+    it('should return valid if release notes match original PR for single PR', async () => {
+      const context = { ...backportPRWithReleaseNotes };
+      expect(
+        await isValidManualBackportReleaseNotes(context, [
+          originalPRWithReleaseNotes,
+        ]),
+      ).toBe(true);
     });
 
-    it('should not update backport PR if release notes match original PR', async () => {
-      await updateManualBackportReleaseNotes(
-        context,
-        backportPRWithReleaseNotes,
-        originalPRWithReleaseNotes,
-      );
-
-      expect(context.octokit.pulls.update).not.toHaveBeenCalled();
+    it('should return valid if release notes match original PR for multiple PR', async () => {
+      const context = { ...backportPRWithReleaseNotes };
+      expect(
+        await isValidManualBackportReleaseNotes(context, [
+          originalPRWithReleaseNotes,
+          originalPRMissingReleaseNotes,
+        ]),
+      ).toBe(true);
     });
 
-    it('should update backport PR if release notes do not match original PR', async () => {
-      jest.spyOn(utils, 'getOriginalBackportNumber').mockResolvedValue(1234);
-      await updateManualBackportReleaseNotes(
-        context,
-        backportPRMissingReleaseNotes,
-        originalPRWithReleaseNotes,
-      );
+    it('should update backport PR if release notes do not match original PR for single PR', async () => {
+      const context = { ...backportPRMissingReleaseNotes };
+      expect(
+        await isValidManualBackportReleaseNotes(context, [
+          originalPRWithReleaseNotes,
+        ]),
+      ).toBe(false);
+    });
 
-      expect(context.octokit.pulls.update).toHaveBeenCalledWith({
-        pull_number: 7,
-        body: 'Backport of #1234\n\nSee that PR for details.\n\n\nNotes: new cool stuff added',
-      });
+    it('should update backport PR if release notes do not match original PR for multiple PR', async () => {
+      const context = { ...backportPRMissingReleaseNotes };
+      expect(
+        await isValidManualBackportReleaseNotes(context, [
+          originalPRWithReleaseNotes,
+          originalPRWithReleaseNotes2,
+        ]),
+      ).toBe(false);
     });
   });
 });
