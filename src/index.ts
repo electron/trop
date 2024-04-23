@@ -110,19 +110,19 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       if (!label.name.startsWith(PRStatus.TARGET)) continue;
       const targetBranch = labelToTargetBranch(label, PRStatus.TARGET);
       const runName = `${CHECK_PREFIX}${targetBranch}`;
-      const existing = checkRuns.find((run) => run.name === runName);
-      if (existing) {
-        if (existing.conclusion !== 'neutral') continue;
+      let checkRun = checkRuns.find((run) => run.name === runName);
+      if (checkRun) {
+        if (checkRun.conclusion !== 'neutral') continue;
 
         await context.octokit.checks.update(
           context.repo({
-            name: existing.name,
-            check_run_id: existing.id,
+            name: checkRun.name,
+            check_run_id: checkRun.id,
             status: 'queued' as 'queued',
           }),
         );
       } else {
-        await context.octokit.checks.create(
+        const response = await context.octokit.checks.create(
           context.repo({
             name: runName,
             head_sha: pr.head.sha,
@@ -130,6 +130,8 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             details_url: 'https://github.com/electron/trop',
           }),
         );
+
+        checkRun = response.data;
       }
 
       await backportImpl(
@@ -138,6 +140,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         pr,
         targetBranch,
         BackportPurpose.Check,
+        checkRun,
       );
     }
 

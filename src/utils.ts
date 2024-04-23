@@ -450,6 +450,7 @@ export const backportImpl = async (
   pr: WebHookPR,
   targetBranch: string,
   purpose: BackportPurpose,
+  checkRun: NonNullable<Awaited<ReturnType<typeof getCheckRun>>>,
   labelToRemove?: string,
   labelToAdd?: string,
 ) => {
@@ -485,16 +486,13 @@ export const backportImpl = async (
     `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
-      const checkRun = await getCheckRun(context, pr, targetBranch);
-      if (checkRun) {
-        await context.octokit.checks.update(
-          context.repo({
-            check_run_id: checkRun.id,
-            name: checkRun.name,
-            status: 'in_progress' as 'in_progress',
-          }),
-        );
-      }
+      await context.octokit.checks.update(
+        context.repo({
+          check_run_id: checkRun.id,
+          name: checkRun.name,
+          status: 'in_progress' as 'in_progress',
+        }),
+      );
 
       const repoAccessToken = await getRepoToken(robot, context);
 
@@ -679,20 +677,18 @@ export const backportImpl = async (
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
 
-      if (checkRun) {
-        context.octokit.checks.update(
-          context.repo({
-            check_run_id: checkRun.id,
-            name: checkRun.name,
-            conclusion: 'success' as 'success',
-            completed_at: new Date().toISOString(),
-            output: {
-              title: 'Clean Backport',
-              summary: `This PR was checked and can be backported to "${targetBranch}" cleanly.`,
-            },
-          }),
-        );
-      }
+      context.octokit.checks.update(
+        context.repo({
+          check_run_id: checkRun.id,
+          name: checkRun.name,
+          conclusion: 'success' as 'success',
+          completed_at: new Date().toISOString(),
+          output: {
+            title: 'Clean Backport',
+            summary: `This PR was checked and can be backported to "${targetBranch}" cleanly.`,
+          },
+        }),
+      );
 
       await fs.remove(createdDir);
     },
@@ -759,30 +755,27 @@ export const backportImpl = async (
         ]);
       }
 
-      const checkRun = await getCheckRun(context, pr, targetBranch);
-      if (checkRun) {
-        const mdSep = '``````````````````````````````';
-        const updateOpts = context.repo({
-          check_run_id: checkRun.id,
-          name: checkRun.name,
-          conclusion: 'neutral' as 'neutral',
-          completed_at: new Date().toISOString(),
-          output: {
-            title: 'Backport Failed',
-            summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
-            text: diff
-              ? `Failed Diff:\n\n${mdSep}diff\n${rawDiff}\n${mdSep}`
-              : undefined,
-            annotations: annotations ? annotations : undefined,
-          },
-        });
-        try {
-          await context.octokit.checks.update(updateOpts);
-        } catch (err) {
-          // A GitHub error occurred - try to mark it as a failure without annotations.
-          updateOpts.output!.annotations = undefined;
-          await context.octokit.checks.update(updateOpts);
-        }
+      const mdSep = '``````````````````````````````';
+      const updateOpts = context.repo({
+        check_run_id: checkRun.id,
+        name: checkRun.name,
+        conclusion: 'neutral' as 'neutral',
+        completed_at: new Date().toISOString(),
+        output: {
+          title: 'Backport Failed',
+          summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
+          text: diff
+            ? `Failed Diff:\n\n${mdSep}diff\n${rawDiff}\n${mdSep}`
+            : undefined,
+          annotations: annotations ? annotations : undefined,
+        },
+      });
+      try {
+        await context.octokit.checks.update(updateOpts);
+      } catch (err) {
+        // A GitHub error occurred - try to mark it as a failure without annotations.
+        updateOpts.output!.annotations = undefined;
+        await context.octokit.checks.update(updateOpts);
       }
     },
   );
