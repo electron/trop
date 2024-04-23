@@ -5,11 +5,7 @@ import {
 } from '../constants';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPR, WebHookPRContext } from '../types';
-import {
-  isSemverMinorPR,
-  tagBackportReviewers,
-  updateManualBackportReleaseNotes,
-} from '../utils';
+import { isSemverMinorPR, tagBackportReviewers } from '../utils';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 
@@ -72,12 +68,6 @@ export const updateManualBackport = async (
       context.repo({ pull_number: oldPRNumber }),
     );
 
-    // Update backport PR release notes if it does not match original PR
-    await updateManualBackportReleaseNotes(
-      context,
-      pr,
-      originalPR as WebHookPR,
-    );
     // Propagate semver label from the original PR if the maintainer didn't add it.
     const originalPRSemverLabel = labelUtils.getSemverLabel(originalPR);
     if (originalPRSemverLabel) {

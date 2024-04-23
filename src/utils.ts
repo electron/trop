@@ -27,6 +27,7 @@ import {
   SimpleWebHookRepoContext,
   WebHookIssueContext,
   WebHookPR,
+  WebHookPRContext,
   WebHookRepoContext,
 } from './types';
 import { Probot } from 'probot';
@@ -802,29 +803,11 @@ export const backportImpl = async (
   );
 };
 
-export const updateManualBackportReleaseNotes = async (
-  context: SimpleWebHookRepoContext,
-  backportPr: WebHookPR,
-  originalPr: WebHookPR,
+export const isValidManualBackportReleaseNotes = async (
+  context: WebHookPRContext,
+  oldPRs: WebHookPR[],
 ) => {
-  const backportPRReleaseNotes = getReleaseNotes(backportPr);
-  const originalPRReleaseNotes = getReleaseNotes(originalPr);
-  // If release notes match, do nothing
-  if (backportPRReleaseNotes === originalPRReleaseNotes) {
-    return;
-  }
-
-  log(
-    'updateManualBackport',
-    LogLevel.WARN,
-    `Manual backport does not match the release notes of the original PR.`,
-  );
-
-  // Update backport PR with new description that includes matching release notes to original PR
-  await context.octokit.pulls.update(
-    context.repo({
-      pull_number: backportPr.number,
-      body: await createBackportComment(context, originalPr),
-    }),
-  );
+  console.log(context, oldPRs);
+  const backportPRReleaseNotes = getReleaseNotes(context.payload.pull_request);
+  return oldPRs.some((pr) => getReleaseNotes(pr) === backportPRReleaseNotes);
 };

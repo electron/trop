@@ -4,6 +4,7 @@ import {
   backportImpl,
   getPRNumbersFromPRBody,
   isAuthorizedUser,
+  isValidManualBackportReleaseNotes,
   labelClosedPR,
 } from './utils';
 import {
@@ -287,6 +288,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             `#${pr.number} has backport numbers - checking their validity now`,
           );
           const supported = await getSupportedBranches(context);
+          const oldPRs = [];
 
           for (const oldPRNumber of oldPRNumbers) {
             robot.log(`Checking validity of #${oldPRNumber}`);
@@ -295,7 +297,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
                 pull_number: oldPRNumber,
               }),
             );
-
+            oldPRs.push(oldPR);
             // The current PR is only valid if the PR it is backporting
             // was merged to main or to a supported release branch.
             if (
@@ -310,6 +312,25 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
               const cause =
                 'the PR that this is backporting has not been merged yet.';
               failureMap.set(oldPRNumber, cause);
+            }
+          }
+
+          if (['opened', 'edited'].includes(action)) {
+            robot.log(`Checking validity of release notes`);
+            // Check to make sure backport PR has the same release notes as at least on of the old prs
+            const isValidReleaseNotes = await isValidManualBackportReleaseNotes(
+              context,
+              oldPRs as WebHookPR[],
+            );
+
+            if (!isValidReleaseNotes) {
+              await updateBackportValidityCheck(context, checkRun, {
+                title: 'Invalid Backport',
+                summary: `The release notes of the backport PR do not match those of ${oldPRNumbers
+                  .map((pr) => `#${pr}`)
+                  .join(', ')}.`,
+                conclusion: CheckRunStatus.FAILURE,
+              });
             }
           }
         }
