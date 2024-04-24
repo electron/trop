@@ -46,7 +46,7 @@
     "nock": "^13.2.9",
     "prettier": "^3.0.0",
     "sinon": "^15.2.0",
-    "smee-client": "^1.2.3",
+    "smee-client": "^2.0.1",
     "ts-jest": "^29.0.0",
     "typescript": "*"
   },
