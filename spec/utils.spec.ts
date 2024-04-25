@@ -109,7 +109,7 @@ describe('utils', () => {
       ).toBe(true);
     });
 
-    it('should update backport PR if release notes do not match original PR for single PR', async () => {
+    it('should return not valid if release notes do not match original PR for single PR', async () => {
       const context = { ...backportPRMissingReleaseNotes };
       expect(
         await isValidManualBackportReleaseNotes(context, [
@@ -118,7 +118,7 @@ describe('utils', () => {
       ).toBe(false);
     });
 
-    it('should update backport PR if release notes do not match original PR for multiple PR', async () => {
+    it('should return not valid if release notes do not match original PR for multiple PR', async () => {
       const context = { ...backportPRMissingReleaseNotes };
       expect(
         await isValidManualBackportReleaseNotes(context, [
