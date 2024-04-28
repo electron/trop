@@ -7,13 +7,13 @@ import { Probot, ProbotOctokit } from 'probot';
 import { SKIP_CHECK_LABEL } from '../src/constants';
 import { CheckRunStatus, PRChange } from '../src/enums';
 import { ProbotHandler } from '../src/index';
-import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
 import {
   backportToBranch,
   backportToLabel,
 } from '../src/operations/backport-to-location';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
 
+import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
 import * as checkUtils from '../src/utils/checks-util';
 
 const trop: ProbotHandler = require('../src/index');
@@ -85,7 +85,6 @@ describe('trop', () => {
   let robot: Probot;
   let octokit: any;
   process.env = { BOT_USER_NAME: 'trop[bot]' };
-  process.env = { COMMITTER_USER_NAME: 'test' };
 
   beforeEach(() => {
     nock.disableNetConnect();
