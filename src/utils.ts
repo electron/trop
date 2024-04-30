@@ -677,7 +677,7 @@ export const backportImpl = async (
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
 
-      context.octokit.checks.update(
+      await context.octokit.checks.update(
         context.repo({
           check_run_id: checkRun.id,
           name: checkRun.name,
