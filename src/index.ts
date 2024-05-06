@@ -111,17 +111,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       const targetBranch = labelToTargetBranch(label, PRStatus.TARGET);
       const runName = `${CHECK_PREFIX}${targetBranch}`;
       let checkRun = checkRuns.find((run) => run.name === runName);
-      if (checkRun) {
-        if (checkRun.conclusion !== 'neutral') continue;
-
-        await context.octokit.checks.update(
-          context.repo({
-            name: checkRun.name,
-            check_run_id: checkRun.id,
-            status: 'queued' as 'queued',
-          }),
-        );
-      } else {
+      if (!checkRun) {
         const response = await context.octokit.checks.create(
           context.repo({
             name: runName,

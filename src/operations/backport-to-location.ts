@@ -7,24 +7,14 @@ import { backportImpl } from '../utils';
 import { Probot } from 'probot';
 import { SimpleWebHookRepoContext, WebHookPR } from '../types';
 
-const createOrUpdateCheckRun = async (
+const getOrCreateCheckRun = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
   targetBranch: string,
 ) => {
   let check = await getCheckRun(context, pr, targetBranch);
 
-  if (check) {
-    if (check.conclusion === 'neutral') {
-      await context.octokit.checks.update(
-        context.repo({
-          name: check.name,
-          check_run_id: check.id,
-          status: 'queued' as 'queued',
-        }),
-      );
-    }
-  } else {
+  if (!check) {
     const response = await context.octokit.checks.create(
       context.repo({
         name: `${CHECK_PREFIX}${targetBranch}`,
@@ -78,7 +68,7 @@ export const backportToLabel = async (
     return;
   }
 
-  const checkRun = await createOrUpdateCheckRun(context, pr, targetBranch);
+  const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
 
   const labelToRemove = label.name;
   const labelToAdd = label.name.replace(PRStatus.TARGET, PRStatus.IN_FLIGHT);
@@ -113,7 +103,7 @@ export const backportToBranch = async (
     `Executing backport to branch '${targetBranch}'`,
   );
 
-  const checkRun = await createOrUpdateCheckRun(context, pr, targetBranch);
+  const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
 
   const labelToRemove = undefined;
   const labelToAdd = PRStatus.IN_FLIGHT + targetBranch;
