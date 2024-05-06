@@ -486,6 +486,11 @@ export const backportImpl = async (
     `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
+      log(
+        'backportImpl',
+        LogLevel.INFO,
+        `Updating check run ID ${checkRun.id} with status 'in_progress'`,
+      );
       await context.octokit.checks.update(
         context.repo({
           check_run_id: checkRun.id,
@@ -676,6 +681,12 @@ export const backportImpl = async (
 
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
+
+      log(
+        'backportImpl',
+        LogLevel.INFO,
+        `Updating check run ID ${checkRun.id} with conclusion 'success'`,
+      );
 
       await context.octokit.checks.update(
         context.repo({
