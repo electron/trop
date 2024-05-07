@@ -19,11 +19,11 @@ export const SEMVER_LABELS = {
   MAJOR: 'semver/major',
 };
 
-export const SKIP_CHECK_LABEL =
-  process.env.SKIP_CHECK_LABEL || 'backport-check-skip';
-
-export const BACKPORT_REQUESTED_LABEL =
-  process.env.BACKPORT_REQUESTED_LABEL || 'backport/requested 🗳';
+export const BACKPORT_REVIEW_LABELS = {
+  SKIP: process.env.SKIP_CHECK_LABEL || 'backport-check-skip',
+  REQUESTED: process.env.BACKPORT_REQUESTED_LABEL || 'backport/requested 🗳',
+  APPROVED: 'backport/approved ✅',
+};
 
 export const DEFAULT_BACKPORT_REVIEW_TEAM =
   process.env.DEFAULT_BACKPORT_REVIEW_TEAM;

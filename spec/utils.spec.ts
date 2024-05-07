@@ -1,8 +1,14 @@
-import * as logUtils from '../src/utils/log-util';
 import { LogLevel } from '../src/enums';
-import { tagBackportReviewers } from '../src/utils';
+import {
+  needsSemverMinorBackportLabel,
+  tagBackportReviewers,
+} from '../src/utils';
+import * as utils from '../src/utils';
+import * as labelUtils from '../src/utils/label-utils';
+import * as logUtils from '../src/utils/log-util';
 
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
+const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.json');
 
 jest.mock('../src/constants', () => ({
   ...jest.requireActual('../src/constants'),
@@ -71,6 +77,45 @@ describe('utils', () => {
         LogLevel.ERROR,
         `Failed to request reviewers for PR #1234`,
         error,
+      );
+    });
+  });
+
+  describe('needsSemverMinorBackportLabel()', () => {
+    const context = {
+      octokit: {},
+      repo: {},
+      ...backportPROpenedEvent,
+    };
+    const pr = context.payload.pull_request;
+
+    it('should should return true if PR is semver minor and not already approved', async () => {
+      jest.spyOn(labelUtils, 'labelExistsOnPR').mockResolvedValue(false);
+      jest.spyOn(utils, 'isSemverMinorPR').mockResolvedValue(true);
+
+      expect(await needsSemverMinorBackportLabel(context, pr)).toBe(true);
+    });
+
+    it('should return false if PR is not semver minor', async () => {
+      jest.spyOn(utils, 'isSemverMinorPR').mockResolvedValue(false);
+
+      expect(await needsSemverMinorBackportLabel(context, pr)).toBe(false);
+    });
+
+    it('should return false if PR is already approved', async () => {
+      jest.spyOn(utils, 'isSemverMinorPR').mockResolvedValue(true);
+
+      // Mocking labelExistsOnPR to return true (indicating backport is already approved)
+      jest.spyOn(labelUtils, 'labelExistsOnPR').mockResolvedValue(true);
+
+      expect(await needsSemverMinorBackportLabel(context, pr)).toBe(false);
+    });
+
+    it('should return false if PR is merged', async () => {
+      const closedPr = backportPRClosedEvent.payload.pull_request;
+
+      expect(await needsSemverMinorBackportLabel(context, closedPr)).toBe(
+        false,
       );
     });
   });

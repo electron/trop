@@ -7,7 +7,7 @@
       "number": 7,
       "url": "my_cool_url",
       "title": "CHANGE README",
-      "merged": true,
+      "merged": false,
       "user": {
         "login": "codebytere"
       },

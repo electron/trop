@@ -1,11 +1,7 @@
-import {
-  BACKPORT_LABEL,
-  BACKPORT_REQUESTED_LABEL,
-  SKIP_CHECK_LABEL,
-} from '../constants';
+import { BACKPORT_LABEL, BACKPORT_REVIEW_LABELS } from '../constants';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPRContext } from '../types';
-import { isSemverMinorPR, tagBackportReviewers } from '../utils';
+import { needsSemverMinorBackportLabel, tagBackportReviewers } from '../utils';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 
@@ -58,7 +54,7 @@ export const updateManualBackport = async (
     const skipCheckLabelExists = await labelUtils.labelExistsOnPR(
       context,
       pr.number,
-      SKIP_CHECK_LABEL,
+      BACKPORT_REVIEW_LABELS.SKIP,
     );
     if (!skipCheckLabelExists) {
       newPRLabelsToAdd.push(BACKPORT_LABEL);
@@ -97,13 +93,14 @@ export const updateManualBackport = async (
       }
     }
 
-    if (await isSemverMinorPR(context, pr)) {
+    if (await needsSemverMinorBackportLabel(context, pr)) {
       log(
         'updateManualBackport',
         LogLevel.INFO,
-        `Determined that ${pr.number} is semver-minor`,
+        `Determined that ${pr.number} is semver-minor and needs backport review`,
       );
-      newPRLabelsToAdd.push(BACKPORT_REQUESTED_LABEL);
+
+      newPRLabelsToAdd.push(BACKPORT_REVIEW_LABELS.REQUESTED);
     }
 
     // We should only comment if there is not a previous existing comment
