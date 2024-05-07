@@ -13,13 +13,7 @@ import {
 } from './utils/label-utils';
 import { CHECK_PREFIX, NO_BACKPORT_LABEL, SKIP_CHECK_LABEL } from './constants';
 import { getEnvVar } from './utils/env-util';
-import {
-  PRChange,
-  PRStatus,
-  BackportPurpose,
-  CheckRunStatus,
-  LogLevel,
-} from './enums';
+import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
 import { Label } from '@octokit/webhooks-types';
 import {
   backportToLabel,
@@ -33,7 +27,6 @@ import {
   updateBackportInformationCheck,
   updateBackportValidityCheck,
 } from './utils/checks-util';
-import { log } from './utils/log-util';
 import { register } from './utils/prom';
 import {
   SimpleWebHookRepoContext,
@@ -116,36 +109,6 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     for (const label of pr.labels) {
       if (!label.name.startsWith(PRStatus.TARGET)) continue;
       const targetBranch = labelToTargetBranch(label, PRStatus.TARGET);
-      const runName = `${CHECK_PREFIX}${targetBranch}`;
-      let checkRun = checkRuns.find((run) => run.name === runName);
-      if (checkRun) {
-        if (checkRun.conclusion !== 'neutral') continue;
-
-        log(
-          'runCheck',
-          LogLevel.INFO,
-          `Updating check run ID ${checkRun.id} with status 'queued'`,
-        );
-
-        await context.octokit.checks.update(
-          context.repo({
-            name: checkRun.name,
-            check_run_id: checkRun.id,
-            status: 'queued' as 'queued',
-          }),
-        );
-      } else {
-        const response = await context.octokit.checks.create(
-          context.repo({
-            name: runName,
-            head_sha: pr.head.sha,
-            status: 'queued' as 'queued',
-            details_url: 'https://github.com/electron/trop',
-          }),
-        );
-
-        checkRun = response.data;
-      }
 
       await backportImpl(
         robot,
@@ -153,7 +116,6 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         pr,
         targetBranch,
         BackportPurpose.Check,
-        checkRun,
       );
     }
 

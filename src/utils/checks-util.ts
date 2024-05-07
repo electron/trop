@@ -1,10 +1,11 @@
-import { CheckRunStatus } from '../enums';
+import { CheckRunStatus, LogLevel } from '../enums';
 import { BACKPORT_INFORMATION_CHECK, CHECK_PREFIX } from '../constants';
 import {
   SimpleWebHookRepoContext,
   WebHookPR,
   WebHookPRContext,
 } from '../types';
+import { log } from '../utils/log-util';
 
 export async function updateBackportValidityCheck(
   context: WebHookPRContext,
@@ -93,7 +94,7 @@ export async function queueBackportInformationCheck(context: WebHookPRContext) {
   );
 }
 
-export async function getCheckRun(
+export async function getOrCreateCheckRun(
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
   targetBranch: string,
@@ -105,7 +106,26 @@ export async function getCheckRun(
     }),
   );
 
-  return allChecks.data.check_runs.find((run) => {
+  let checkRun = allChecks.data.check_runs.find((run) => {
     return run.name === `${CHECK_PREFIX}${targetBranch}`;
   });
+
+  if (!checkRun) {
+    const response = await context.octokit.checks.create(
+      context.repo({
+        name: `${CHECK_PREFIX}${targetBranch}`,
+        head_sha: pr.head.sha,
+        status: 'queued' as 'queued',
+        details_url: 'https://github.com/electron/trop',
+      }),
+    );
+    checkRun = response.data;
+    log(
+      'backportImpl',
+      LogLevel.INFO,
+      `Created check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with status 'queued'`,
+    );
+  }
+
+  return checkRun;
 }
