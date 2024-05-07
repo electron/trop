@@ -16,6 +16,12 @@ const createOrUpdateCheckRun = async (
 
   if (check) {
     if (check.conclusion === 'neutral') {
+      log(
+        'createOrUpdateCheckRun',
+        LogLevel.INFO,
+        `Updating check run ID ${check.id} with status 'queued'`,
+      );
+
       await context.octokit.checks.update(
         context.repo({
           name: check.name,
