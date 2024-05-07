@@ -1,50 +1,9 @@
-import { CHECK_PREFIX } from '../constants';
 import { PRStatus, BackportPurpose, LogLevel } from '../enums';
-import { getCheckRun } from '../utils/checks-util';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 import { backportImpl } from '../utils';
 import { Probot } from 'probot';
 import { SimpleWebHookRepoContext, WebHookPR } from '../types';
-
-const createOrUpdateCheckRun = async (
-  context: SimpleWebHookRepoContext,
-  pr: WebHookPR,
-  targetBranch: string,
-) => {
-  let check = await getCheckRun(context, pr, targetBranch);
-
-  if (check) {
-    if (check.conclusion === 'neutral') {
-      log(
-        'createOrUpdateCheckRun',
-        LogLevel.INFO,
-        `Updating check run ID ${check.id} with status 'queued'`,
-      );
-
-      await context.octokit.checks.update(
-        context.repo({
-          name: check.name,
-          check_run_id: check.id,
-          status: 'queued' as 'queued',
-        }),
-      );
-    }
-  } else {
-    const response = await context.octokit.checks.create(
-      context.repo({
-        name: `${CHECK_PREFIX}${targetBranch}`,
-        head_sha: pr.head.sha,
-        status: 'queued' as 'queued',
-        details_url: 'https://github.com/electron/trop',
-      }),
-    );
-
-    check = response.data;
-  }
-
-  return check;
-};
 
 /**
  * Performs a backport to a specified label representing a branch.
@@ -84,8 +43,6 @@ export const backportToLabel = async (
     return;
   }
 
-  const checkRun = await createOrUpdateCheckRun(context, pr, targetBranch);
-
   const labelToRemove = label.name;
   const labelToAdd = label.name.replace(PRStatus.TARGET, PRStatus.IN_FLIGHT);
   await backportImpl(
@@ -94,7 +51,6 @@ export const backportToLabel = async (
     pr,
     targetBranch,
     BackportPurpose.ExecuteBackport,
-    checkRun,
     labelToRemove,
     labelToAdd,
   );
@@ -119,8 +75,6 @@ export const backportToBranch = async (
     `Executing backport to branch '${targetBranch}'`,
   );
 
-  const checkRun = await createOrUpdateCheckRun(context, pr, targetBranch);
-
   const labelToRemove = undefined;
   const labelToAdd = PRStatus.IN_FLIGHT + targetBranch;
   await backportImpl(
@@ -129,7 +83,6 @@ export const backportToBranch = async (
     pr,
     targetBranch,
     BackportPurpose.ExecuteBackport,
-    checkRun,
     labelToRemove,
     labelToAdd,
   );

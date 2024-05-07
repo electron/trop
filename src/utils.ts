@@ -8,6 +8,7 @@ import {
   BACKPORT_REQUESTED_LABEL,
   DEFAULT_BACKPORT_REVIEW_TEAM,
   BACKPORT_LABEL,
+  CHECK_PREFIX,
 } from './constants';
 import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
@@ -17,7 +18,7 @@ import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
-import { getCheckRun } from './utils/checks-util';
+import { getOrCreateCheckRun } from './utils/checks-util';
 import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
 import { TryBackportOptions } from './interfaces';
@@ -450,7 +451,6 @@ export const backportImpl = async (
   pr: WebHookPR,
   targetBranch: string,
   purpose: BackportPurpose,
-  checkRun: NonNullable<Awaited<ReturnType<typeof getCheckRun>>>,
   labelToRemove?: string,
   labelToAdd?: string,
 ) => {
@@ -486,10 +486,11 @@ export const backportImpl = async (
     `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
+      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
       log(
         'backportImpl',
         LogLevel.INFO,
-        `Updating check run ID ${checkRun.id} with status 'in_progress'`,
+        `Updating check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with status 'in_progress'`,
       );
       await context.octokit.checks.update(
         context.repo({
@@ -685,7 +686,7 @@ export const backportImpl = async (
       log(
         'backportImpl',
         LogLevel.INFO,
-        `Updating check run ID ${checkRun.id} with conclusion 'success'`,
+        `Updating check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with conclusion 'success'`,
       );
 
       await context.octokit.checks.update(
@@ -766,6 +767,7 @@ export const backportImpl = async (
         ]);
       }
 
+      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
       const mdSep = '``````````````````````````````';
       const updateOpts = context.repo({
         check_run_id: checkRun.id,
@@ -781,6 +783,11 @@ export const backportImpl = async (
           annotations: annotations ? annotations : undefined,
         },
       });
+      log(
+        'backportImpl',
+        LogLevel.INFO,
+        `Updating check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with conclusion 'neutral'`,
+      );
       try {
         await context.octokit.checks.update(updateOpts);
       } catch (err) {
