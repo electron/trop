@@ -496,6 +496,7 @@ export const backportImpl = async (
         context.repo({
           check_run_id: checkRun.id,
           name: checkRun.name,
+          started_at: new Date().toISOString(),
           status: 'in_progress' as 'in_progress',
         }),
       );
