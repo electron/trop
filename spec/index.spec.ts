@@ -4,15 +4,16 @@ import { posix as path } from 'path';
 
 import { Probot, ProbotOctokit } from 'probot';
 
-import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
+import { SKIP_CHECK_LABEL } from '../src/constants';
+import { CheckRunStatus, PRChange } from '../src/enums';
+import { ProbotHandler } from '../src/index';
 import {
   backportToBranch,
   backportToLabel,
 } from '../src/operations/backport-to-location';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
-import { ProbotHandler } from '../src/index';
-import { CheckRunStatus, PRChange } from '../src/enums';
 
+import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
 import * as checkUtils from '../src/utils/checks-util';
 
 const trop: ProbotHandler = require('../src/index');
@@ -36,6 +37,12 @@ const newPROpenedEventPath = path.join(
   'pull_request.opened.json',
 );
 
+const newPRBackportOpenedEventPath = path.join(
+  __dirname,
+  'fixtures',
+  'backport_pull_request.opened.json',
+);
+
 const noBackportLabel = {
   name: 'no-backport',
   color: '000',
@@ -50,6 +57,10 @@ jest.mock('../src/utils', () => ({
   labelClosedPR: jest.fn(),
   isAuthorizedUser: jest.fn().mockReturnValue(Promise.resolve([true])),
   getPRNumbersFromPRBody: jest.fn().mockReturnValue([12345]),
+}));
+
+jest.mock('../src/utils/env-util', () => ({
+  getEnvVar: jest.fn(),
 }));
 
 jest.mock('../src/operations/update-manual-backport', () => ({
@@ -465,6 +476,148 @@ Notes: <!-- One-line Change Summary Here-->`,
       expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
       expect((labelClosedPR as any).mock.calls[0][2]).toBe('4-0-x');
       expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.MERGE);
+    });
+  });
+
+  describe('updateBackportValidityCheck from pull_request events', () => {
+    it('skips the backport validity check if there is skip check label in a new PR', async () => {
+      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
+        Promise.resolve([]),
+      );
+      (octokit.issues.listLabelsOnIssue as jest.Mock).mockReturnValueOnce(
+        Promise.resolve({
+          data: [
+            {
+              name: SKIP_CHECK_LABEL,
+            },
+          ],
+        }),
+      );
+      const event = JSON.parse(
+        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+      );
+      event.payload.action = 'synchronize';
+      event.payload.pull_request.base.ref = '30-x-y';
+      await robot.receive(event);
+
+      const updatePayload = (
+        checkUtils.updateBackportValidityCheck as jest.Mock
+      ).mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Check Skipped',
+        summary: 'This PR is not a backport - skip backport validation check',
+        conclusion: CheckRunStatus.NEUTRAL,
+      });
+    });
+
+    it('cancels the backport validity check if branch is targeting main', async () => {
+      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
+        Promise.resolve([]),
+      );
+
+      const event = JSON.parse(
+        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+      );
+
+      await robot.receive(event);
+
+      const updatePayload = (
+        checkUtils.updateBackportValidityCheck as jest.Mock
+      ).mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Cancelled',
+        summary: "This PR is targeting 'main' and is not a backport",
+        conclusion: CheckRunStatus.NEUTRAL,
+      });
+    });
+
+    it('fails the backport validity check if old PR was not merged to a supported release branch', async () => {
+      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce([1234]);
+      (octokit.pulls.get as jest.Mock).mockResolvedValueOnce({
+        data: {
+          merged: true,
+          base: {
+            ref: 'not-supported-branch',
+          },
+        },
+      });
+      const event = JSON.parse(
+        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+      );
+      event.payload.pull_request.base.ref = '30-x-y';
+      event.payload.action = 'synchronize';
+      await robot.receive(event);
+
+      const updatePayload = (
+        checkUtils.updateBackportValidityCheck as jest.Mock
+      ).mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Invalid Backport',
+        summary:
+          'This PR is targeting a branch that is not main but the PR that it is backporting was not targeting the default branch.',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+    });
+
+    it('fails the backport validity check if old PR has not been merged yet', async () => {
+      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce([1234]);
+      (octokit.pulls.get as jest.Mock).mockResolvedValueOnce({
+        data: {
+          merged: false,
+          base: {
+            ref: 'main',
+          },
+        },
+      });
+      const event = JSON.parse(
+        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+      );
+      event.payload.pull_request.base.ref = '30-x-y';
+      event.payload.action = 'synchronize';
+      await robot.receive(event);
+
+      const updatePayload = (
+        checkUtils.updateBackportValidityCheck as jest.Mock
+      ).mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Invalid Backport',
+        summary:
+          'This PR is targeting a branch that is not main but the PR that this is backporting has not been merged yet.',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+    });
+
+    it('succeeds the backport validity check if all checks pass', async () => {
+      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce([1234]);
+      (octokit.pulls.get as jest.Mock).mockResolvedValueOnce({
+        data: {
+          merged: true,
+          base: {
+            ref: 'main',
+          },
+        },
+      });
+      const event = JSON.parse(
+        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+      );
+      event.payload.pull_request.base.ref = '30-x-y';
+      event.payload.action = 'synchronize';
+      await robot.receive(event);
+
+      const updatePayload = (
+        checkUtils.updateBackportValidityCheck as jest.Mock
+      ).mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Valid Backport',
+        summary:
+          'This PR is declared as backporting "#1234" which is a valid PR that has been merged into main',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
     });
   });
 });
