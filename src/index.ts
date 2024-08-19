@@ -543,13 +543,14 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         name: 'backport to branch',
         command: /^run backport-to (([^,]*)(, ?([^,]*))*)/,
         execute: async (targetBranches: string) => {
-          const branches = targetBranches.split(',').map((b) => b.trim());
+          const branches = new Set(
+            targetBranches.split(',').map((b) => b.trim()),
+          );
           for (const branch of branches) {
             robot.log(
               `Initiating backport to \`${branch}\` from 'backport-to' comment`,
             );
 
-            if (!branch.trim()) continue;
             const pr = (
               await context.octokit.pulls.get(
                 context.repo({ pull_number: issue.number }),
