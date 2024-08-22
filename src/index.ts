@@ -548,55 +548,55 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
           );
           for (const branch of branches) {
             robot.log(
-              `Initiating backport to \`${branch}\` from 'backport-to' comment`,
+              `Attempting backport to \`${branch}\` from 'backport-to' comment`,
             );
 
-            const pr = (
-              await context.octokit.pulls.get(
-                context.repo({ pull_number: issue.number }),
-              )
-            ).data as WebHookPR;
-
-            try {
-              await context.octokit.repos.getBranch(context.repo({ branch }));
-            } catch (err) {
-              await context.octokit.issues.createComment(
-                context.repo({
-                  body: `The branch you provided \`${branch}\` does not appear to exist.`,
-                  issue_number: issue.number,
-                }),
-              );
-              return true;
-            }
-
-            // Optionally disallow backports to EOL branches
             const noEOLSupport = getEnvVar('NO_EOL_SUPPORT', '');
             if (noEOLSupport) {
               const supported = await getSupportedBranches(context);
               if (!supported.includes(branch)) {
-                robot.log(
-                  `${branch} is no longer supported - no backport will be initiated`,
-                );
+                robot.log(`${branch} is EOL - no backport will be initiated`);
                 await context.octokit.issues.createComment(
                   context.repo({
-                    body: `\`${branch}\` is no longer supported - no backport will be initiated.`,
+                    body: `Provided branch \`${branch}\` is EOL - no backport will be performed.`,
                     issue_number: issue.number,
                   }),
                 );
-                return false;
+                continue;
               }
+            }
+
+            try {
+              await context.octokit.repos.getBranch(context.repo({ branch }));
+            } catch (err) {
+              robot.log(
+                `${branch} does not exist - no backport will be initiated`,
+              );
+              await context.octokit.issues.createComment(
+                context.repo({
+                  body: `Provided branch \`${branch}\` does not appear to exist.`,
+                  issue_number: issue.number,
+                }),
+              );
+              continue;
             }
 
             robot.log(
               `Initiating manual backport process for #${issue.number} to ${branch}`,
             );
+
             await context.octokit.issues.createComment(
               context.repo({
                 body: `The backport process for this PR has been manually initiated - sending your PR to \`${branch}\`!`,
                 issue_number: issue.number,
               }),
             );
-            backportToBranch(robot, context, pr, branch);
+
+            const { data: pr } = await context.octokit.pulls.get(
+              context.repo({ pull_number: issue.number }),
+            );
+
+            backportToBranch(robot, context, pr as WebHookPR, branch);
           }
           return true;
         },
