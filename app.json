@@ -11,15 +11,14 @@
       "required": true
     }
   },
-  "formation": {
-  },
-  "addons": [
-
-  ],
+  "formation": {},
+  "addons": [],
   "buildpacks": [
     {
       "url": "heroku/nodejs"
+    }, {
+      "url": "heroku-community/apt"
     }
   ],
-  "stack": "heroku-22"
+  "stack": "heroku-24"
 }

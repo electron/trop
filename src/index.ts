@@ -370,7 +370,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       'pull_request.unlabeled',
       'pull_request.synchronize',
     ],
-    async (context) => {
+    async (context: WebHookPRContext) => {
       const pr = context.payload.pull_request;
 
       if (pr.base.ref !== pr.base.repo.default_branch) {
@@ -423,7 +423,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   );
 
   // Backport pull requests to labeled targets when PR is merged.
-  robot.on('pull_request.closed', async (context: WebHookPRContext) => {
+  robot.on('pull_request.closed', async (context) => {
     const { pull_request: pr } = context.payload;
 
     const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
@@ -471,7 +471,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   const TROP_COMMAND_PREFIX = '/trop ';
 
   // Manually trigger backporting process on trigger comment phrase.
-  robot.on('issue_comment.created', async (context: WebHookIssueContext) => {
+  robot.on('issue_comment.created', async (context) => {
     const { issue, comment } = context.payload;
 
     const isPullRequest = (i: { number: number; html_url: string }) =>
