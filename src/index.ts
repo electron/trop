@@ -28,12 +28,7 @@ import {
   updateBackportValidityCheck,
 } from './utils/checks-util';
 import { register } from './utils/prom';
-import {
-  SimpleWebHookRepoContext,
-  WebHookIssueContext,
-  WebHookPR,
-  WebHookPRContext,
-} from './types';
+import { SimpleWebHookRepoContext, WebHookPR, WebHookPRContext } from './types';
 
 // Built in fetch doesn't support global-agent...
 // @ts-ignore
@@ -370,7 +365,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       'pull_request.unlabeled',
       'pull_request.synchronize',
     ],
-    async (context: WebHookPRContext) => {
+    async (context) => {
       const pr = context.payload.pull_request;
 
       if (pr.base.ref !== pr.base.repo.default_branch) {
