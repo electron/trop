@@ -27,3 +27,6 @@ export const BACKPORT_REQUESTED_LABEL =
 
 export const DEFAULT_BACKPORT_REVIEW_TEAM =
   process.env.DEFAULT_BACKPORT_REVIEW_TEAM;
+
+export const VALID_BACKPORT_CHECK_NAME =
+  process.env.BACKPORT_REQUESTED_LABEL || 'Valid Backport';

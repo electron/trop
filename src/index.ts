@@ -11,7 +11,12 @@ import {
   labelExistsOnPR,
   removeLabel,
 } from './utils/label-utils';
-import { CHECK_PREFIX, NO_BACKPORT_LABEL, SKIP_CHECK_LABEL } from './constants';
+import {
+  CHECK_PREFIX,
+  NO_BACKPORT_LABEL,
+  SKIP_CHECK_LABEL,
+  VALID_BACKPORT_CHECK_NAME,
+} from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
 import { Label } from '@octokit/webhooks-types';
@@ -30,8 +35,9 @@ import {
 import { register } from './utils/prom';
 import { SimpleWebHookRepoContext, WebHookPR, WebHookPRContext } from './types';
 
-// Built in fetch doesn't support global-agent...
-// @ts-ignore
+import { execSync } from 'child_process';
+
+// @ts-ignore - builtin fetch doesn't support global-agent.
 delete globalThis.fetch;
 
 const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
@@ -140,6 +146,12 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     }
   };
 
+  const gitExists = execSync('which git').toString().trim();
+  if (/git not found/.test(gitExists)) {
+    robot.log('Git not found - unable to proceed with backporting');
+    process.exit(1);
+  }
+
   /**
    * Checks that a PR done to `main` contains the required
    * backport information, i.e.: at least a `no-backport` or
@@ -148,8 +160,6 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
    * @param context
    * @returns
    */
-
-  const VALID_BACKPORT_CHECK_NAME = 'Valid Backport';
 
   robot.on(
     [
