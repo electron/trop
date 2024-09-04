@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import * as fs from 'fs-extra';
+import { execSync } from 'child_process';
 import Queue from 'queue';
 import simpleGit from 'simple-git';
 
@@ -29,7 +30,7 @@ import {
   WebHookPR,
   WebHookRepoContext,
 } from './types';
-import { Context, Probot } from 'probot';
+import { Probot } from 'probot';
 
 const { parse: parseDiff } = require('what-the-diff');
 
@@ -473,6 +474,17 @@ export const backportImpl = async (
       );
       return;
     }
+  }
+
+  const gitExists = execSync('which git').toString().trim();
+  if (/git not found/.test(gitExists)) {
+    await context.octokit.issues.createComment(
+      context.repo({
+        body: `Git not found - unable to proceed with backporting to ${targetBranch}`,
+        issue_number: pr.number,
+      }),
+    );
+    return;
   }
 
   const base = pr.base;

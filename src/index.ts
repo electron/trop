@@ -11,7 +11,12 @@ import {
   labelExistsOnPR,
   removeLabel,
 } from './utils/label-utils';
-import { CHECK_PREFIX, NO_BACKPORT_LABEL, SKIP_CHECK_LABEL } from './constants';
+import {
+  CHECK_PREFIX,
+  NO_BACKPORT_LABEL,
+  SKIP_CHECK_LABEL,
+  VALID_BACKPORT_CHECK_NAME,
+} from './constants';
 import { getEnvVar } from './utils/env-util';
 import { PRChange, PRStatus, BackportPurpose, CheckRunStatus } from './enums';
 import { Label } from '@octokit/webhooks-types';
@@ -28,15 +33,11 @@ import {
   updateBackportValidityCheck,
 } from './utils/checks-util';
 import { register } from './utils/prom';
-import {
-  SimpleWebHookRepoContext,
-  WebHookIssueContext,
-  WebHookPR,
-  WebHookPRContext,
-} from './types';
+import { SimpleWebHookRepoContext, WebHookPR, WebHookPRContext } from './types';
 
-// Built in fetch doesn't support global-agent...
-// @ts-ignore
+import { execSync } from 'child_process';
+
+// @ts-ignore - builtin fetch doesn't support global-agent.
 delete globalThis.fetch;
 
 const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
@@ -145,6 +146,12 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     }
   };
 
+  const gitExists = execSync('which git').toString().trim();
+  if (/git not found/.test(gitExists)) {
+    robot.log('Git not found - unable to proceed with backporting');
+    process.exit(1);
+  }
+
   /**
    * Checks that a PR done to `main` contains the required
    * backport information, i.e.: at least a `no-backport` or
@@ -153,8 +160,6 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
    * @param context
    * @returns
    */
-
-  const VALID_BACKPORT_CHECK_NAME = 'Valid Backport';
 
   robot.on(
     [
@@ -423,7 +428,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   );
 
   // Backport pull requests to labeled targets when PR is merged.
-  robot.on('pull_request.closed', async (context: WebHookPRContext) => {
+  robot.on('pull_request.closed', async (context) => {
     const { pull_request: pr } = context.payload;
 
     const oldPRNumbers = getPRNumbersFromPRBody(pr, true);
@@ -471,7 +476,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   const TROP_COMMAND_PREFIX = '/trop ';
 
   // Manually trigger backporting process on trigger comment phrase.
-  robot.on('issue_comment.created', async (context: WebHookIssueContext) => {
+  robot.on('issue_comment.created', async (context) => {
     const { issue, comment } = context.payload;
 
     const isPullRequest = (i: { number: number; html_url: string }) =>
