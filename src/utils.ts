@@ -72,7 +72,7 @@ export const labelClosedPR = async (
 
     if (change === PRChange.MERGE) {
       const mergedLabel = PRStatus.MERGED + targetBranch;
-      const needsManualLabel = PRStatus.IN_FLIGHT + targetBranch;
+      const needsManualLabel = PRStatus.NEEDS_MANUAL + targetBranch;
 
       // Add merged label to the original PR.
       await labelUtils.addLabels(context, prNumber, [mergedLabel]);
