@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import * as sinon from 'sinon';
 
 import { ExecutionQueue } from '../src/Queue';
 
@@ -22,8 +21,8 @@ const delayedEvent = async (
 const fakeTask = (name: string) => {
   const namedArgs = {
     name,
-    taskRunner: sinon.stub().returns(Promise.resolve()),
-    errorHandler: sinon.stub().returns(Promise.resolve()),
+    taskRunner: jest.fn().mockResolvedValue(undefined),
+    errorHandler: jest.fn().mockResolvedValue(undefined),
     args: () =>
       [name, namedArgs.taskRunner, namedArgs.errorHandler] as [
         string,
@@ -40,18 +39,18 @@ describe('ExecutionQueue', () => {
 
     const task = fakeTask('test');
     await delayedEvent(q, 'empty', async () => q.enterQueue(...task.args()));
-    expect(task.taskRunner.callCount).toBe(1);
+    expect(task.taskRunner).toHaveBeenCalledTimes(1);
   });
 
   it('should run the tasks error handler if the task throws', async () => {
     const q = new ExecutionQueue();
 
     const task = fakeTask('test');
-    task.taskRunner.returns(Promise.reject('err'));
+    task.taskRunner.mockRejectedValue('err');
     await delayedEvent(q, 'empty', async () => q.enterQueue(...task.args()));
-    expect(task.taskRunner.callCount).toBe(1);
-    expect(task.errorHandler.callCount).toBe(1);
-    expect(task.errorHandler.firstCall.args[0]).toBe('err');
+    expect(task.taskRunner).toHaveBeenCalledTimes(1);
+    expect(task.errorHandler).toHaveBeenCalledTimes(1);
+    expect(task.errorHandler).toHaveBeenNthCalledWith(1, 'err');
   });
 
   it('should run the next task if the current task succeeds', async () => {
@@ -63,36 +62,36 @@ describe('ExecutionQueue', () => {
       q.enterQueue(...task.args());
       q.enterQueue(...task2.args());
     });
-    expect(task.taskRunner.callCount).toBe(1);
-    expect(task2.taskRunner.callCount).toBe(1);
+    expect(task.taskRunner).toHaveBeenCalledTimes(1);
+    expect(task2.taskRunner).toHaveBeenCalledTimes(1);
   });
 
   it('should run the next task if the current task fails', async () => {
     const q = new ExecutionQueue();
 
     const task = fakeTask('test');
-    task.taskRunner.returns(Promise.reject('err'));
+    task.taskRunner.mockRejectedValue('err');
     const task2 = fakeTask('test2');
     await delayedEvent(q, 'empty', async () => {
       q.enterQueue(...task.args());
       q.enterQueue(...task2.args());
     });
-    expect(task.taskRunner.callCount).toBe(1);
-    expect(task2.taskRunner.callCount).toBe(1);
+    expect(task.taskRunner).toHaveBeenCalledTimes(1);
+    expect(task2.taskRunner).toHaveBeenCalledTimes(1);
   });
 
   it("should run the next task if the current task fails and it's error handler fails", async () => {
     const q = new ExecutionQueue();
 
     const task = fakeTask('test');
-    task.taskRunner.returns(Promise.reject('err'));
-    task.errorHandler.returns(Promise.reject('bad error'));
+    task.taskRunner.mockRejectedValue('err');
+    task.errorHandler.mockRejectedValue('bad error');
     const task2 = fakeTask('test2');
     await delayedEvent(q, 'empty', async () => {
       q.enterQueue(...task.args());
       q.enterQueue(...task2.args());
     });
-    expect(task.taskRunner.callCount).toBe(1);
-    expect(task2.taskRunner.callCount).toBe(1);
+    expect(task.taskRunner).toHaveBeenCalledTimes(1);
+    expect(task2.taskRunner).toHaveBeenCalledTimes(1);
   });
 });
