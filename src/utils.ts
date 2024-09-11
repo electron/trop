@@ -59,26 +59,30 @@ export const labelClosedPR = async (
     `Labeling original PRs for PR at #${pr.number}`,
   );
 
+  const targetLabel = PRStatus.TARGET + targetBranch;
+
   if (change === PRChange.CLOSE) {
-    const targetLabel = PRStatus.TARGET + targetBranch;
     await labelUtils.removeLabel(context, pr.number, targetLabel);
   }
 
   const backportNumbers = getPRNumbersFromPRBody(pr);
   for (const prNumber of backportNumbers) {
-    const labelToRemove = PRStatus.IN_FLIGHT + targetBranch;
+    const inFlightLabel = PRStatus.IN_FLIGHT + targetBranch;
+    await labelUtils.removeLabel(context, prNumber, inFlightLabel);
 
-    // Add merged label to the original PR. If this is an intermediary PR,
-    // remove target labels from the current PR.
     if (change === PRChange.MERGE) {
       const mergedLabel = PRStatus.MERGED + targetBranch;
-      const targetLabel = PRStatus.TARGET + targetBranch;
+      const needsManualLabel = PRStatus.NEEDS_MANUAL + targetBranch;
 
+      // Add merged label to the original PR.
       await labelUtils.addLabels(context, prNumber, [mergedLabel]);
+
+      // Remove the needs-manual-backport label from the original PR.
+      await labelUtils.removeLabel(context, prNumber, needsManualLabel);
+
+      // Remove the target label from the intermediate PR.
       await labelUtils.removeLabel(context, pr.number, targetLabel);
     }
-
-    await labelUtils.removeLabel(context, prNumber, labelToRemove);
   }
 };
 
