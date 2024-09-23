@@ -215,6 +215,19 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         checkRun = response.data;
       }
 
+      // Allow the PR to skip backport label checking if it has the SKIP_CHECK_LABEL.
+      if (await labelExistsOnPR(context, pr.number, SKIP_CHECK_LABEL)) {
+        robot.log(
+          `#${pr.number} is labeled with ${SKIP_CHECK_LABEL} - skipping backport validation check`,
+        );
+        await updateBackportValidityCheck(context, checkRun, {
+          title: 'Backport Check Skipped',
+          summary: 'This PR is not a backport - skip backport validation check',
+          conclusion: CheckRunStatus.NEUTRAL,
+        });
+        return;
+      }
+
       if (pr.base.ref !== pr.base.repo.default_branch) {
         // Ensure that we aren't including our own base branch in the backport process.
         if (action === 'labeled') {
@@ -230,21 +243,6 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
               await removeLabel(context, 1, '');
             }
           }
-        }
-
-        // If a branch is targeting something that isn't main it might not be a backport;
-        // allow for a label to skip backport validity check for these branches.
-        if (await labelExistsOnPR(context, pr.number, SKIP_CHECK_LABEL)) {
-          robot.log(
-            `#${pr.number} is labeled with ${SKIP_CHECK_LABEL} - skipping backport validation check`,
-          );
-          await updateBackportValidityCheck(context, checkRun, {
-            title: 'Backport Check Skipped',
-            summary:
-              'This PR is not a backport - skip backport validation check',
-            conclusion: CheckRunStatus.NEUTRAL,
-          });
-          return;
         }
 
         const FASTTRACK_PREFIXES = ['build:', 'ci:'];
