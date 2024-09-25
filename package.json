@@ -30,7 +30,7 @@
   "devDependencies": {
     "@types/fs-extra": "^11.0.1",
     "@types/jest": "^29.0.0",
-    "@types/node": "^18.11.8",
+    "@types/node": "^20.11.8",
     "@types/node-fetch": "^2.5.4",
     "@types/pino-std-serializers": "^4.0.0",
     "@typescript-eslint/eslint-plugin": "^5.50.0",
@@ -52,7 +52,7 @@
     "{src,spec}/**/*.ts": "prettier --write **/*.ts"
   },
   "engines": {
-    "node": ">= 7.7.0",
+    "node": ">= 20.7.0",
     "npm": ">= 4.0.0"
   },
   "resolutions": {
