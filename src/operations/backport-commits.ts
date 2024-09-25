@@ -4,6 +4,7 @@ import simpleGit from 'simple-git';
 import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
+import { isUtf8 } from 'buffer';
 
 const cleanRawGitString = (s: string) => {
   let nS = s.trim();
@@ -138,14 +139,30 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
                   sha: null as any,
                 };
               }
-              const fileContents = await fs.readFile(onDiskPath, 'utf-8');
+              const fileContents = await fs.readFile(onDiskPath);
               const stat = await fs.stat(onDiskPath);
               const userMode = (stat.mode & parseInt('777', 8)).toString(8)[0];
+              if (isUtf8(fileContents)) {
+                return <const>{
+                  path: changedFile,
+                  mode: userMode === '6' ? '100644' : '100755',
+                  type: 'blob',
+                  content: fileContents.toString('utf-8'),
+                };
+              }
+
+              const blob = await options.github.git.createBlob(
+                options.context.repo({
+                  content: fileContents.toString('base64'),
+                  encoding: 'base64',
+                }),
+              );
+
               return <const>{
                 path: changedFile,
                 mode: userMode === '6' ? '100644' : '100755',
                 type: 'blob',
-                content: fileContents,
+                sha: blob.data.sha,
               };
             }),
           ),
