@@ -132,18 +132,18 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
             changedFiles.map(async (changedFile) => {
               const onDiskPath = path.resolve(options.dir, changedFile);
               if (!(await fs.pathExists(onDiskPath))) {
-                return <const>{
+                return {
                   path: changedFile,
-                  mode: <const>'100644',
+                  mode: '100644',
                   type: 'blob',
-                  sha: null as any,
+                  sha: null,
                 };
               }
               const fileContents = await fs.readFile(onDiskPath);
               const stat = await fs.stat(onDiskPath);
               const userMode = (stat.mode & parseInt('777', 8)).toString(8)[0];
               if (isUtf8(fileContents)) {
-                return <const>{
+                return {
                   path: changedFile,
                   mode: userMode === '6' ? '100644' : '100755',
                   type: 'blob',
@@ -158,7 +158,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
                 }),
               );
 
-              return <const>{
+              return {
                 path: changedFile,
                 mode: userMode === '6' ? '100644' : '100755',
                 type: 'blob',
