@@ -721,7 +721,7 @@ export const backportImpl = async (
       await fs.remove(createdDir);
     },
     async () => {
-      let annotations: any[] | null = null;
+      let annotations: unknown[] | null = null;
       let diff;
       let rawDiff;
       if (createdDir) {
@@ -751,7 +751,8 @@ export const backportImpl = async (
               message: 'Patch Conflict',
               raw_details: hunk.lines
                 .filter(
-                  (_: any, i: number) => i >= startOffset && i <= finalOffset,
+                  (_: unknown, i: number) =>
+                    i >= startOffset && i <= finalOffset,
                 )
                 .join('\n'),
             });

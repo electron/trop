@@ -23,7 +23,7 @@ export const addLabels = async (
 };
 
 export const getSemverLabel = (pr: Pick<WebHookPR, 'labels'>) => {
-  return pr.labels.find((l: any) => l.name.startsWith(SEMVER_PREFIX));
+  return pr.labels.find((l) => l.name.startsWith(SEMVER_PREFIX));
 };
 
 export const getHighestSemverLabel = (...labels: string[]) => {

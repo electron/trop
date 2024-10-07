@@ -3,7 +3,7 @@ import { log } from './utils/log-util';
 import { LogLevel } from './enums';
 
 export type Executor = () => Promise<void>;
-export type ErrorExecutor = (err: any) => Promise<void>;
+export type ErrorExecutor = (err: unknown) => Promise<void>;
 
 const DEFAULT_MAX_ACTIVE = 5;
 
@@ -36,7 +36,7 @@ export class ExecutionQueue extends EventEmitter {
     this.active += 1;
     fns[1]()
       .then(() => this.runNext(fns[0]))
-      .catch((err: any) => {
+      .catch((err: unknown) => {
         if (!process.env.SPEC_RUNNING) {
           console.error(err);
         }

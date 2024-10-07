@@ -10,7 +10,7 @@ import { LogLevel } from '../enums';
 export const log = (
   functionName: string,
   logLevel: LogLevel,
-  ...message: any[]
+  ...message: unknown[]
 ) => {
   const output = `${functionName}: ${message}`;
 

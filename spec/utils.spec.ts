@@ -16,13 +16,11 @@ describe('utils', () => {
         requestReviewers: jest.fn(),
       },
       repos: {
-        getCollaboratorPermissionLevel: jest.fn().mockReturnValue(
-          Promise.resolve({
-            data: {
-              permission: 'admin',
-            },
-          }),
-        ),
+        getCollaboratorPermissionLevel: jest.fn().mockResolvedValue({
+          data: {
+            permission: 'admin',
+          },
+        }),
       },
     };
 

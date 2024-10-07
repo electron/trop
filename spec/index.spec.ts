@@ -55,7 +55,7 @@ const targetLabel = {
 
 jest.mock('../src/utils', () => ({
   labelClosedPR: jest.fn(),
-  isAuthorizedUser: jest.fn().mockReturnValue(Promise.resolve([true])),
+  isAuthorizedUser: jest.fn().mockResolvedValue([true]),
   getPRNumbersFromPRBody: jest.fn().mockReturnValue([12345]),
 }));
 
@@ -74,11 +74,9 @@ jest.mock('../src/operations/backport-to-location', () => ({
 
 jest.mock('../src/utils/checks-util', () => ({
   updateBackportValidityCheck: jest.fn(),
-  getBackportInformationCheck: jest
-    .fn()
-    .mockReturnValue(Promise.resolve({ status: 'thing' })),
-  updateBackportInformationCheck: jest.fn().mockReturnValue(Promise.resolve()),
-  queueBackportInformationCheck: jest.fn().mockReturnValue(Promise.resolve()),
+  getBackportInformationCheck: jest.fn().mockResolvedValue({ status: 'thing' }),
+  updateBackportInformationCheck: jest.fn().mockResolvedValue(undefined),
+  queueBackportInformationCheck: jest.fn().mockResolvedValue(undefined),
 }));
 
 describe('trop', () => {
@@ -90,59 +88,51 @@ describe('trop', () => {
     nock.disableNetConnect();
     octokit = {
       repos: {
-        getBranch: jest.fn().mockReturnValue(Promise.resolve()),
-        listBranches: jest.fn().mockReturnValue(
-          Promise.resolve({
-            data: [{ name: '8-x-y' }, { name: '7-1-x' }],
-          }),
-        ),
+        getBranch: jest.fn().mockResolvedValue(undefined),
+        listBranches: jest.fn().mockResolvedValue({
+          data: [{ name: '8-x-y' }, { name: '7-1-x' }],
+        }),
       },
       git: {
-        deleteRef: jest.fn().mockReturnValue(Promise.resolve()),
+        deleteRef: jest.fn().mockResolvedValue(undefined),
       },
       pulls: {
-        get: jest.fn().mockReturnValue(
-          Promise.resolve({
-            data: {
-              merged: true,
-              head: {
-                sha: '6dcb09b5b57875f334f61aebed695e2e4193db5e',
-              },
-              labels: [
-                {
-                  url: 'my_cool_url',
-                  name: 'target/X-X-X',
-                  color: 'fc2929',
-                },
-              ],
+        get: jest.fn().mockResolvedValue({
+          data: {
+            merged: true,
+            head: {
+              sha: '6dcb09b5b57875f334f61aebed695e2e4193db5e',
             },
-          }),
-        ),
-      },
-      issues: {
-        addLabels: jest.fn().mockReturnValue(Promise.resolve({})),
-        removeLabel: jest.fn().mockReturnValue(Promise.resolve({})),
-        createLabel: jest.fn().mockReturnValue(Promise.resolve({})),
-        createComment: jest.fn().mockReturnValue(Promise.resolve({})),
-        listLabelsOnIssue: jest.fn().mockReturnValue(
-          Promise.resolve({
-            data: [
+            labels: [
               {
-                id: 208045946,
-                url: 'https://api.github.com/repos/octocat/Hello-World/labels/bug',
-                name: 'bug',
-                description: "Something isn't working",
-                color: 'f29513',
+                url: 'my_cool_url',
+                name: 'target/X-X-X',
+                color: 'fc2929',
               },
             ],
-          }),
-        ),
+          },
+        }),
+      },
+      issues: {
+        addLabels: jest.fn().mockResolvedValue({}),
+        removeLabel: jest.fn().mockResolvedValue({}),
+        createLabel: jest.fn().mockResolvedValue({}),
+        createComment: jest.fn().mockResolvedValue({}),
+        listLabelsOnIssue: jest.fn().mockResolvedValue({
+          data: [
+            {
+              id: 208045946,
+              url: 'https://api.github.com/repos/octocat/Hello-World/labels/bug',
+              name: 'bug',
+              description: "Something isn't working",
+              color: 'f29513',
+            },
+          ],
+        }),
       },
       checks: {
-        listForRef: jest
-          .fn()
-          .mockReturnValue(Promise.resolve({ data: { check_runs: [] } })),
-        create: jest.fn().mockReturnValue(Promise.resolve({ data: jest.fn() })),
+        listForRef: jest.fn().mockResolvedValue({ data: { check_runs: [] } }),
+        create: jest.fn().mockResolvedValue({ data: jest.fn() }),
       },
     };
 
@@ -153,7 +143,7 @@ describe('trop', () => {
         throttle: { enabled: false },
       }),
     });
-    (robot as any).state.octokit.auth = () => Promise.resolve(octokit);
+    robot['state'].octokit.auth = () => Promise.resolve(octokit);
     robot.auth = () => Promise.resolve(octokit);
     robot.load(trop);
   });
@@ -175,7 +165,7 @@ describe('trop', () => {
     it('does not trigger the backport on comment if the PR is not merged', async () => {
       octokit.pulls.get = jest
         .fn()
-        .mockReturnValue(Promise.resolve({ data: { merged: false } }));
+        .mockResolvedValue({ data: { merged: false } });
 
       await robot.receive(issueCommentBackportCreatedEvent);
 
@@ -229,33 +219,29 @@ describe('trop', () => {
 
     it('queues the check if there is no backport information for a new PR', async () => {
       const event = JSON.parse(
-        (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
       );
 
       event.payload.pull_request.labels = [];
 
       await robot.receive(event);
 
-      expect(
-        checkUtils.queueBackportInformationCheck as jest.Mock,
-      ).toHaveBeenCalledTimes(1);
+      expect(checkUtils.queueBackportInformationCheck).toHaveBeenCalledTimes(1);
     });
 
     it('fails the check if there is conflicting backport information in a new PR', async () => {
-      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
-        Promise.resolve([]),
-      );
+      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       const event = JSON.parse(
-        (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
       );
 
       event.payload.pull_request.labels = [noBackportLabel, targetLabel];
 
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportInformationCheck as jest.Mock
+      const updatePayload = jest.mocked(
+        checkUtils.updateBackportInformationCheck,
       ).mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
@@ -267,20 +253,18 @@ describe('trop', () => {
     });
 
     it('passes the check if there is a "no-backport" label and no "target/" label in a new PR', async () => {
-      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
-        Promise.resolve([]),
-      );
+      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       const event = JSON.parse(
-        (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
       );
 
       event.payload.pull_request.labels = [noBackportLabel];
 
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportInformationCheck as jest.Mock
+      const updatePayload = jest.mocked(
+        checkUtils.updateBackportInformationCheck,
       ).mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
@@ -291,20 +275,18 @@ describe('trop', () => {
     });
 
     it('passes the check if there is no "no-backport" label and a "target/" label in a new PR', async () => {
-      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
-        Promise.resolve([]),
-      );
+      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       const event = JSON.parse(
-        (await fs.readFile(newPROpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
       );
 
       event.payload.pull_request.labels = [targetLabel];
 
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportInformationCheck as jest.Mock
+      const updatePayload = jest.mocked(
+        checkUtils.updateBackportInformationCheck,
       ).mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
@@ -352,9 +334,12 @@ Notes: <!-- One-line Change Summary Here-->`,
         },
       };
 
-      expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
-      expect((labelClosedPR as any).mock.calls[0][2]).toBe('5-0-x');
-      expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.CLOSE);
+      expect(jest.mocked(labelClosedPR)).toHaveBeenCalledWith(
+        expect.anything(),
+        pr,
+        '5-0-x',
+        PRChange.CLOSE,
+      );
     });
 
     it('updates labels on the original PR when a bot backport PR has been merged', async () => {
@@ -387,9 +372,12 @@ Notes: <!-- One-line Change Summary Here-->`,
         },
       };
 
-      expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
-      expect((labelClosedPR as any).mock.calls[0][2]).toBe('4-0-x');
-      expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.MERGE);
+      expect(jest.mocked(labelClosedPR)).toHaveBeenCalledWith(
+        expect.anything(),
+        pr,
+        '4-0-x',
+        PRChange.MERGE,
+      );
     });
 
     it('updates labels on the original PR when a manual backport PR has been closed with unmerged commits', async () => {
@@ -430,9 +418,12 @@ Notes: <!-- One-line Change Summary Here-->`,
 
       expect(updateManualBackport).toHaveBeenCalled();
 
-      expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
-      expect((labelClosedPR as any).mock.calls[0][2]).toBe('4-0-x');
-      expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.CLOSE);
+      expect(jest.mocked(labelClosedPR)).toHaveBeenCalledWith(
+        expect.anything(),
+        pr,
+        '4-0-x',
+        PRChange.CLOSE,
+      );
     });
 
     it('updates labels on the original PR when a manual backport PR has been merged', async () => {
@@ -473,36 +464,34 @@ Notes: <!-- One-line Change Summary Here-->`,
 
       expect(updateManualBackport).toHaveBeenCalled();
 
-      expect((labelClosedPR as any).mock.calls[0][1]).toEqual(pr);
-      expect((labelClosedPR as any).mock.calls[0][2]).toBe('4-0-x');
-      expect((labelClosedPR as any).mock.calls[0][3]).toBe(PRChange.MERGE);
+      expect(jest.mocked(labelClosedPR)).toHaveBeenCalledWith(
+        expect.anything(),
+        pr,
+        '4-0-x',
+        PRChange.MERGE,
+      );
     });
   });
 
   describe('updateBackportValidityCheck from pull_request events', () => {
     it('skips the backport validity check if there is skip check label in a new PR', async () => {
-      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
-        Promise.resolve([]),
-      );
-      (octokit.issues.listLabelsOnIssue as jest.Mock).mockReturnValueOnce(
-        Promise.resolve({
-          data: [
-            {
-              name: SKIP_CHECK_LABEL,
-            },
-          ],
-        }),
-      );
+      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+      octokit.issues.listLabelsOnIssue.mockResolvedValue({
+        data: [
+          {
+            name: SKIP_CHECK_LABEL,
+          },
+        ],
+      });
       const event = JSON.parse(
-        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
       event.payload.action = 'synchronize';
       event.payload.pull_request.base.ref = '30-x-y';
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportValidityCheck as jest.Mock
-      ).mock.calls[0][2];
+      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Backport Check Skipped',
@@ -512,19 +501,16 @@ Notes: <!-- One-line Change Summary Here-->`,
     });
 
     it('cancels the backport validity check if branch is targeting main', async () => {
-      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce(
-        Promise.resolve([]),
-      );
+      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       const event = JSON.parse(
-        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
 
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportValidityCheck as jest.Mock
-      ).mock.calls[0][2];
+      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Cancelled',
@@ -534,8 +520,8 @@ Notes: <!-- One-line Change Summary Here-->`,
     });
 
     it('fails the backport validity check if old PR was not merged to a supported release branch', async () => {
-      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce([1234]);
-      (octokit.pulls.get as jest.Mock).mockResolvedValueOnce({
+      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
+      octokit.pulls.get.mockResolvedValueOnce({
         data: {
           merged: true,
           base: {
@@ -544,15 +530,14 @@ Notes: <!-- One-line Change Summary Here-->`,
         },
       });
       const event = JSON.parse(
-        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
       event.payload.pull_request.base.ref = '30-x-y';
       event.payload.action = 'synchronize';
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportValidityCheck as jest.Mock
-      ).mock.calls[0][2];
+      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Invalid Backport',
@@ -563,8 +548,8 @@ Notes: <!-- One-line Change Summary Here-->`,
     });
 
     it('fails the backport validity check if old PR has not been merged yet', async () => {
-      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce([1234]);
-      (octokit.pulls.get as jest.Mock).mockResolvedValueOnce({
+      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
+      octokit.pulls.get.mockResolvedValueOnce({
         data: {
           merged: false,
           base: {
@@ -573,15 +558,14 @@ Notes: <!-- One-line Change Summary Here-->`,
         },
       });
       const event = JSON.parse(
-        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
       event.payload.pull_request.base.ref = '30-x-y';
       event.payload.action = 'synchronize';
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportValidityCheck as jest.Mock
-      ).mock.calls[0][2];
+      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Invalid Backport',
@@ -592,8 +576,8 @@ Notes: <!-- One-line Change Summary Here-->`,
     });
 
     it('succeeds the backport validity check if all checks pass', async () => {
-      (getPRNumbersFromPRBody as jest.Mock).mockReturnValueOnce([1234]);
-      (octokit.pulls.get as jest.Mock).mockResolvedValueOnce({
+      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
+      octokit.pulls.get.mockResolvedValueOnce({
         data: {
           merged: true,
           base: {
@@ -602,15 +586,14 @@ Notes: <!-- One-line Change Summary Here-->`,
         },
       });
       const event = JSON.parse(
-        (await fs.readFile(newPRBackportOpenedEventPath, 'utf-8')) as string,
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
       event.payload.pull_request.base.ref = '30-x-y';
       event.payload.action = 'synchronize';
       await robot.receive(event);
 
-      const updatePayload = (
-        checkUtils.updateBackportValidityCheck as jest.Mock
-      ).mock.calls[0][2];
+      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Valid Backport',

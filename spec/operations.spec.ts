@@ -22,7 +22,7 @@ const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.j
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 
 jest.mock('../src/utils', () => ({
-  tagBackportReviewers: jest.fn().mockReturnValue(Promise.resolve()),
+  tagBackportReviewers: jest.fn().mockResolvedValue(undefined),
   isSemverMinorPR: jest.fn().mockReturnValue(false),
 }));
 
@@ -125,11 +125,11 @@ describe('runner', () => {
   describe('updateManualBackport()', () => {
     const octokit = {
       pulls: {
-        get: jest.fn().mockReturnValue(Promise.resolve({})),
+        get: jest.fn().mockResolvedValue({}),
       },
       issues: {
-        createComment: jest.fn().mockReturnValue(Promise.resolve({})),
-        listComments: jest.fn().mockReturnValue(Promise.resolve({ data: [] })),
+        createComment: jest.fn().mockResolvedValue({}),
+        listComments: jest.fn().mockResolvedValue({ data: [] }),
       },
     };
 
