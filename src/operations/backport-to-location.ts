@@ -8,9 +8,9 @@ import { SimpleWebHookRepoContext, WebHookPR } from '../types';
 /**
  * Performs a backport to a specified label representing a branch.
  *
- * @param {Probot} robot - an instance of Probot
- * @param {WebHookRepoContext} context - the context of the event that was triggered
- * @param {PullsGetResponseLabelsItem} label - the label representing the target branch for backporting
+ * @param robot - an instance of Probot
+ * @param context - the context of the event that was triggered
+ * @param label - the label representing the target branch for backporting
  */
 export const backportToLabel = async (
   robot: Probot,
@@ -59,9 +59,9 @@ export const backportToLabel = async (
 /**
  * Performs a backport to a specified target branch.
  *
- * @param {Probot} robot - an instance of Probot
- * @param {WebHookRepoContext} context - the context of the event that was triggered
- * @param {string} targetBranch - the branch to which the backport will be performed
+ * @param robot - an instance of Probot
+ * @param context - the context of the event that was triggered
+ * @param targetBranch - the branch to which the backport will be performed
  */
 export const backportToBranch = async (
   robot: Probot,
