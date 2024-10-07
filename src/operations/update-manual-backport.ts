@@ -4,7 +4,7 @@ import {
   SKIP_CHECK_LABEL,
 } from '../constants';
 import { PRChange, PRStatus, LogLevel } from '../enums';
-import { WebHookPRContext } from '../types';
+import { WebHookPR, WebHookPRContext } from '../types';
 import { isSemverMinorPR, tagBackportReviewers } from '../utils';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
