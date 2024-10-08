@@ -20,12 +20,12 @@ const cleanRawGitString = (s: string) => {
 /**
  * Runs the git commands to apply backports in a series of cherry-picked commits.
  *
- * @param {BackportOptions} options - an object containing:
+ * @param options - an object containing:
  *   1) dir - the repo directory
  *   2) targetBranch - the target branch
  *   3) patches - a list of patches to apply to the target branch
  *   4) tempBranch - the temporary branch to PR against the target branch
- * @returns {Object} - an object containing the repo initialization directory
+ * @returns false on failure, otherwise an object containing the repo initialization directory
  */
 export const backportCommitsToBranch = async (options: BackportOptions) => {
   log(

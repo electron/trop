@@ -13,9 +13,9 @@ import { log } from '../utils/log-util';
  * Updates the labels on a backport's original PR as well as comments with links
  * to the backport if it's a newly opened PR.
  *
- * @param {Context} context - the context of the event that was triggered
- * @param {PRChange} type - the type of PR status change: either OPEN or CLOSE
- * @param {number} oldPRNumber - the number corresponding to the backport's original PR
+ * @param context - the context of the event that was triggered
+ * @param type - the type of PR status change: either OPEN or CLOSE
+ * @param oldPRNumber - the number corresponding to the backport's original PR
  */
 export const updateManualBackport = async (
   context: WebHookPRContext,
