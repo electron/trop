@@ -27,8 +27,8 @@ export const updateManualBackport = async (
   const newPRLabelsToAdd = [pr.base.ref];
 
   // Changed labels on the original PR.
-  let labelToAdd;
-  let labelToRemove;
+  let labelToAdd: string | undefined;
+  let labelToRemove: string;
 
   log(
     'updateManualBackport',
