@@ -6,9 +6,9 @@ import { SimpleWebHookRepoContext } from '../types';
 /**
  * Creates and returns an installation token for a GitHub App.
  *
- * @param {Application} robot - an instance of Probot
- * @param {Context} context - the context of the event that was triggered
- * @returns {Promise<string>} - a string representing a GitHub App installation token
+ * @param robot - an instance of Probot
+ * @param context - the context of the event that was triggered
+ * @returns a string representing a GitHub App installation token
  */
 export const getRepoToken = async (
   robot: Probot,

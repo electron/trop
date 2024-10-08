@@ -45,8 +45,8 @@ async function updateRepoCache({ slug, accessToken }: InitRepoOptions) {
 /**
  * Initializes the cloned repo trop will use to run backports.
  *
- * @param {InitRepoOptions} options - repo and payload for repo initialization
- * @returns {{dir: string}} - an object containing the repo initialization directory
+ * @param options - repo and payload for repo initialization
+ * @returns an object containing the repo initialization directory
  */
 export const initRepo = async ({
   slug,

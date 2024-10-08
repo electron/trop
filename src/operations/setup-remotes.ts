@@ -6,10 +6,10 @@ import { LogLevel } from '../enums';
 /**
  * Sets up remotes that trop will run backports with.
  *
- * @param {RemotesOptions} options - an object containing:
+ * @param options - an object containing:
  *  1) dir - the repo directory
  *  2) remotes - the list of remotes to set on the initialized git repository
- * @returns {Object} - an object containing the repo initialization directory
+ * @returns an object containing the repo initialization directory
  */
 export const setupRemotes = async (options: RemotesOptions) => {
   log('setupRemotes', LogLevel.INFO, 'Setting up git remotes');

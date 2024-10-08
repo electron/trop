@@ -66,8 +66,8 @@ function comparePart(a: string, b: string): number {
 /**
  * Fetches an array of the currently supported branches for a repository.
  *
- * @param {Context} context - the context of the event that was triggered
- * @returns {Promise<string[]>} - an array of currently supported branches in x-y-z format
+ * @param context - the context of the event that was triggered
+ * @returns an array of currently supported branches in x-y-z format
  */
 export async function getSupportedBranches(
   context: Pick<WebHookRepoContext, 'octokit' | 'repo'>,
