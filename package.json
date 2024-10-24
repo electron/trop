@@ -52,9 +52,5 @@
   "engines": {
     "node": ">= 20.7.0",
     "npm": ">= 4.0.0"
-  },
-  "resolutions": {
-    "config-yml/shelljs": "0.8.5",
-    "config-yml/yargs": "17.6.2"
   }
 }
