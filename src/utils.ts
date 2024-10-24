@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import * as fs from 'fs-extra';
 import { execSync } from 'child_process';
 import Queue from 'queue';
