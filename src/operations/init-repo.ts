@@ -1,5 +1,5 @@
 import { parse } from 'yaml';
-import * as fs from 'fs-extra';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit, { CheckRepoActions } from 'simple-git';
@@ -24,7 +24,7 @@ function mutexForRepoCache(slug: string) {
 async function updateRepoCache({ slug, accessToken }: InitRepoOptions) {
   const cacheDir = path.resolve(baseDir, slug, 'git-cache');
 
-  await fs.mkdirp(cacheDir);
+  await fs.promises.mkdir(cacheDir, { recursive: true });
   const git = simpleGit(cacheDir);
   if (!(await git.checkIsRepo(CheckRepoActions.BARE))) {
     // The repo might be missing, or otherwise somehow corrupt. Re-clone it.
@@ -33,8 +33,8 @@ async function updateRepoCache({ slug, accessToken }: InitRepoOptions) {
       LogLevel.INFO,
       `${cacheDir} was not a git repo, cloning...`,
     );
-    await fs.remove(cacheDir);
-    await fs.mkdirp(cacheDir);
+    await fs.promises.rm(cacheDir, { recursive: true, force: true });
+    await fs.promises.mkdir(cacheDir, { recursive: true });
     await git.clone(githubUrl({ slug, accessToken }), '.', ['--bare']);
   }
   await git.fetch();
@@ -54,9 +54,9 @@ export const initRepo = async ({
 }: InitRepoOptions): Promise<{ dir: string }> => {
   log('initRepo', LogLevel.INFO, 'Setting up local repository');
 
-  await fs.mkdirp(path.resolve(baseDir, slug));
+  await fs.promises.mkdir(path.resolve(baseDir, slug), { recursive: true });
   const prefix = path.resolve(baseDir, slug, 'job-');
-  const dir = await fs.mkdtemp(prefix);
+  const dir = await fs.promises.mkdtemp(prefix);
   const git = simpleGit(dir);
 
   // Concurrent access to the repo cache has the potential to mess things up.
