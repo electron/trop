@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import fetch from 'node-fetch';
 import { execSync } from 'child_process';
 import Queue from 'queue';
 import simpleGit from 'simple-git';
