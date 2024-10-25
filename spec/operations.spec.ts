@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import * as fs from 'fs-extra';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
@@ -39,7 +39,7 @@ describe('runner', () => {
 
   afterEach(async () => {
     if (dirObject && dirObject.dir) {
-      await fs.remove(dirObject.dir);
+      await fs.promises.rm(dirObject.dir, { force: true, recursive: true });
     }
   });
 
@@ -51,8 +51,8 @@ describe('runner', () => {
           accessToken: '',
         }),
       );
-      expect(await fs.pathExists(dir)).toBe(true);
-      expect(await fs.pathExists(path.resolve(dir, '.git'))).toBe(true);
+      expect(fs.existsSync(dir)).toBe(true);
+      expect(fs.existsSync(path.resolve(dir, '.git'))).toBe(true);
     });
 
     it('should fail if the github repository does not exist', async () => {
@@ -69,14 +69,14 @@ describe('runner', () => {
     let dir: string;
 
     beforeEach(async () => {
-      dir = await fs.mkdtemp(path.resolve(os.tmpdir(), 'trop-spec-'));
-      await fs.mkdirp(dir);
+      dir = await fs.promises.mkdtemp(path.resolve(os.tmpdir(), 'trop-spec-'));
+      await fs.promises.mkdir(dir, { recursive: true });
       spawnSync('git', ['init'], { cwd: dir });
     });
 
     afterEach(async () => {
-      if (await fs.pathExists(dir)) {
-        await fs.remove(dir);
+      if (fs.existsSync(dir)) {
+        await fs.promises.rm(dir, { force: true, recursive: true });
       }
     });
 

@@ -1,4 +1,4 @@
-import * as fs from 'fs-extra';
+import * as fs from 'fs';
 import { execSync } from 'child_process';
 import Queue from 'queue';
 import simpleGit from 'simple-git';
@@ -717,7 +717,7 @@ export const backportImpl = async (
         }),
       );
 
-      await fs.remove(createdDir);
+      await fs.promises.rm(createdDir, { force: true, recursive: true });
     },
     async () => {
       let annotations: unknown[] | null = null;
@@ -758,7 +758,7 @@ export const backportImpl = async (
           }
         }
 
-        await fs.remove(createdDir);
+        await fs.promises.rm(createdDir, { force: true, recursive: true });
       }
 
       if (purpose === BackportPurpose.ExecuteBackport) {

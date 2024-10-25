@@ -1,4 +1,4 @@
-import * as fs from 'fs-extra';
+import * as fs from 'fs';
 import * as path from 'path';
 import simpleGit from 'simple-git';
 import { BackportOptions } from '../interfaces';
@@ -77,7 +77,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
 
   for (const patch of options.patches) {
     try {
-      await fs.writeFile(patchPath, patch, 'utf8');
+      await fs.promises.writeFile(patchPath, patch, 'utf8');
       await git.raw(['am', '-3', '--keep-cr', patchPath]);
     } catch (error) {
       log(
@@ -89,8 +89,8 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
 
       return false;
     } finally {
-      if (await fs.pathExists(patchPath)) {
-        await fs.remove(patchPath);
+      if (fs.existsSync(patchPath)) {
+        await fs.promises.rm(patchPath, { force: true, recursive: true });
       }
     }
   }
@@ -131,7 +131,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
           tree: await Promise.all(
             changedFiles.map(async (changedFile) => {
               const onDiskPath = path.resolve(options.dir, changedFile);
-              if (!(await fs.pathExists(onDiskPath))) {
+              if (!fs.existsSync(onDiskPath)) {
                 return {
                   path: changedFile,
                   mode: '100644',
@@ -139,8 +139,8 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
                   sha: null,
                 };
               }
-              const fileContents = await fs.readFile(onDiskPath);
-              const stat = await fs.stat(onDiskPath);
+              const fileContents = await fs.promises.readFile(onDiskPath);
+              const stat = await fs.promises.stat(onDiskPath);
               const userMode = (stat.mode & parseInt('777', 8)).toString(8)[0];
               if (isUtf8(fileContents)) {
                 return {
