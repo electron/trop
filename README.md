@@ -1,6 +1,6 @@
-[![CircleCI](https://dl.circleci.com/status-badge/img/gh/electron/trop/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/electron/trop/tree/main)
-
 # trop
+
+[![Test](https://github.com/electron/trop/actions/workflows/test.yml/badge.svg)](https://github.com/electron/trop/actions/workflows/test.yml)
 
 > a GitHub App built with [probot](https://github.com/probot/probot) that automates the process of backporting features and bugfixes.
 
@@ -24,7 +24,6 @@ npm install
 # Run the bot
 npm start
 ```
-
 
 ## Documentation
 
