@@ -1,12 +1,14 @@
 import { promises as fs } from 'fs';
-import * as nock from 'nock';
 import { posix as path } from 'path';
+import { execSync } from 'child_process';
 
+import nock from 'nock';
 import { Probot, ProbotOctokit } from 'probot';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SKIP_CHECK_LABEL } from '../src/constants';
 import { CheckRunStatus, PRChange } from '../src/enums';
-import { ProbotHandler } from '../src/index';
+import { default as trop } from '../src/index';
 import {
   backportToBranch,
   backportToLabel,
@@ -15,8 +17,6 @@ import { updateManualBackport } from '../src/operations/update-manual-backport';
 
 import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
 import * as checkUtils from '../src/utils/checks-util';
-
-const trop: ProbotHandler = require('../src/index');
 
 // event fixtures
 const prClosedEvent = require('./fixtures/pull_request.closed.json');
@@ -53,51 +53,51 @@ const targetLabel = {
   color: 'fff',
 };
 
-jest.mock('../src/utils', () => ({
-  labelClosedPR: jest.fn(),
-  isAuthorizedUser: jest.fn().mockResolvedValue([true]),
-  getPRNumbersFromPRBody: jest.fn().mockReturnValue([12345]),
+vi.mock('../src/utils', () => ({
+  labelClosedPR: vi.fn(),
+  isAuthorizedUser: vi.fn().mockResolvedValue([true]),
+  getPRNumbersFromPRBody: vi.fn().mockReturnValue([12345]),
 }));
 
-jest.mock('../src/utils/env-util', () => ({
-  getEnvVar: jest.fn(),
+vi.mock('../src/utils/env-util', () => ({
+  getEnvVar: vi.fn(),
 }));
 
-jest.mock('../src/operations/update-manual-backport', () => ({
-  updateManualBackport: jest.fn(),
+vi.mock('../src/operations/update-manual-backport', () => ({
+  updateManualBackport: vi.fn(),
 }));
 
-jest.mock('../src/operations/backport-to-location', () => ({
-  backportToBranch: jest.fn(),
-  backportToLabel: jest.fn(),
+vi.mock('../src/operations/backport-to-location', () => ({
+  backportToBranch: vi.fn(),
+  backportToLabel: vi.fn(),
 }));
 
-jest.mock('../src/utils/checks-util', () => ({
-  updateBackportValidityCheck: jest.fn(),
-  getBackportInformationCheck: jest.fn().mockResolvedValue({ status: 'thing' }),
-  updateBackportInformationCheck: jest.fn().mockResolvedValue(undefined),
-  queueBackportInformationCheck: jest.fn().mockResolvedValue(undefined),
+vi.mock('../src/utils/checks-util', () => ({
+  updateBackportValidityCheck: vi.fn(),
+  getBackportInformationCheck: vi.fn().mockResolvedValue({ status: 'thing' }),
+  updateBackportInformationCheck: vi.fn().mockResolvedValue(undefined),
+  queueBackportInformationCheck: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('trop', () => {
   let robot: Probot;
   let octokit: any;
-  process.env = { BOT_USER_NAME: 'trop[bot]' };
+  process.env = { ...process.env, BOT_USER_NAME: 'trop[bot]' };
 
   beforeEach(() => {
     nock.disableNetConnect();
     octokit = {
       repos: {
-        getBranch: jest.fn().mockResolvedValue(undefined),
-        listBranches: jest.fn().mockResolvedValue({
+        getBranch: vi.fn().mockResolvedValue(undefined),
+        listBranches: vi.fn().mockResolvedValue({
           data: [{ name: '8-x-y' }, { name: '7-1-x' }],
         }),
       },
       git: {
-        deleteRef: jest.fn().mockResolvedValue(undefined),
+        deleteRef: vi.fn().mockResolvedValue(undefined),
       },
       pulls: {
-        get: jest.fn().mockResolvedValue({
+        get: vi.fn().mockResolvedValue({
           data: {
             merged: true,
             head: {
@@ -114,11 +114,11 @@ describe('trop', () => {
         }),
       },
       issues: {
-        addLabels: jest.fn().mockResolvedValue({}),
-        removeLabel: jest.fn().mockResolvedValue({}),
-        createLabel: jest.fn().mockResolvedValue({}),
-        createComment: jest.fn().mockResolvedValue({}),
-        listLabelsOnIssue: jest.fn().mockResolvedValue({
+        addLabels: vi.fn().mockResolvedValue({}),
+        removeLabel: vi.fn().mockResolvedValue({}),
+        createLabel: vi.fn().mockResolvedValue({}),
+        createComment: vi.fn().mockResolvedValue({}),
+        listLabelsOnIssue: vi.fn().mockResolvedValue({
           data: [
             {
               id: 208045946,
@@ -131,8 +131,8 @@ describe('trop', () => {
         }),
       },
       checks: {
-        listForRef: jest.fn().mockResolvedValue({ data: { check_runs: [] } }),
-        create: jest.fn().mockResolvedValue({ data: jest.fn() }),
+        listForRef: vi.fn().mockResolvedValue({ data: { check_runs: [] } }),
+        create: vi.fn().mockResolvedValue({ data: vi.fn() }),
       },
     };
 
@@ -163,7 +163,7 @@ describe('trop', () => {
     });
 
     it('does not trigger the backport on comment if the PR is not merged', async () => {
-      octokit.pulls.get = jest
+      octokit.pulls.get = vi
         .fn()
         .mockResolvedValue({ data: { merged: false } });
 
@@ -199,7 +199,7 @@ describe('trop', () => {
     });
 
     it('does not trigger the backport on comment to a targeted branch if the branch does not exist', async () => {
-      octokit.repos.getBranch = jest
+      octokit.repos.getBranch = vi
         .fn()
         .mockReturnValue(Promise.reject(new Error('404')));
       await robot.receive(issueCommentBackportToCreatedEvent);
@@ -230,7 +230,7 @@ describe('trop', () => {
     });
 
     it('fails the check if there is conflicting backport information in a new PR', async () => {
-      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       const event = JSON.parse(
         await fs.readFile(newPROpenedEventPath, 'utf-8'),
@@ -240,9 +240,8 @@ describe('trop', () => {
 
       await robot.receive(event);
 
-      const updatePayload = jest.mocked(
-        checkUtils.updateBackportInformationCheck,
-      ).mock.calls[0][2];
+      const updatePayload = vi.mocked(checkUtils.updateBackportInformationCheck)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Conflicting Backport Information',
@@ -253,7 +252,7 @@ describe('trop', () => {
     });
 
     it('passes the check if there is a "no-backport" label and no "target/" label in a new PR', async () => {
-      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       const event = JSON.parse(
         await fs.readFile(newPROpenedEventPath, 'utf-8'),
@@ -263,9 +262,8 @@ describe('trop', () => {
 
       await robot.receive(event);
 
-      const updatePayload = jest.mocked(
-        checkUtils.updateBackportInformationCheck,
-      ).mock.calls[0][2];
+      const updatePayload = vi.mocked(checkUtils.updateBackportInformationCheck)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Backport Information Provided',
@@ -275,7 +273,7 @@ describe('trop', () => {
     });
 
     it('passes the check if there is no "no-backport" label and a "target/" label in a new PR', async () => {
-      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       const event = JSON.parse(
         await fs.readFile(newPROpenedEventPath, 'utf-8'),
@@ -285,9 +283,8 @@ describe('trop', () => {
 
       await robot.receive(event);
 
-      const updatePayload = jest.mocked(
-        checkUtils.updateBackportInformationCheck,
-      ).mock.calls[0][2];
+      const updatePayload = vi.mocked(checkUtils.updateBackportInformationCheck)
+        .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
         title: 'Backport Information Provided',
@@ -334,7 +331,7 @@ Notes: <!-- One-line Change Summary Here-->`,
         },
       };
 
-      expect(jest.mocked(labelClosedPR)).toHaveBeenCalledWith(
+      expect(vi.mocked(labelClosedPR)).toHaveBeenCalledWith(
         expect.anything(),
         pr,
         '5-0-x',
@@ -372,7 +369,7 @@ Notes: <!-- One-line Change Summary Here-->`,
         },
       };
 
-      expect(jest.mocked(labelClosedPR)).toHaveBeenCalledWith(
+      expect(vi.mocked(labelClosedPR)).toHaveBeenCalledWith(
         expect.anything(),
         pr,
         '4-0-x',
@@ -418,7 +415,7 @@ Notes: <!-- One-line Change Summary Here-->`,
 
       expect(updateManualBackport).toHaveBeenCalled();
 
-      expect(jest.mocked(labelClosedPR)).toHaveBeenCalledWith(
+      expect(vi.mocked(labelClosedPR)).toHaveBeenCalledWith(
         expect.anything(),
         pr,
         '4-0-x',
@@ -464,7 +461,7 @@ Notes: <!-- One-line Change Summary Here-->`,
 
       expect(updateManualBackport).toHaveBeenCalled();
 
-      expect(jest.mocked(labelClosedPR)).toHaveBeenCalledWith(
+      expect(vi.mocked(labelClosedPR)).toHaveBeenCalledWith(
         expect.anything(),
         pr,
         '4-0-x',
@@ -475,7 +472,7 @@ Notes: <!-- One-line Change Summary Here-->`,
 
   describe('updateBackportValidityCheck from pull_request events', () => {
     it('skips the backport validity check if there is skip check label in a new PR', async () => {
-      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
       octokit.issues.listLabelsOnIssue.mockResolvedValue({
         data: [
           {
@@ -490,7 +487,7 @@ Notes: <!-- One-line Change Summary Here-->`,
       event.payload.pull_request.base.ref = '30-x-y';
       await robot.receive(event);
 
-      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+      const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
         .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
@@ -501,7 +498,7 @@ Notes: <!-- One-line Change Summary Here-->`,
     });
 
     it('cancels the backport validity check if branch is targeting main', async () => {
-      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       const event = JSON.parse(
         await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
@@ -509,7 +506,7 @@ Notes: <!-- One-line Change Summary Here-->`,
 
       await robot.receive(event);
 
-      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+      const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
         .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
@@ -520,7 +517,7 @@ Notes: <!-- One-line Change Summary Here-->`,
     });
 
     it('fails the backport validity check if old PR was not merged to a supported release branch', async () => {
-      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
       octokit.pulls.get.mockResolvedValueOnce({
         data: {
           merged: true,
@@ -536,7 +533,7 @@ Notes: <!-- One-line Change Summary Here-->`,
       event.payload.action = 'synchronize';
       await robot.receive(event);
 
-      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+      const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
         .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
@@ -548,7 +545,7 @@ Notes: <!-- One-line Change Summary Here-->`,
     });
 
     it('fails the backport validity check if old PR has not been merged yet', async () => {
-      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
       octokit.pulls.get.mockResolvedValueOnce({
         data: {
           merged: false,
@@ -564,7 +561,7 @@ Notes: <!-- One-line Change Summary Here-->`,
       event.payload.action = 'synchronize';
       await robot.receive(event);
 
-      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+      const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
         .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({
@@ -576,7 +573,7 @@ Notes: <!-- One-line Change Summary Here-->`,
     });
 
     it('succeeds the backport validity check if all checks pass', async () => {
-      jest.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
       octokit.pulls.get.mockResolvedValueOnce({
         data: {
           merged: true,
@@ -592,7 +589,7 @@ Notes: <!-- One-line Change Summary Here-->`,
       event.payload.action = 'synchronize';
       await robot.receive(event);
 
-      const updatePayload = jest.mocked(checkUtils.updateBackportValidityCheck)
+      const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
         .mock.calls[0][2];
 
       expect(updatePayload).toMatchObject({

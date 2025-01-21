@@ -1,11 +1,13 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import * as logUtils from '../src/utils/log-util';
 import { LogLevel } from '../src/enums';
 import { tagBackportReviewers } from '../src/utils';
 
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 
-jest.mock('../src/constants', () => ({
-  ...jest.requireActual('../src/constants'),
+vi.mock('../src/constants', async () => ({
+  ...(await vi.importActual('../src/constants')),
   DEFAULT_BACKPORT_REVIEW_TEAM: 'electron/wg-releases',
 }));
 
@@ -13,10 +15,10 @@ describe('utils', () => {
   describe('tagBackportReviewers()', () => {
     const octokit = {
       pulls: {
-        requestReviewers: jest.fn(),
+        requestReviewers: vi.fn(),
       },
       repos: {
-        getCollaboratorPermissionLevel: jest.fn().mockResolvedValue({
+        getCollaboratorPermissionLevel: vi.fn().mockResolvedValue({
           data: {
             permission: 'admin',
           },
@@ -26,11 +28,11 @@ describe('utils', () => {
 
     const context = {
       octokit,
-      repo: jest.fn((obj) => obj),
+      repo: vi.fn((obj) => obj),
       ...backportPROpenedEvent,
     };
 
-    beforeEach(() => jest.clearAllMocks());
+    beforeEach(() => vi.clearAllMocks());
 
     it('correctly tags team reviewers when user is undefined', async () => {
       await tagBackportReviewers({ context, targetPrNumber: 1234 });
@@ -55,11 +57,9 @@ describe('utils', () => {
 
     it('logs an error if requestReviewers throws an error', async () => {
       const error = new Error('Request failed');
-      context.octokit.pulls.requestReviewers = jest
-        .fn()
-        .mockRejectedValue(error);
+      context.octokit.pulls.requestReviewers = vi.fn().mockRejectedValue(error);
 
-      const logSpy = jest.spyOn(logUtils, 'log');
+      const logSpy = vi.spyOn(logUtils, 'log');
       await tagBackportReviewers({ context, targetPrNumber: 1234 });
 
       expect(octokit.pulls.requestReviewers).toHaveBeenCalled();

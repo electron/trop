@@ -1,3 +1,5 @@
+import { describe, expect, it } from 'vitest';
+
 import { BranchMatcher, getBackportPattern } from '../src/utils/branch-util';
 
 describe('getBackportPattern', () => {

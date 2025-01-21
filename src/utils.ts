@@ -480,7 +480,7 @@ export const backportImpl = async (
     }
   }
 
-  const gitExists = execSync('which git').toString().trim();
+  const gitExists = execSync('which git', { encoding: 'utf-8' }).trim();
   if (/git not found/.test(gitExists)) {
     await context.octokit.issues.createComment(
       context.repo({

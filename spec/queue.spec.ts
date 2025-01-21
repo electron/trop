@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events';
 
+import { describe, expect, it, vi } from 'vitest';
+
 import { ExecutionQueue } from '../src/Queue';
 
 const waitForEvent = (emitter: EventEmitter, event: string) => {
@@ -21,8 +23,8 @@ const delayedEvent = async (
 const fakeTask = (name: string) => {
   const namedArgs = {
     name,
-    taskRunner: jest.fn().mockResolvedValue(undefined),
-    errorHandler: jest.fn().mockResolvedValue(undefined),
+    taskRunner: vi.fn().mockResolvedValue(undefined),
+    errorHandler: vi.fn().mockResolvedValue(undefined),
     args: () =>
       [name, namedArgs.taskRunner, namedArgs.errorHandler] as [
         string,
