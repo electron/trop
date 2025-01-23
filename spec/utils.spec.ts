@@ -1,8 +1,15 @@
-import * as logUtils from '../src/utils/log-util';
 import { LogLevel } from '../src/enums';
-import { tagBackportReviewers } from '../src/utils';
+import {
+  tagBackportReviewers,
+  isValidManualBackportReleaseNotes,
+} from '../src/utils';
+import * as utils from '../src/utils';
+import * as logUtils from '../src/utils/log-util';
 
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
+const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
+const PROpenedEvent = require('./fixtures/pull_request.opened.json');
+const PRClosedEvent = require('./fixtures/pull_request.closed.json');
 
 jest.mock('../src/constants', () => ({
   ...jest.requireActual('../src/constants'),
@@ -70,6 +77,53 @@ describe('utils', () => {
         `Failed to request reviewers for PR #1234`,
         error,
       );
+    });
+  });
+
+  describe('isValidManualBackportReleaseNotes', () => {
+    const backportPRMissingReleaseNotes = backportPROpenedEvent;
+    const backportPRWithReleaseNotes = backportPRMergedEvent;
+    const originalPRWithReleaseNotes = PROpenedEvent.payload.pull_request;
+    const originalPRMissingReleaseNotes = PRClosedEvent.payload.pull_request;
+    const originalPRWithReleaseNotes2 =
+      backportPRMergedEvent.payload.pull_request;
+
+    it('should return valid if release notes match original PR for single PR', async () => {
+      const context = { ...backportPRWithReleaseNotes };
+      expect(
+        await isValidManualBackportReleaseNotes(context, [
+          originalPRWithReleaseNotes,
+        ]),
+      ).toBe(true);
+    });
+
+    it('should return valid if release notes match original PR for multiple PR', async () => {
+      const context = { ...backportPRWithReleaseNotes };
+      expect(
+        await isValidManualBackportReleaseNotes(context, [
+          originalPRWithReleaseNotes,
+          originalPRMissingReleaseNotes,
+        ]),
+      ).toBe(true);
+    });
+
+    it('should return not valid if release notes do not match original PR for single PR', async () => {
+      const context = { ...backportPRMissingReleaseNotes };
+      expect(
+        await isValidManualBackportReleaseNotes(context, [
+          originalPRWithReleaseNotes,
+        ]),
+      ).toBe(false);
+    });
+
+    it('should return not valid if release notes do not match original PR for multiple PR', async () => {
+      const context = { ...backportPRMissingReleaseNotes };
+      expect(
+        await isValidManualBackportReleaseNotes(context, [
+          originalPRWithReleaseNotes,
+          originalPRWithReleaseNotes2,
+        ]),
+      ).toBe(false);
     });
   });
 });

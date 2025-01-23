@@ -4,6 +4,7 @@ import {
   backportImpl,
   getPRNumbersFromPRBody,
   isAuthorizedUser,
+  isValidManualBackportReleaseNotes,
   labelClosedPR,
 } from './utils';
 import {
@@ -254,8 +255,6 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         ];
         const FASTTRACK_LABELS: string[] = ['fast-track 🚅'];
 
-        const failureMap = new Map();
-
         // There are several types of PRs which might not target main yet which are
         // inherently valid; e.g roller-bot PRs. Check for and allow those here.
         if (oldPRNumbers.length === 0) {
@@ -291,7 +290,9 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
           robot.log(
             `#${pr.number} has backport numbers - checking their validity now`,
           );
+          const failureMap = new Map();
           const supported = await getSupportedBranches(context);
+          const oldPRs = [];
 
           for (const oldPRNumber of oldPRNumbers) {
             robot.log(`Checking validity of #${oldPRNumber}`);
@@ -300,6 +301,8 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
                 pull_number: oldPRNumber,
               }),
             );
+
+            oldPRs.push(oldPR);
 
             // The current PR is only valid if the PR it is backporting
             // was merged to main or to a supported release branch.
@@ -317,29 +320,48 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
               failureMap.set(oldPRNumber, cause);
             }
           }
-        }
 
-        for (const oldPRNumber of oldPRNumbers) {
-          if (failureMap.has(oldPRNumber)) {
-            robot.log(
-              `#${pr.number} is targeting a branch that is not ${
-                pr.base.repo.default_branch
-              } - ${failureMap.get(oldPRNumber)}`,
+          for (const oldPRNumber of oldPRNumbers) {
+            if (failureMap.has(oldPRNumber)) {
+              robot.log(
+                `#${pr.number} is targeting a branch that is not ${
+                  pr.base.repo.default_branch
+                } - ${failureMap.get(oldPRNumber)}`,
+              );
+              await updateBackportValidityCheck(context, checkRun, {
+                title: 'Invalid Backport',
+                summary: `This PR is targeting a branch that is not ${
+                  pr.base.repo.default_branch
+                } but ${failureMap.get(oldPRNumber)}`,
+                conclusion: CheckRunStatus.FAILURE,
+              });
+            } else {
+              robot.log(`#${pr.number} is a valid backport of #${oldPRNumber}`);
+              await updateBackportValidityCheck(context, checkRun, {
+                title: 'Valid Backport',
+                summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into ${pr.base.repo.default_branch}`,
+                conclusion: CheckRunStatus.SUCCESS,
+              });
+            }
+          }
+
+          if (['opened', 'edited'].includes(action)) {
+            robot.log(`Checking validity of release notes`);
+            // Check to make sure backport PR has the same release notes as at least one of the old prs
+            const isValidReleaseNotes = await isValidManualBackportReleaseNotes(
+              context,
+              oldPRs as WebHookPR[],
             );
-            await updateBackportValidityCheck(context, checkRun, {
-              title: 'Invalid Backport',
-              summary: `This PR is targeting a branch that is not ${
-                pr.base.repo.default_branch
-              } but ${failureMap.get(oldPRNumber)}`,
-              conclusion: CheckRunStatus.FAILURE,
-            });
-          } else {
-            robot.log(`#${pr.number} is a valid backport of #${oldPRNumber}`);
-            await updateBackportValidityCheck(context, checkRun, {
-              title: 'Valid Backport',
-              summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into ${pr.base.repo.default_branch}`,
-              conclusion: CheckRunStatus.SUCCESS,
-            });
+
+            if (!isValidReleaseNotes) {
+              await updateBackportValidityCheck(context, checkRun, {
+                title: 'Invalid Backport',
+                summary: `The release notes of the backport PR do not match those of ${oldPRNumbers
+                  .map((pr) => `#${pr}`)
+                  .join(', ')}.`,
+                conclusion: CheckRunStatus.FAILURE,
+              });
+            }
           }
         }
       } else {

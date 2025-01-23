@@ -28,6 +28,7 @@ import {
   SimpleWebHookRepoContext,
   WebHookIssueContext,
   WebHookPR,
+  WebHookPRContext,
   WebHookRepoContext,
 } from './types';
 import { Probot } from 'probot';
@@ -303,7 +304,7 @@ export const getPRNumbersFromPRBody = (pr: WebHookPR, checkNotBot = false) => {
  * @param context Context
  * @param pr Pull Request
  */
-const getOriginalBackportNumber = async (
+export const getOriginalBackportNumber = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
 ) => {
@@ -370,6 +371,23 @@ const checkUserHasWriteAccess = async (
   return ['write', 'admin'].includes(userInfo.permission);
 };
 
+const getReleaseNotes = (pr: Pick<WebHookPR, 'body'>) => {
+  const onelineMatch = pr.body?.match(
+    /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi,
+  );
+  const multilineMatch = pr.body?.match(
+    /(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/gi,
+  );
+
+  if (onelineMatch && onelineMatch[0]) {
+    return `\n\n${onelineMatch[0]}`;
+  } else if (multilineMatch && multilineMatch[0]) {
+    return `\n\n${multilineMatch[0]}`;
+  } else {
+    return '\n\nNotes: no-notes';
+  }
+};
+
 const createBackportComment = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
@@ -382,23 +400,9 @@ const createBackportComment = async (
     `Creating backport comment for #${prNumber}`,
   );
 
-  let body = `Backport of #${prNumber}\n\nSee that PR for details.`;
-
-  const onelineMatch = pr.body?.match(
-    /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi,
-  );
-  const multilineMatch = pr.body?.match(
-    /(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/gi,
-  );
-
+  const releaseNotes = getReleaseNotes(pr);
   // attach release notes to backport PR body
-  if (onelineMatch && onelineMatch[0]) {
-    body += `\n\n${onelineMatch[0]}`;
-  } else if (multilineMatch && multilineMatch[0]) {
-    body += `\n\n${multilineMatch[0]}`;
-  } else {
-    body += '\n\nNotes: no-notes';
-  }
+  const body = `Backport of #${prNumber}\n\nSee that PR for details.${releaseNotes}`;
 
   return body;
 };
@@ -814,4 +818,12 @@ export const backportImpl = async (
       }
     },
   );
+};
+
+export const isValidManualBackportReleaseNotes = async (
+  context: WebHookPRContext,
+  oldPRs: WebHookPR[],
+) => {
+  const backportPRReleaseNotes = getReleaseNotes(context.payload.pull_request);
+  return oldPRs.some((pr) => getReleaseNotes(pr) === backportPRReleaseNotes);
 };
