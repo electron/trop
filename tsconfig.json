@@ -21,6 +21,6 @@
 		"spec",
 		"lib",
 		"working",
-		"jest.config.js"
+		"vitest.config.ts"
 	]
 }

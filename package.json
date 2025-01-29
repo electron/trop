@@ -11,7 +11,7 @@
     "start": "probot run ./lib/index.js",
     "prettier:write": "prettier --write \"{src,spec}/**/*.ts\"",
     "lint": "prettier --check \"{src,spec}/**/*.ts\"",
-    "test": "jest --testPathIgnorePatterns=/working/ --testPathIgnorePatterns=/node_modules/",
+    "test": "vitest run",
     "postinstall": "tsc",
     "prepare": "husky"
   },
@@ -27,7 +27,6 @@
     "yaml": "^2.3.1"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.14",
     "@types/node": "^22.9.0",
     "@types/node-fetch": "^2.6.11",
     "@types/pino-std-serializers": "^4.0.0",
@@ -38,13 +37,12 @@
     "eslint-plugin-n": "^15.0.0",
     "eslint-plugin-promise": "^6.0.0",
     "husky": "^9.1.6",
-    "jest": "^29.7.0",
     "lint-staged": "^15.2.10",
     "nock": "^13.5.5",
     "prettier": "^3.3.3",
     "smee-client": "^2.0.4",
-    "ts-jest": "^29.2.5",
-    "typescript": "*"
+    "typescript": "*",
+    "vitest": "^3.0.2"
   },
   "lint-staged": {
     "{src,spec}/**/*.ts": "prettier --write **/*.ts"

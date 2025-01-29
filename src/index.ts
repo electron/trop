@@ -146,7 +146,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     }
   };
 
-  const gitExists = execSync('which git').toString().trim();
+  const gitExists = execSync('which git', { encoding: 'utf-8' }).trim();
   if (/git not found/.test(gitExists)) {
     robot.log('Git not found - unable to proceed with backporting');
     process.exit(1);
@@ -623,7 +623,4 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   });
 };
 
-module.exports = probotHandler;
-
-type ProbotHandler = typeof probotHandler;
-export { ProbotHandler };
+export default probotHandler;
