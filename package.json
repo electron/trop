@@ -42,7 +42,7 @@
     "prettier": "^3.3.3",
     "smee-client": "^2.0.4",
     "typescript": "*",
-    "vitest": "^3.0.2"
+    "vitest": "^3.0.5"
   },
   "lint-staged": {
     "{src,spec}/**/*.ts": "prettier --write **/*.ts"
