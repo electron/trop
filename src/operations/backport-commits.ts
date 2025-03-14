@@ -5,6 +5,7 @@ import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
 import { isUtf8 } from 'buffer';
+import { parse } from 'yaml';
 
 const cleanRawGitString = (s: string) => {
   let nS = s.trim();
@@ -111,6 +112,12 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
     );
     let baseTreeSha = baseTree.data.sha;
 
+    const config = parse(fs.readFileSync('./config.yml', 'utf8'));
+    const committer = {
+      email: config.tropEmail,
+      name: config.tropName,
+    };
+
     for (const commit of [...appliedCommits.all].reverse()) {
       const rawDiffTree: string = await git.raw([
         'diff-tree',
@@ -169,23 +176,25 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
         }),
       );
 
-      const authorEmail = cleanRawGitString(
-        await git.raw(['show', '-s', "--format='%ae'", commit.hash]),
-      );
-      const authorName = cleanRawGitString(
-        await git.raw(['show', '-s', "--format='%an'", commit.hash]),
-      );
-      const commitMessage = cleanRawGitString(
-        await git.raw(['show', '-s', "--format='%B'", commit.hash]),
-      );
+      const gitShowClean = async (fmt: string) => {
+        const args: string[] = ['show', '-s', `--format='${fmt}'`, commit.hash];
+        return cleanRawGitString(await git.raw(args));
+      };
 
-      const newMessage = `${commitMessage}\n\nCo-authored-by: ${authorName} <${authorEmail}>`;
+      const author = {
+        email: await gitShowClean('%ae'),
+        name: await gitShowClean('%an'),
+      };
+
+      const message = await gitShowClean('%B');
 
       const newCommit = await options.github.git.createCommit(
         options.context.repo({
+          author,
+          committer,
+          message,
           parents: [baseCommitSha],
           tree: newTree.data.sha,
-          message: newMessage,
         }),
       );
 
