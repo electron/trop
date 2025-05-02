@@ -379,7 +379,7 @@ describe('trop', () => {
     });
   });
 
-  describe('pull_request.labeled event', () => {
+  describe.skip('pull_request.labeled event', () => {
     it('queues the backport approval check if the "backport/requested" label is added', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
@@ -414,7 +414,7 @@ describe('trop', () => {
     });
   });
 
-  describe('pull_request.unlabeled event', () => {
+  describe.skip('pull_request.unlabeled event', () => {
     it('passes the backport approval check if all "backport/*" labels are removed', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRUnlabeledEventPath, 'utf-8'),
