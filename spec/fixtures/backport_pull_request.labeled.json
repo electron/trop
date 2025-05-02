@@ -1,0 +1,43 @@
+{
+  "name": "pull_request",
+  "payload": {
+    "action": "labeled",
+    "number": 7,
+    "pull_request": {
+      "number": 7,
+      "url": "my_cool_url",
+      "title": "CHANGE README",
+      "merged": true,
+      "user": {
+        "login": "codebytere"
+      },
+      "body": "Backport of #12345",
+      "labels": [{
+        "name": "todo",
+        "color": "8cb728"
+      }],
+      "head": {
+        "sha": "ABC"
+      },
+      "base": {
+        "ref": "main",
+        "repo": {
+          "default_branch": "main"
+        }
+      }
+    },
+    "label": {
+      "name": "todo",
+      "color": "8cb728"
+    },
+    "repository": {
+      "name": "probot-test",
+      "owner": {
+        "login": "codebytere"
+      }
+    },
+    "installation": {
+      "id": 103619
+    }
+  }
+}

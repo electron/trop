@@ -1,5 +1,7 @@
 export const CHECK_PREFIX = 'Backportable? - ';
 
+export const BACKPORT_APPROVAL_CHECK = 'Backport Approval Enforcement';
+
 export const BACKPORT_INFORMATION_CHECK = 'Backport Labels Added';
 
 export const NUM_SUPPORTED_VERSIONS = parseInt(
@@ -21,6 +23,9 @@ export const SEMVER_LABELS = {
 
 export const SKIP_CHECK_LABEL =
   process.env.SKIP_CHECK_LABEL || 'backport-check-skip';
+
+export const BACKPORT_APPROVED_LABEL =
+  process.env.BACKPORT_APPROVED_LABEL || 'backport/approved ✅';
 
 export const BACKPORT_REQUESTED_LABEL =
   process.env.BACKPORT_REQUESTED_LABEL || 'backport/requested 🗳';
