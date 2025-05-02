@@ -20,7 +20,7 @@
         "sha": "ABC"
       },
       "base": {
-        "ref": "main",
+        "ref": "36-x-y",
         "repo": {
           "default_branch": "main"
         }

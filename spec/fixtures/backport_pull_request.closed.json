@@ -4,6 +4,7 @@
     "action": "closed",
     "number": 15,
     "pull_request": {
+      "number": 15,
       "state": "closed",
       "title": "mirror",
       "user": {
@@ -13,7 +14,7 @@
         "ref": "123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg"
       },
       "base": {
-        "ref": "main",
+        "ref": "36-x-y",
         "repo": {
           "default_branch": "main"
         }
