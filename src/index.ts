@@ -12,6 +12,8 @@ import {
   removeLabel,
 } from './utils/label-utils';
 import {
+  BACKPORT_APPROVED_LABEL,
+  BACKPORT_REQUESTED_LABEL,
   CHECK_PREFIX,
   NO_BACKPORT_LABEL,
   SKIP_CHECK_LABEL,
@@ -27,8 +29,11 @@ import {
 import { updateManualBackport } from './operations/update-manual-backport';
 import { getSupportedBranches, isBranchSupported } from './utils/branch-util';
 import {
+  getBackportApprovalCheck,
   getBackportInformationCheck,
+  queueBackportApprovalCheck,
   queueBackportInformationCheck,
+  updateBackportApprovalCheck,
   updateBackportInformationCheck,
   updateBackportValidityCheck,
 } from './utils/checks-util';
@@ -383,10 +388,37 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       }
 
       let backportCheck = await getBackportInformationCheck(context);
+      let backportApprovalCheck = await getBackportApprovalCheck(context);
 
       if (!backportCheck) {
         await queueBackportInformationCheck(context);
         backportCheck = (await getBackportInformationCheck(context))!;
+      }
+
+      if (!backportApprovalCheck) {
+        await queueBackportApprovalCheck(context);
+        backportApprovalCheck = (await getBackportApprovalCheck(context))!;
+      }
+
+      const isBackportApproved = pr.labels.some(
+        (prLabel) => prLabel.name === BACKPORT_APPROVED_LABEL,
+      );
+      const isBackportRequested = pr.labels.some(
+        (prLabel) => prLabel.name === BACKPORT_REQUESTED_LABEL,
+      );
+
+      if (isBackportApproved) {
+        await updateBackportApprovalCheck(context, backportApprovalCheck, {
+          title: 'Backport Approved',
+          summary: 'This PR has been approved for backporting.',
+          conclusion: CheckRunStatus.SUCCESS,
+        });
+      } else if (!isBackportRequested) {
+        await updateBackportApprovalCheck(context, backportCheck, {
+          title: 'Backport Approval Not Required',
+          summary: 'This PR does not need backport approval.',
+          conclusion: CheckRunStatus.SUCCESS,
+        });
       }
 
       const isNoBackport = pr.labels.some(

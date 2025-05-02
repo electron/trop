@@ -6,7 +6,11 @@ import nock from 'nock';
 import { Probot, ProbotOctokit } from 'probot';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SKIP_CHECK_LABEL } from '../src/constants';
+import {
+  BACKPORT_APPROVED_LABEL,
+  BACKPORT_REQUESTED_LABEL,
+  SKIP_CHECK_LABEL,
+} from '../src/constants';
 import { CheckRunStatus, PRChange } from '../src/enums';
 import { default as trop } from '../src/index';
 import {
@@ -43,6 +47,18 @@ const newPRBackportOpenedEventPath = path.join(
   'backport_pull_request.opened.json',
 );
 
+const backportPRLabeledEventPath = path.join(
+  __dirname,
+  'fixtures',
+  'backport_pull_request.labeled.json',
+);
+
+const backportPRUnlabeledEventPath = path.join(
+  __dirname,
+  'fixtures',
+  'backport_pull_request.unlabeled.json',
+);
+
 const noBackportLabel = {
   name: 'no-backport',
   color: '000',
@@ -50,6 +66,16 @@ const noBackportLabel = {
 
 const targetLabel = {
   name: 'target/12-x-y',
+  color: 'fff',
+};
+
+const backportApprovedLabel = {
+  name: BACKPORT_APPROVED_LABEL,
+  color: 'fff',
+};
+
+const backportRequestedLabel = {
+  name: BACKPORT_REQUESTED_LABEL,
   color: 'fff',
 };
 
@@ -77,6 +103,9 @@ vi.mock('../src/utils/checks-util', () => ({
   getBackportInformationCheck: vi.fn().mockResolvedValue({ status: 'thing' }),
   updateBackportInformationCheck: vi.fn().mockResolvedValue(undefined),
   queueBackportInformationCheck: vi.fn().mockResolvedValue(undefined),
+  getBackportApprovalCheck: vi.fn().mockResolvedValue(undefined),
+  updateBackportApprovalCheck: vi.fn().mockResolvedValue(undefined),
+  queueBackportApprovalCheck: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('trop', () => {
@@ -289,6 +318,113 @@ describe('trop', () => {
       expect(updatePayload).toMatchObject({
         title: 'Backport Information Provided',
         summary: 'This PR contains the required  backport information.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+
+    it('passes the backport approval check if there is no "backport/requested" label in a new PR', async () => {
+      const event = JSON.parse(
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
+      );
+
+      event.payload.pull_request.labels = [];
+
+      await robot.receive(event);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportApprovalCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Approval Not Required',
+        summary: 'This PR does not need backport approval.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+
+    it('queues the backport approval check if there is the "backport/requested" label in a new PR', async () => {
+      const event = JSON.parse(
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
+      );
+
+      event.payload.pull_request.labels = [backportRequestedLabel];
+
+      await robot.receive(event);
+
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes the backport approval check if there is the "backport/approved" label in a new PR', async () => {
+      const event = JSON.parse(
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
+      );
+
+      event.payload.pull_request.labels = [backportApprovedLabel];
+
+      await robot.receive(event);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportApprovalCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Approved',
+        summary: 'This PR has been approved for backporting.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+  });
+
+  describe('pull_request.labeled event', () => {
+    it('queues the backport approval check if the "backport/requested" label is added', async () => {
+      const event = JSON.parse(
+        await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
+      );
+
+      event.payload.label = backportApprovedLabel;
+      event.payload.pull_request.labels = [backportRequestedLabel];
+
+      await robot.receive(event);
+
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes the backport approval check if the "backport/approved" label is added', async () => {
+      const event = JSON.parse(
+        await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
+      );
+
+      event.payload.label = backportApprovedLabel;
+      event.payload.pull_request.labels = [backportApprovedLabel];
+
+      await robot.receive(event);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportApprovalCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Approved',
+        summary: 'This PR has been approved for backporting.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+  });
+
+  describe('pull_request.unlabeled event', () => {
+    it('passes the backport approval check if all "backport/*" labels are removed', async () => {
+      const event = JSON.parse(
+        await fs.readFile(backportPRUnlabeledEventPath, 'utf-8'),
+      );
+
+      event.payload.label = backportRequestedLabel;
+      event.payload.pull_request.labels = [];
+
+      await robot.receive(event);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportApprovalCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Approval Not Required',
+        summary: 'This PR does not need backport approval.',
         conclusion: CheckRunStatus.SUCCESS,
       });
     });
