@@ -4,6 +4,7 @@
     "action": "closed",
     "number": 15,
     "pull_request": {
+      "number": 15,
       "state": "closed",
       "title": "mirror",
       "user": {
@@ -11,6 +12,12 @@
       },
       "head": {
         "ref": "123456789iuytdxcvbnjhfdriuyfedfgy54escghjnbg"
+      },
+      "base": {
+        "ref": "36-x-y",
+        "repo": {
+          "default_branch": "main"
+        }
       },
       "body": "Backport of #14\nSee that PR for details.\nNotes: <!-- One-line Change Summary Here-->",
       "created_at": "2018-11-01T17:29:51Z",

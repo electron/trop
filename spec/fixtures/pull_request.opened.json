@@ -5,6 +5,7 @@
     "number": 7,
     "pull_request": {
       "url": "my_cool_url",
+      "number": 7,
       "title": "CHANGE README",
       "merged": true,
       "user": {
