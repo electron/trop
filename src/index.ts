@@ -12,6 +12,7 @@ import {
   removeLabel,
 } from './utils/label-utils';
 import {
+  BACKPORT_APPROVAL_CHECK,
   BACKPORT_APPROVED_LABEL,
   BACKPORT_REQUESTED_LABEL,
   CHECK_PREFIX,
@@ -158,14 +159,8 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   }
 
   /**
-   * Checks that a PR done to `main` contains the required
-   * backport information, i.e.: at least a `no-backport` or
-   * a `target/XYZ` labels.
-   *
-   * @param context
-   * @returns
+   * Checks for backport PRs.
    */
-
   robot.on(
     [
       'pull_request.opened',
@@ -205,6 +200,9 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       let checkRun = allChecks.check_runs.find(
         (run) => run.name === VALID_BACKPORT_CHECK_NAME,
       );
+      let backportApprovalCheck = allChecks.check_runs.find(
+        (run) => run.name === BACKPORT_APPROVAL_CHECK,
+      );
 
       if (!checkRun) {
         robot.log(`Queueing new check run for #${pr.number}`);
@@ -221,6 +219,11 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       }
 
       if (pr.base.ref !== pr.base.repo.default_branch) {
+        if (!backportApprovalCheck) {
+          await queueBackportApprovalCheck(context);
+          backportApprovalCheck = (await getBackportApprovalCheck(context))!;
+        }
+
         // Ensure that we aren't including our own base branch in the backport process.
         if (action === 'labeled') {
           if (
@@ -247,6 +250,11 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             title: 'Backport Check Skipped',
             summary:
               'This PR is not a backport - skip backport validation check',
+            conclusion: CheckRunStatus.NEUTRAL,
+          });
+          await updateBackportApprovalCheck(context, backportApprovalCheck, {
+            title: 'Skipped',
+            summary: `This PR is targeting '${pr.base.repo.default_branch}' and is not a backport`,
             conclusion: CheckRunStatus.NEUTRAL,
           });
           return;
@@ -347,6 +355,31 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             });
           }
         }
+
+        const isBackportApproved = pr.labels.some(
+          (prLabel) => prLabel.name === BACKPORT_APPROVED_LABEL,
+        );
+        const isBackportRequested = pr.labels.some(
+          (prLabel) => prLabel.name === BACKPORT_REQUESTED_LABEL,
+        );
+
+        if (isBackportApproved) {
+          await updateBackportApprovalCheck(context, backportApprovalCheck, {
+            title: 'Backport Approved',
+            summary: 'This PR has been approved for backporting.',
+            conclusion: CheckRunStatus.SUCCESS,
+          });
+        } else if (!isBackportRequested) {
+          await updateBackportApprovalCheck(context, backportApprovalCheck, {
+            title: 'Backport Approval Not Required',
+            summary: 'This PR does not need backport approval.',
+            conclusion: CheckRunStatus.SUCCESS,
+          });
+        } else {
+          if (backportApprovalCheck.status !== 'queued') {
+            await queueBackportApprovalCheck(context);
+          }
+        }
       } else {
         // If we're somehow targeting main and have a check run,
         // we mark this check as cancelled.
@@ -372,6 +405,11 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   robot.on('pull_request.labeled', maybeRunCheck);
   robot.on('pull_request.unlabeled', maybeRunCheck);
 
+  /**
+   * Checks that a PR done to `main` contains the required
+   * backport information, i.e.: at least a `no-backport` or
+   * a `target/XYZ` labels.
+   */
   robot.on(
     [
       'pull_request.opened',
@@ -388,37 +426,10 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       }
 
       let backportCheck = await getBackportInformationCheck(context);
-      let backportApprovalCheck = await getBackportApprovalCheck(context);
 
       if (!backportCheck) {
         await queueBackportInformationCheck(context);
         backportCheck = (await getBackportInformationCheck(context))!;
-      }
-
-      if (!backportApprovalCheck) {
-        await queueBackportApprovalCheck(context);
-        backportApprovalCheck = (await getBackportApprovalCheck(context))!;
-      }
-
-      const isBackportApproved = pr.labels.some(
-        (prLabel) => prLabel.name === BACKPORT_APPROVED_LABEL,
-      );
-      const isBackportRequested = pr.labels.some(
-        (prLabel) => prLabel.name === BACKPORT_REQUESTED_LABEL,
-      );
-
-      if (isBackportApproved) {
-        await updateBackportApprovalCheck(context, backportApprovalCheck, {
-          title: 'Backport Approved',
-          summary: 'This PR has been approved for backporting.',
-          conclusion: CheckRunStatus.SUCCESS,
-        });
-      } else if (!isBackportRequested) {
-        await updateBackportApprovalCheck(context, backportCheck, {
-          title: 'Backport Approval Not Required',
-          summary: 'This PR does not need backport approval.',
-          conclusion: CheckRunStatus.SUCCESS,
-        });
       }
 
       const isNoBackport = pr.labels.some(
