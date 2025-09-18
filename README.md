@@ -2,7 +2,9 @@
 
 [![Test](https://github.com/electron/trop/actions/workflows/test.yml/badge.svg)](https://github.com/electron/trop/actions/workflows/test.yml)
 
-> a GitHub App built with [probot](https://github.com/probot/probot) that automates the process of backporting features and bugfixes.
+<img height="124px" width="124px" align="right" alt="trop-logo" src="design/logo.png">
+
+Trop a GitHub App built with [probot](https://github.com/probot/probot) that automates the process of backporting features and bugfixes.
 
 ```js
 [...'backport'.slice(4)].reverse().join``
