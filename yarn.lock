@@ -1949,13 +1949,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"commander@npm:^12.0.0":
-  version: 12.0.0
-  resolution: "commander@npm:12.0.0"
-  checksum: 10c0/e51cac1d1d0aa1f76581981d2256a9249497e08f5a370bf63b0dfc7e76a647fc8cbc3ddd507928f2bdca6c514c83834e87e2687ace2fe2fc7cc7e631bf80f83d
-  languageName: node
-  linkType: hard
-
 "commander@npm:^6.2.0":
   version: 6.2.1
   resolution: "commander@npm:6.2.1"
@@ -5871,19 +5864,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"smee-client@npm:^2.0.4":
-  version: 2.0.4
-  resolution: "smee-client@npm:2.0.4"
-  dependencies:
-    commander: "npm:^12.0.0"
-    eventsource: "npm:^2.0.2"
-    validator: "npm:^13.11.0"
-  bin:
-    smee: bin/smee.js
-  checksum: 10c0/4e578ebf88731fb6eb5e933192c533b2520c3265426d97fe63dee0555d7502efdb1a1127f721b23165c3a08641a3b622b8bfec81509d0a89c54da0f669f26d03
-  languageName: node
-  linkType: hard
-
 "socks-proxy-agent@npm:^8.0.3":
   version: 8.0.5
   resolution: "socks-proxy-agent@npm:8.0.5"
@@ -6300,7 +6280,6 @@ __metadata:
     prom-client: "npm:^14.2.0"
     queue: "npm:^6.0.0"
     simple-git: "npm:3.19.1"
-    smee-client: "npm:^2.0.4"
     typescript: "npm:*"
     vitest: "npm:^3.0.5"
     what-the-diff: "npm:^0.6.0"
@@ -6524,13 +6503,6 @@ __metadata:
   bin:
     uuid: dist/bin/uuid
   checksum: 10c0/bcbb807a917d374a49f475fae2e87fdca7da5e5530820ef53f65ba1d12131bd81a92ecf259cc7ce317cbe0f289e7d79fdfebcef9bfa3087c8c8a2fa304c9be54
-  languageName: node
-  linkType: hard
-
-"validator@npm:^13.11.0":
-  version: 13.15.23
-  resolution: "validator@npm:13.15.23"
-  checksum: 10c0/22a05ec6a98d48d2b6fb34d43ce854af61d15842362d142e64cfca0325d4d0c2d1051d9f9d3a0f741e58ea888f73a35baf7a2a810f5aed0f89183bd5040f0177
   languageName: node
   linkType: hard
 
