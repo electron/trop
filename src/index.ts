@@ -171,7 +171,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     ],
     async (context) => {
       const { pull_request: pr, action } = context.payload;
-      let label: Label;
+      let label: Label | undefined = undefined;
       if ('label' in context.payload) {
         label = context.payload.label;
       }
@@ -225,17 +225,21 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         }
 
         // Ensure that we aren't including our own base branch in the backport process.
-        if (action === 'labeled') {
-          if (
-            Object.values(PRStatus).some((status) =>
-              label.name.startsWith(status),
-            )
-          ) {
-            if (isBranchSupported(label!.name) && label!.name === pr.base.ref) {
+        if (action === 'labeled' && label) {
+          const labelPrefix = Object.values(PRStatus).find((status) =>
+            label.name.startsWith(status),
+          );
+
+          if (labelPrefix) {
+            const targetBranch = labelToTargetBranch(label, labelPrefix);
+            if (
+              isBranchSupported(targetBranch) &&
+              targetBranch === pr.base.ref
+            ) {
               robot.log(
                 `#${pr.number} is trying to backport to itself - this is not allowed`,
               );
-              await removeLabel(context, 1, '');
+              await removeLabel(context, pr.number, label.name);
             }
           }
         }

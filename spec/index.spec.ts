@@ -462,6 +462,31 @@ describe('trop', () => {
         conclusion: CheckRunStatus.SUCCESS,
       });
     });
+
+    it('removes label if PR is trying to backport to its own base branch', async () => {
+      const event = JSON.parse(
+        await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
+      );
+
+      // Add label targeting the base branch of the PR itself
+      const label = {
+        name: `target/${event.payload.pull_request.base.ref}`,
+        color: 'fff',
+      };
+
+      event.payload.label = label;
+      event.payload.pull_request.labels = [label];
+      octokit.issues.listLabelsOnIssue.mockResolvedValue({ data: [label] });
+
+      await robot.receive(event);
+
+      expect(octokit.issues.removeLabel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issue_number: event.payload.pull_request.number,
+          name: label.name,
+        }),
+      );
+    });
   });
 
   describe('pull_request.unlabeled event', () => {
