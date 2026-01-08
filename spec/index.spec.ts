@@ -463,6 +463,31 @@ describe('trop', () => {
       });
     });
 
+    it('removes the "backport/requested" label if the "backport/approved" label is added', async () => {
+      const event = JSON.parse(
+        await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
+      );
+
+      event.payload.label = backportApprovedLabel;
+      event.payload.pull_request.labels = [
+        backportApprovedLabel,
+        backportRequestedLabel,
+      ];
+
+      octokit.issues.listLabelsOnIssue.mockResolvedValue({
+        data: event.payload.pull_request.labels,
+      });
+
+      await robot.receive(event);
+
+      expect(octokit.issues.removeLabel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issue_number: event.payload.pull_request.number,
+          name: backportRequestedLabel.name,
+        }),
+      );
+    });
+
     it('removes label if PR is trying to backport to its own base branch', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
@@ -545,6 +570,28 @@ describe('trop', () => {
 
       expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
       expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
+    });
+
+    it('adds back the "backport/requested" label if the "backport/approved" label is removed', async () => {
+      const event = JSON.parse(
+        await fs.readFile(backportPRUnlabeledEventPath, 'utf-8'),
+      );
+
+      event.payload.label = backportApprovedLabel;
+      event.payload.pull_request.labels = [];
+
+      octokit.issues.listLabelsOnIssue.mockResolvedValue({
+        data: event.payload.pull_request.labels,
+      });
+
+      await robot.receive(event);
+
+      expect(octokit.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issue_number: event.payload.pull_request.number,
+          labels: [backportRequestedLabel.name],
+        }),
+      );
     });
   });
 
