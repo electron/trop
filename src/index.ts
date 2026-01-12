@@ -7,6 +7,7 @@ import {
   labelClosedPR,
 } from './utils';
 import {
+  addLabels,
   labelToTargetBranch,
   labelExistsOnPR,
   removeLabel,
@@ -368,12 +369,23 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         );
 
         if (isBackportApproved) {
+          // Remove the backport/requested label if it exists
+          if (isBackportRequested) {
+            await removeLabel(context, pr.number, BACKPORT_REQUESTED_LABEL);
+          }
           await updateBackportApprovalCheck(context, backportApprovalCheck, {
             title: 'Backport Approved',
             summary: 'This PR has been approved for backporting.',
             conclusion: CheckRunStatus.SUCCESS,
           });
         } else if (!isBackportRequested) {
+          // If backport/approved was removed, add backport/requested back
+          if (
+            action === 'unlabeled' &&
+            label?.name === BACKPORT_APPROVED_LABEL
+          ) {
+            await addLabels(context, pr.number, [BACKPORT_REQUESTED_LABEL]);
+          }
           await updateBackportApprovalCheck(context, backportApprovalCheck, {
             title: 'Backport Approval Not Required',
             summary: 'This PR does not need backport approval.',
