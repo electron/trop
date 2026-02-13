@@ -70,7 +70,7 @@ export const backportToBranch = async (
   targetBranch: string,
 ) => {
   log(
-    'backportToLabel',
+    'backportToBranch',
     LogLevel.INFO,
     `Executing backport to branch '${targetBranch}'`,
   );
