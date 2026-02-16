@@ -650,7 +650,9 @@ export const backportImpl = async (
             originalPRNumber,
             labelToRemove,
           );
-        } else if (labelToAdd?.startsWith(PRStatus.IN_FLIGHT)) {
+        }
+
+        if (labelToAdd?.startsWith(PRStatus.IN_FLIGHT)) {
           await labelUtils.removeLabel(
             context,
             originalPRNumber,
