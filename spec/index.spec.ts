@@ -4,7 +4,15 @@ import { execSync } from 'child_process';
 
 import nock from 'nock';
 import { Probot, ProbotOctokit } from 'probot';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import {
   BACKPORT_APPROVAL_CHECK,
@@ -125,68 +133,37 @@ vi.mock('../src/utils/checks-util', () => ({
   queueBackportApprovalCheck: vi.fn().mockResolvedValue(undefined),
 }));
 
+const GH_API = 'https://api.github.com';
+
+const BRANCHES = [{ name: '8-x-y' }, { name: '7-1-x' }];
+
+const MOCK_PR = {
+  merged: true,
+  head: {
+    sha: '6dcb09b5b57875f334f61aebed695e2e4193db5e',
+  },
+  base: {
+    ref: 'main',
+    repo: {
+      default_branch: 'main',
+    },
+  },
+  labels: [
+    {
+      url: 'my_cool_url',
+      name: 'target/X-X-X',
+      color: 'fc2929',
+    },
+  ],
+};
+
 describe('trop', () => {
   let robot: Probot;
-  let octokit: any;
   process.env = { ...process.env, BOT_USER_NAME: 'trop[bot]' };
 
   beforeEach(() => {
+    vi.clearAllMocks();
     nock.disableNetConnect();
-    octokit = {
-      repos: {
-        getBranch: vi.fn().mockResolvedValue(undefined),
-        listBranches: vi.fn().mockResolvedValue({
-          data: [{ name: '8-x-y' }, { name: '7-1-x' }],
-        }),
-      },
-      git: {
-        deleteRef: vi.fn().mockResolvedValue(undefined),
-      },
-      pulls: {
-        get: vi.fn().mockResolvedValue({
-          data: {
-            merged: true,
-            head: {
-              sha: '6dcb09b5b57875f334f61aebed695e2e4193db5e',
-            },
-            base: {
-              ref: 'main',
-              repo: {
-                default_branch: 'main',
-              },
-            },
-            labels: [
-              {
-                url: 'my_cool_url',
-                name: 'target/X-X-X',
-                color: 'fc2929',
-              },
-            ],
-          },
-        }),
-      },
-      issues: {
-        addLabels: vi.fn().mockResolvedValue({}),
-        removeLabel: vi.fn().mockResolvedValue({}),
-        createLabel: vi.fn().mockResolvedValue({}),
-        createComment: vi.fn().mockResolvedValue({}),
-        listLabelsOnIssue: vi.fn().mockResolvedValue({
-          data: [
-            {
-              id: 208045946,
-              url: 'https://api.github.com/repos/octocat/Hello-World/labels/bug',
-              name: 'bug',
-              description: "Something isn't working",
-              color: 'f29513',
-            },
-          ],
-        }),
-      },
-      checks: {
-        listForRef: vi.fn().mockResolvedValue({ data: { check_runs: [] } }),
-        create: vi.fn().mockResolvedValue({ data: vi.fn() }),
-      },
-    };
 
     robot = new Probot({
       githubToken: 'test',
@@ -195,75 +172,209 @@ describe('trop', () => {
         throttle: { enabled: false },
       }),
     });
-    robot['state'].octokit.auth = () => Promise.resolve(octokit);
-    robot.auth = () => Promise.resolve(octokit);
     robot.load(trop);
   });
 
   afterEach(() => {
+    assert(nock.isDone(), 'Not all Nock interceptors used');
     nock.cleanAll();
     nock.enableNetConnect();
   });
 
   describe('issue_comment.created event', () => {
     it('manually triggers the backport on comment', async () => {
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .post(
+          '/repos/codebytere/public-repo/issues/1234/comments',
+          ({ body }) => {
+            expect(body).toEqual(
+              'The backport process for this PR has been manually initiated - here we go! :D',
+            );
+            return true;
+          },
+        )
+        .reply(200);
+
       await robot.receive(issueCommentBackportCreatedEvent);
 
-      expect(octokit.pulls.get).toHaveBeenCalled();
-      expect(octokit.issues.createComment).toHaveBeenCalled();
       expect(backportToLabel).toHaveBeenCalled();
     });
 
     it('does not trigger the backport on comment if the PR is not merged', async () => {
-      octokit.pulls.get = vi
-        .fn()
-        .mockResolvedValue({ data: { merged: false } });
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, { ...MOCK_PR, merged: false });
+
+      nock(GH_API)
+        .post(
+          '/repos/codebytere/public-repo/issues/1234/comments',
+          ({ body }) => {
+            expect(body).toEqual(
+              'This PR has not been merged yet, and cannot be backported.',
+            );
+            return true;
+          },
+        )
+        .reply(200);
 
       await robot.receive(issueCommentBackportCreatedEvent);
 
-      expect(octokit.pulls.get).toHaveBeenCalled();
-      expect(octokit.issues.createComment).toHaveBeenCalled();
       expect(backportToLabel).not.toHaveBeenCalled();
     });
 
     it('triggers the backport on comment to a targeted branch', async () => {
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/public-repo/branches/thingy')
+        .reply(200, {});
+
+      nock(GH_API)
+        .post(
+          '/repos/codebytere/public-repo/issues/1234/comments',
+          ({ body }) => {
+            expect(body).toEqual(
+              'The backport process for this PR has been manually initiated - sending your PR to `thingy`!',
+            );
+            return true;
+          },
+        )
+        .reply(200);
+
       await robot.receive(issueCommentBackportToCreatedEvent);
 
-      expect(octokit.pulls.get).toHaveBeenCalled();
-      expect(octokit.issues.createComment).toHaveBeenCalled();
       expect(backportToBranch).toHaveBeenCalled();
     });
 
     it('allows for multiple PRs to be triggered in the same comment', async () => {
+      const comments: string[] = [];
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get(/^\/repos\/codebytere\/public-repo\/branches\/thingy[12]$/)
+        .times(2)
+        .reply(200, {});
+
+      nock(GH_API)
+        .post(
+          '/repos/codebytere/public-repo/issues/1234/comments',
+          ({ body }) => {
+            comments.push(body);
+            return true;
+          },
+        )
+        .times(2)
+        .reply(200);
+
       await robot.receive(issueCommentBackportToMultipleCreatedEvent);
 
-      expect(octokit.pulls.get).toHaveBeenCalledTimes(3);
-      expect(octokit.issues.createComment).toHaveBeenCalledTimes(2);
       expect(backportToBranch).toHaveBeenCalledTimes(2);
+      expect(comments).toEqual([
+        'The backport process for this PR has been manually initiated - sending your PR to `thingy1`!',
+        'The backport process for this PR has been manually initiated - sending your PR to `thingy2`!',
+      ]);
     });
 
     it('allows for multiple PRs to be triggered in the same comment with space-separated branches', async () => {
+      const comments: string[] = [];
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get(/^\/repos\/codebytere\/public-repo\/branches\/thingy[123]$/)
+        .times(3)
+        .reply(200, {});
+
+      nock(GH_API)
+        .post(
+          '/repos/codebytere/public-repo/issues/1234/comments',
+          ({ body }) => {
+            comments.push(body);
+            return true;
+          },
+        )
+        .times(3)
+        .reply(200);
+
       await robot.receive(issueCommentBackportToMultipleCreatedSpacesEvent);
 
-      expect(octokit.pulls.get).toHaveBeenCalledTimes(4);
-      expect(octokit.issues.createComment).toHaveBeenCalledTimes(3);
       expect(backportToBranch).toHaveBeenCalledTimes(3);
+      expect(comments).toEqual([
+        'The backport process for this PR has been manually initiated - sending your PR to `thingy1`!',
+        'The backport process for this PR has been manually initiated - sending your PR to `thingy2`!',
+        'The backport process for this PR has been manually initiated - sending your PR to `thingy3`!',
+      ]);
     });
 
     it('does not trigger the backport on comment to a targeted branch if the branch does not exist', async () => {
-      octokit.repos.getBranch = vi
-        .fn()
-        .mockReturnValue(Promise.reject(new Error('404')));
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .post(
+          '/repos/codebytere/public-repo/issues/1234/comments',
+          ({ body }) => {
+            expect(body).toEqual(
+              'Provided branch `thingy` does not appear to exist.',
+            );
+            return true;
+          },
+        )
+        .reply(200);
+
       await robot.receive(issueCommentBackportToCreatedEvent);
 
-      expect(octokit.pulls.get).toHaveBeenCalled();
-      expect(octokit.issues.createComment).toHaveBeenCalled();
       expect(backportToBranch).toHaveBeenCalledTimes(0);
     });
   });
 
   describe('pull_request.opened event', () => {
+    beforeEach(() => {
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
+
+      nock(GH_API).post('/repos/codebytere/probot-test/check-runs').reply(200);
+    });
+
     it('labels the original PR when a manual backport PR has been opened', async () => {
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/issues/7/labels?per_page=100&page=1',
+        )
+        .reply(200, MOCK_PR.labels);
+
       await robot.receive(backportPROpenedEvent);
 
       expect(updateManualBackport).toHaveBeenCalled();
@@ -357,6 +468,22 @@ describe('trop', () => {
     });
 
     it('passes the backport approval check if the "backport/requested" label is not on new backport PR', async () => {
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/issues/7/labels?per_page=100&page=1',
+        )
+        .reply(200, []);
+
       await robot.receive(backportPROpenedEvent);
 
       const updatePayload = vi.mocked(checkUtils.updateBackportApprovalCheck)
@@ -381,6 +508,22 @@ describe('trop', () => {
 
       event.payload.pull_request.labels = [backportRequestedLabel];
 
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, []);
+
       await robot.receive(event);
 
       expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
@@ -393,6 +536,22 @@ describe('trop', () => {
       );
 
       event.payload.pull_request.labels = [backportApprovedLabel];
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, []);
 
       await robot.receive(event);
 
@@ -408,8 +567,19 @@ describe('trop', () => {
   });
 
   describe('pull_request.labeled event', () => {
+    beforeEach(() => {
+      nock(GH_API).post('/repos/codebytere/probot-test/check-runs').reply(200);
+    });
+
     it('skips the backport approval check if PR is not a backport', async () => {
       const event = JSON.parse(await fs.readFile(prLabeledEventPath, 'utf-8'));
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
 
       await robot.receive(event);
 
@@ -418,24 +588,41 @@ describe('trop', () => {
     });
 
     it('queues the backport approval check if the "backport/requested" label is added', async () => {
-      vi.mocked(octokit.checks.listForRef).mockResolvedValueOnce({
-        data: {
-          check_runs: [
-            {
-              name: BACKPORT_APPROVAL_CHECK,
-              status: 'completed',
-              conclusion: 'success',
-            },
-          ],
-        },
-      });
-
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
       );
 
       event.payload.label = backportApprovedLabel;
       event.payload.pull_request.labels = [backportRequestedLabel];
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, MOCK_PR.labels);
 
       await robot.receive(event);
 
@@ -450,6 +637,29 @@ describe('trop', () => {
 
       event.payload.label = backportApprovedLabel;
       event.payload.pull_request.labels = [backportApprovedLabel];
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, MOCK_PR.labels);
 
       await robot.receive(event);
 
@@ -474,18 +684,36 @@ describe('trop', () => {
         backportRequestedLabel,
       ];
 
-      octokit.issues.listLabelsOnIssue.mockResolvedValue({
-        data: event.payload.pull_request.labels,
-      });
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      nock(GH_API)
+        .delete(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels/${encodeURIComponent(backportRequestedLabel.name)}`,
+        )
+        .reply(200);
 
       await robot.receive(event);
-
-      expect(octokit.issues.removeLabel).toHaveBeenCalledWith(
-        expect.objectContaining({
-          issue_number: event.payload.pull_request.number,
-          name: backportRequestedLabel.name,
-        }),
-      );
     });
 
     it('removes label if PR is trying to backport to its own base branch', async () => {
@@ -501,24 +729,56 @@ describe('trop', () => {
 
       event.payload.label = label;
       event.payload.pull_request.labels = [label];
-      octokit.issues.listLabelsOnIssue.mockResolvedValue({ data: [label] });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      nock(GH_API)
+        .delete(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels/${encodeURIComponent(label.name)}`,
+        )
+        .reply(200);
 
       await robot.receive(event);
-
-      expect(octokit.issues.removeLabel).toHaveBeenCalledWith(
-        expect.objectContaining({
-          issue_number: event.payload.pull_request.number,
-          name: label.name,
-        }),
-      );
     });
   });
 
   describe('pull_request.unlabeled event', () => {
+    beforeEach(() => {
+      nock(GH_API).post('/repos/codebytere/probot-test/check-runs').reply(200);
+    });
+
     it('skips the backport approval check if PR is not a backport', async () => {
       const event = JSON.parse(
         await fs.readFile(prUnlabeledEventPath, 'utf-8'),
       );
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
 
       await robot.receive(event);
 
@@ -534,6 +794,29 @@ describe('trop', () => {
       event.payload.label = backportRequestedLabel;
       event.payload.pull_request.labels = [];
 
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
       await robot.receive(event);
 
       const updatePayload = vi.mocked(checkUtils.updateBackportApprovalCheck)
@@ -547,24 +830,41 @@ describe('trop', () => {
     });
 
     it('queues the backport approval check if the "backport/approved" label is removed and "backport/requested" remains', async () => {
-      vi.mocked(octokit.checks.listForRef).mockResolvedValueOnce({
-        data: {
-          check_runs: [
-            {
-              name: BACKPORT_APPROVAL_CHECK,
-              status: 'completed',
-              conclusion: 'success',
-            },
-          ],
-        },
-      });
-
       const event = JSON.parse(
         await fs.readFile(backportPRUnlabeledEventPath, 'utf-8'),
       );
 
       event.payload.label = backportApprovedLabel;
       event.payload.pull_request.labels = [backportRequestedLabel];
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
 
       await robot.receive(event);
 
@@ -580,18 +880,46 @@ describe('trop', () => {
       event.payload.label = backportApprovedLabel;
       event.payload.pull_request.labels = [];
 
-      octokit.issues.listLabelsOnIssue.mockResolvedValue({
-        data: event.payload.pull_request.labels,
-      });
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      nock(GH_API)
+        .post(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels`,
+          ({ labels }) => {
+            expect(labels).toEqual([backportRequestedLabel.name]);
+            return true;
+          },
+        )
+        .reply(200);
 
       await robot.receive(event);
-
-      expect(octokit.issues.addLabels).toHaveBeenCalledWith(
-        expect.objectContaining({
-          issue_number: event.payload.pull_request.number,
-          labels: [backportRequestedLabel.name],
-        }),
-      );
     });
   });
 
@@ -788,20 +1116,32 @@ Notes: <!-- One-line Change Summary Here-->`,
   });
 
   describe('updateBackportValidityCheck from pull_request events', () => {
+    beforeEach(() => {
+      nock(GH_API).post('/repos/codebytere/probot-test/check-runs').reply(200);
+    });
+
     it('skips the backport validity check if there is skip check label in a new PR', async () => {
       vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
-      octokit.issues.listLabelsOnIssue.mockResolvedValue({
-        data: [
-          {
-            name: SKIP_CHECK_LABEL,
-          },
-        ],
-      });
       const event = JSON.parse(
         await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
       event.payload.action = 'synchronize';
       event.payload.pull_request.base.ref = '30-x-y';
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, [{ name: SKIP_CHECK_LABEL }]);
+
       await robot.receive(event);
 
       const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
@@ -821,6 +1161,19 @@ Notes: <!-- One-line Change Summary Here-->`,
         await fs.readFile(newPROpenedEventPath, 'utf-8'),
       );
 
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
       await robot.receive(event);
 
       const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
@@ -835,19 +1188,47 @@ Notes: <!-- One-line Change Summary Here-->`,
 
     it('fails the backport validity check if old PR was not merged to a supported release branch', async () => {
       vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
-      octokit.pulls.get.mockResolvedValueOnce({
-        data: {
-          merged: true,
-          base: {
-            ref: 'not-supported-branch',
-          },
-        },
-      });
+
       const event = JSON.parse(
         await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
       event.payload.pull_request.base.ref = '30-x-y';
       event.payload.action = 'synchronize';
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/1234')
+        .reply(200, {
+          merged: true,
+          base: {
+            ref: 'not-supported-branch',
+          },
+        });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
       await robot.receive(event);
 
       const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
@@ -863,19 +1244,47 @@ Notes: <!-- One-line Change Summary Here-->`,
 
     it('fails the backport validity check if old PR has not been merged yet', async () => {
       vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
-      octokit.pulls.get.mockResolvedValueOnce({
-        data: {
-          merged: false,
-          base: {
-            ref: 'main',
-          },
-        },
-      });
+
       const event = JSON.parse(
         await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
       event.payload.pull_request.base.ref = '30-x-y';
       event.payload.action = 'synchronize';
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/1234')
+        .reply(200, {
+          merged: false,
+          base: {
+            ref: 'main',
+          },
+        });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
       await robot.receive(event);
 
       const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
@@ -891,19 +1300,47 @@ Notes: <!-- One-line Change Summary Here-->`,
 
     it('succeeds the backport validity check if all checks pass', async () => {
       vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
-      octokit.pulls.get.mockResolvedValueOnce({
-        data: {
-          merged: true,
-          base: {
-            ref: 'main',
-          },
-        },
-      });
+
       const event = JSON.parse(
         await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
       );
       event.payload.pull_request.base.ref = '30-x-y';
       event.payload.action = 'synchronize';
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/1234')
+        .reply(200, {
+          merged: true,
+          base: {
+            ref: 'main',
+          },
+        });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
       await robot.receive(event);
 
       const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
