@@ -4,15 +4,7 @@ import { execSync } from 'child_process';
 
 import nock from 'nock';
 import { Probot, ProbotOctokit } from 'probot';
-import {
-  afterEach,
-  assert,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BACKPORT_APPROVAL_CHECK,
@@ -176,7 +168,7 @@ describe('trop', () => {
   });
 
   afterEach(() => {
-    assert(nock.isDone(), 'Not all Nock interceptors used');
+    expect(nock.isDone(), 'Not all Nock interceptors used');
     nock.cleanAll();
     nock.enableNetConnect();
   });
