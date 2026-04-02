@@ -23,7 +23,7 @@
     "queue": "^6.0.0",
     "simple-git": "3.32.3",
     "what-the-diff": "^0.6.0",
-    "yaml": "^2.3.1"
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
