@@ -1,8 +1,7 @@
-export { BackportExtension } from './types';
-export { electronPatchesExtension } from './electron-patches';
-
-import { BackportExtension } from './types';
+import type { BackportExtension } from './types';
 import { electronPatchesExtension } from './electron-patches';
+
+export { electronPatchesExtension, type BackportExtension };
 
 export const defaultExtensions: BackportExtension[] = [
   electronPatchesExtension,
