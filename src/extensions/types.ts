@@ -1,4 +1,4 @@
-import { SimpleGit } from 'simple-git';
+import type { SimpleGit } from 'simple-git';
 
 export interface BackportExtension {
   name: string;
