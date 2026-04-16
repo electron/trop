@@ -3,7 +3,7 @@ import * as path from 'path';
 import { SimpleGit } from 'simple-git';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
-import { BackportExtension } from './types';
+import type { BackportExtension } from './types';
 
 // patch content --> array of .patches files that the patch changed
 const getChangedPatchesFiles = (patchContents: string): string[] => {
