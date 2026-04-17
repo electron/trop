@@ -5,6 +5,7 @@ import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
 import { isUtf8 } from 'buffer';
+import { defaultExtensions } from '../extensions';
 
 const cleanRawGitString = (s: string) => {
   let nS = s.trim();
@@ -79,6 +80,10 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
     try {
       await fs.promises.writeFile(patchPath, patch, 'utf8');
       await git.raw(['am', '-3', '--keep-cr', patchPath]);
+
+      for (const ext of defaultExtensions) {
+        await ext.afterApply({ git, dir: options.dir, patch });
+      }
     } catch (error) {
       log(
         'backportCommitsToBranch',
