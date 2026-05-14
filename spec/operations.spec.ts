@@ -417,7 +417,11 @@ describe('runner', () => {
 
       // Main branch advances with an unrelated commit.
       runGit(sourceDir, ['checkout', 'main']);
-      await writeRepoFile(sourceDir, 'unrelated.txt', 'unrelated-main-change\n');
+      await writeRepoFile(
+        sourceDir,
+        'unrelated.txt',
+        'unrelated-main-change\n',
+      );
       runGit(sourceDir, ['add', 'unrelated.txt']);
       runGit(sourceDir, ['commit', '-m', 'chore: unrelated main change']);
 
