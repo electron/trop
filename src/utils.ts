@@ -96,12 +96,23 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
   const { context } = opts;
   if (!context) return;
 
-  const commits = (
-    await context.octokit.paginate(
-      'GET /repos/{owner}/{repo}/pulls/{pull_number}/commits',
-      context.repo({ pull_number: opts.pr.number, per_page: 100 }),
-    )
-  ).map((commit) => commit.sha);
+  const allCommits = await context.octokit.paginate(
+    'GET /repos/{owner}/{repo}/pulls/{pull_number}/commits',
+    context.repo({ pull_number: opts.pr.number, per_page: 100 }),
+  );
+
+  const mergeCommits = allCommits.filter((c) => c.parents.length > 1);
+  if (mergeCommits.length > 0) {
+    log(
+      'backportImpl',
+      LogLevel.INFO,
+      `Skipping ${mergeCommits.length} merge commit(s) from PR #${opts.pr.number}: ${mergeCommits.map((c) => c.sha).join(', ')}`,
+    );
+  }
+
+  const commits = allCommits
+    .filter((commit) => commit.parents.length <= 1)
+    .map((commit) => commit.sha);
 
   if (commits.length === 0) {
     log(

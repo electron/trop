@@ -384,6 +384,86 @@ describe('runner', () => {
         `${expectedShearedPatches}\n`,
       );
     });
+
+    it('applies only non-merge-commit patches when merge commits are filtered', async () => {
+      const remoteDir = await makeTempDir('trop-remote-');
+      const sourceDir = await makeTempDir('trop-source-');
+      const targetDir = await makeTempDir('trop-target-');
+      const workDir = await makeTempDir('trop-work-');
+
+      runGit(remoteDir, ['init', '--bare']);
+
+      // Shared initial state: a file that both the target branch and the
+      // feature branch start from.
+      for (const dir of [sourceDir, targetDir]) {
+        initTestGitRepo(dir);
+        await writeRepoFile(dir, 'feature.txt', 'initial\n');
+        runGit(dir, ['add', '.']);
+        runGit(dir, ['commit', '-m', 'initial']);
+      }
+      runGit(targetDir, ['branch', '42-x-y']);
+
+      // Feature branch: one real commit (single parent).
+      runGit(sourceDir, ['checkout', '-b', 'feature']);
+      await writeRepoFile(sourceDir, 'feature.txt', 'feature-change\n');
+      runGit(sourceDir, ['add', 'feature.txt']);
+      runGit(sourceDir, ['commit', '-m', 'feat: change feature file']);
+      const featurePatch = runGit(sourceDir, [
+        'format-patch',
+        '-1',
+        '--stdout',
+        'HEAD',
+      ]);
+
+      // Main branch advances with an unrelated commit.
+      runGit(sourceDir, ['checkout', 'main']);
+      await writeRepoFile(
+        sourceDir,
+        'unrelated.txt',
+        'unrelated-main-change\n',
+      );
+      runGit(sourceDir, ['add', 'unrelated.txt']);
+      runGit(sourceDir, ['commit', '-m', 'chore: unrelated main change']);
+
+      // Merge main back into feature — this is the merge commit (two parents)
+      // that tryBackportAllCommits now filters out.
+      runGit(sourceDir, ['checkout', 'feature']);
+      runGit(sourceDir, ['merge', 'main', '--no-edit', '--no-ff']);
+
+      // Set up remote / work / target for the backport operation.
+      runGit(targetDir, ['remote', 'add', 'origin', remoteDir]);
+      runGit(targetDir, ['push', 'origin', 'main', '42-x-y']);
+      runGit(remoteDir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+      runGit(workDir, ['clone', remoteDir, '.']);
+      runGit(workDir, ['config', 'user.name', 'Trop Test']);
+      runGit(workDir, ['config', 'user.email', 'trop@example.com']);
+      runGit(workDir, ['remote', 'add', 'target_repo', remoteDir]);
+      runGit(workDir, ['fetch', 'target_repo']);
+
+      // Pass only the single-parent (non-merge) patch — mirroring what
+      // tryBackportAllCommits does after filtering out merge commits.
+      const result = await backportCommitsToBranch({
+        context: {} as never,
+        dir: workDir,
+        github: {} as never,
+        patches: [featurePatch],
+        shouldPush: false,
+        slug: 'electron/trop',
+        targetBranch: '42-x-y',
+        targetRemote: 'target_repo',
+        tempBranch: 'backport-to-42-x-y',
+      });
+      expect(result).toEqual({ dir: workDir });
+
+      // The feature commit's change must be present.
+      expect(
+        await fs.promises.readFile(path.join(workDir, 'feature.txt'), 'utf8'),
+      ).toBe('feature-change\n');
+
+      // The unrelated change introduced by the main-branch commit (which was
+      // only reachable via the merge commit) must NOT be present.
+      expect(fs.existsSync(path.join(workDir, 'unrelated.txt'))).toBe(false);
+    });
   });
 
   describe('updateManualBackport()', { timeout: 30_000 }, () => {
