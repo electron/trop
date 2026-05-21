@@ -37,6 +37,8 @@ const runGit = (cwd: string, args: string[]) => {
 
 const initTestGitRepo = (dir: string) => {
   runGit(dir, ['init']);
+  runGit(dir, ['config', 'gc.autoDetach', 'false']);
+  runGit(dir, ['config', 'maintenance.autoDetach', 'false']);
   runGit(dir, ['checkout', '-b', 'main']);
   runGit(dir, ['config', 'user.name', 'Trop Test']);
   runGit(dir, ['config', 'user.email', 'trop@example.com']);
@@ -103,7 +105,9 @@ describe('runner', () => {
     beforeEach(async () => {
       dir = await fs.promises.mkdtemp(path.resolve(os.tmpdir(), 'trop-spec-'));
       await fs.promises.mkdir(dir, { recursive: true });
-      spawnSync('git', ['init'], { cwd: dir });
+      runGit(dir, ['init']);
+      runGit(dir, ['config', 'gc.autoDetach', 'false']);
+      runGit(dir, ['config', 'maintenance.autoDetach', 'false']);
     });
 
     afterEach(async () => {
