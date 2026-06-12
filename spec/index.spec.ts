@@ -20,7 +20,11 @@ import {
 } from '../src/operations/backport-to-location';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
 
-import { labelClosedPR, getPRNumbersFromPRBody } from '../src/utils';
+import {
+  labelClosedPR,
+  getPRNumbersFromPRBody,
+  updatePRBranch,
+} from '../src/utils';
 import * as checkUtils from '../src/utils/checks-util';
 
 // event fixtures
@@ -29,6 +33,7 @@ const issueCommentBackportCreatedEvent = require('./fixtures/issue_comment_backp
 const issueCommentBackportToCreatedEvent = require('./fixtures/issue_comment_backport_to.created.json');
 const issueCommentBackportToMultipleCreatedEvent = require('./fixtures/issue_comment_backport_to_multiple.created.json');
 const issueCommentBackportToMultipleCreatedSpacesEvent = require('./fixtures/issue_comment_backport_to_multiple_spaces.created.json');
+const issueCommentUpdateBranchCreatedEvent = require('./fixtures/issue_comment_update_branch.created.json');
 
 const backportPRMergedBotEvent = require('./fixtures/backport_pull_request.merged.bot.json');
 const backportPRClosedBotEvent = require('./fixtures/backport_pull_request.closed.bot.json');
@@ -96,6 +101,7 @@ vi.mock('../src/utils', () => ({
   labelClosedPR: vi.fn(),
   isAuthorizedUser: vi.fn().mockResolvedValue([true]),
   getPRNumbersFromPRBody: vi.fn().mockReturnValue([12345]),
+  updatePRBranch: vi.fn(),
 }));
 
 vi.mock('../src/utils/env-util', () => ({
@@ -335,6 +341,17 @@ describe('trop', () => {
       await robot.receive(issueCommentBackportToCreatedEvent);
 
       expect(backportToBranch).toHaveBeenCalledTimes(0);
+    });
+
+    it('triggers a branch update on `/trop update-branch` comment', async () => {
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, MOCK_PR);
+
+      await robot.receive(issueCommentUpdateBranchCreatedEvent);
+
+      expect(updatePRBranch).toHaveBeenCalled();
     });
   });
 

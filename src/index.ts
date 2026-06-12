@@ -5,6 +5,7 @@ import {
   getPRNumbersFromPRBody,
   isAuthorizedUser,
   labelClosedPR,
+  updatePRBranch,
 } from './utils';
 import {
   addLabels,
@@ -662,6 +663,18 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
 
             backportToBranch(robot, context, pr as WebHookPR, branch);
           }
+          return true;
+        },
+      },
+      {
+        name: 'update branch',
+        command: /^update-branch$/,
+        execute: async () => {
+          const { data: pr } = await context.octokit.pulls.get(
+            context.repo({ pull_number: issue.number }),
+          );
+
+          await updatePRBranch(context, pr as WebHookPR);
           return true;
         },
       },
