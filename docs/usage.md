@@ -39,6 +39,10 @@ and update the labels appropriately.
 **Note**
   - You can delete the original PR branch whenever you want - trop does not need the original branch to perform the backport.
 
+**Updating a Backport Branch**:
+1. On an open pull request whose branch has fallen behind its base branch, create a new comment with the following body: `/trop update-branch`
+2. `trop` will merge the latest changes from the base branch into the pull request's branch (the same operation as the "Update branch" button, but attributed to trop)
+
 #### Environment Variables
 
 `trop` is configured by default to use variable specific to electron, so in order to get the best experience you should be sure to set the following:
