@@ -104,10 +104,6 @@ vi.mock('../src/utils', () => ({
   updatePRBranch: vi.fn(),
 }));
 
-vi.mock('../src/utils/env-util', () => ({
-  getEnvVar: vi.fn(),
-}));
-
 vi.mock('../src/operations/update-manual-backport', () => ({
   updateManualBackport: vi.fn(),
 }));
