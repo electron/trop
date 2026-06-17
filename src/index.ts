@@ -671,6 +671,19 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             context.repo({ pull_number: issue.number }),
           );
 
+          if (pr.user?.login !== getEnvVar('BOT_USER_NAME')) {
+            robot.log(
+              `#${issue.number} is not a trop backport PR - skipping update-branch`,
+            );
+            await context.octokit.issues.createComment(
+              context.repo({
+                issue_number: issue.number,
+                body: 'This PR was not created by trop and cannot be updated via this command.',
+              }),
+            );
+            return false;
+          }
+
           await updatePRBranch(context, pr as WebHookPR);
           return true;
         },

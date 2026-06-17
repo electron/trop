@@ -151,9 +151,11 @@ const MOCK_PR = {
   ],
 };
 
+const BOT_USER_NAME = 'trop[bot]';
+
 describe('trop', () => {
   let robot: Probot;
-  process.env = { ...process.env, BOT_USER_NAME: 'trop[bot]' };
+  process.env = { ...process.env, BOT_USER_NAME };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -343,11 +345,36 @@ describe('trop', () => {
       nock(GH_API)
         .persist()
         .get('/repos/codebytere/public-repo/pulls/1234')
-        .reply(200, MOCK_PR);
+        .reply(200, { ...MOCK_PR, user: { login: BOT_USER_NAME } });
 
       await robot.receive(issueCommentUpdateBranchCreatedEvent);
 
       expect(updatePRBranch).toHaveBeenCalled();
+    });
+
+    it('does not trigger a branch update on `/trop update-branch` comment when BOT_USER_NAME is not the author', async () => {
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, { ...MOCK_PR, user: { login: 'someone-else' } });
+
+      let comment: string | undefined;
+      nock(GH_API)
+        .post(
+          '/repos/codebytere/public-repo/issues/1234/comments',
+          ({ body }) => {
+            comment = body;
+            return true;
+          },
+        )
+        .reply(200);
+
+      await robot.receive(issueCommentUpdateBranchCreatedEvent);
+
+      expect(updatePRBranch).not.toHaveBeenCalled();
+      expect(comment).toEqual(
+        'This PR was not created by trop and cannot be updated via this command.',
+      );
     });
   });
 
@@ -968,7 +995,7 @@ Notes: <!-- One-line Change Summary Here-->`,
         state: 'closed',
         title: 'mirror',
         user: {
-          login: 'trop[bot]',
+          login: BOT_USER_NAME,
         },
       };
 
@@ -1013,7 +1040,7 @@ Notes: <!-- One-line Change Summary Here-->`,
         state: 'closed',
         title: 'mirror',
         user: {
-          login: 'trop[bot]',
+          login: BOT_USER_NAME,
         },
       };
 
