@@ -2,8 +2,8 @@ import { ApplicationFunction } from 'probot';
 
 import {
   backportImpl,
+  checkUserHasWriteAccess,
   getPRNumbersFromPRBody,
-  isAuthorizedUser,
   labelClosedPR,
   updatePRBranch,
 } from './utils';
@@ -545,7 +545,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     if (!cmd.startsWith(TROP_COMMAND_PREFIX)) return;
 
     // Allow all users with push access to handle backports.
-    if (!(await isAuthorizedUser(context, comment.user.login))) {
+    if (!(await checkUserHasWriteAccess(context, comment.user.login))) {
       robot.log(
         `@${comment.user.login} is not authorized to run PR backports - stopping`,
       );
