@@ -268,19 +268,6 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
   return success;
 };
 
-export const isAuthorizedUser = async (
-  context: WebHookIssueContext,
-  username: string,
-) => {
-  const { data } = await context.octokit.repos.getCollaboratorPermissionLevel(
-    context.repo({
-      username,
-    }),
-  );
-
-  return ['admin', 'write'].includes(data.permission);
-};
-
 export const getPRNumbersFromPRBody = (pr: WebHookPR, checkNotBot = false) => {
   const backportNumbers: number[] = [];
 
@@ -362,7 +349,7 @@ export const isSemverMinorPR = async (
   return hasLabel || hasPrefix;
 };
 
-const checkUserHasWriteAccess = async (
+export const checkUserHasWriteAccess = async (
   context: SimpleWebHookRepoContext,
   user: string,
 ) => {

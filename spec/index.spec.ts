@@ -99,7 +99,7 @@ const backportRequestedLabel = {
 
 vi.mock('../src/utils', () => ({
   labelClosedPR: vi.fn(),
-  isAuthorizedUser: vi.fn().mockResolvedValue([true]),
+  checkUserHasWriteAccess: vi.fn().mockResolvedValue(true),
   getPRNumbersFromPRBody: vi.fn().mockReturnValue([12345]),
   updatePRBranch: vi.fn(),
 }));
