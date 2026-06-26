@@ -107,7 +107,11 @@ export const updateManualBackport = async (
     }
 
     // We should only comment if there is not a previous existing comment
-    const commentBody = `@${pr.user.login} has manually backported this PR to "${pr.base.ref}", \
+    // Bot logins include "[bot]" suffix which GitHub can't @mention correctly,
+    // so we use a plain reference for bots instead of a broken @mention.
+    const authorRef =
+      pr.user.type === 'Bot' ? pr.user.login : `@${pr.user.login}`;
+    const commentBody = `${authorRef} has manually backported this PR to "${pr.base.ref}", \
 please check out #${pr.number}`;
 
     // TODO(codebytere): Once probot updates to @octokit/rest@16 we can use .paginate to
