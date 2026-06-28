@@ -1385,5 +1385,120 @@ Notes: <!-- One-line Change Summary Here-->`,
         conclusion: CheckRunStatus.SUCCESS,
       });
     });
+
+    it('fails the backport validity check if any referenced PR is invalid regardless of ordering', async () => {
+      // An invalid reference listed before a valid one must not be able to
+      // force the aggregate check green via last-write-wins ordering.
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234, 5678]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
+      );
+      event.payload.pull_request.base.ref = '30-x-y';
+      event.payload.action = 'synchronize';
+
+      // First reference: invalid (not merged).
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/1234')
+        .reply(200, {
+          merged: false,
+          base: {
+            ref: 'main',
+          },
+        });
+
+      // Second reference: a real, merged PR targeting the default branch.
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/5678')
+        .reply(200, {
+          merged: true,
+          base: {
+            ref: 'main',
+          },
+        });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      await robot.receive(event);
+
+      // The check run must be updated exactly once with a FAILURE conclusion -
+      // it must not be overwritten to SUCCESS by the trailing valid reference.
+      const validityCalls = vi.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls;
+      expect(validityCalls).toHaveLength(1);
+      expect(validityCalls[0][2]).toMatchObject({
+        title: 'Invalid Backport',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+    });
+
+    it('keeps the backport validity check failed for a non-fast-track PR with no backport declaration', async () => {
+      // A PR targeting a release branch with no "Backport of #N" declaration
+      // that does not qualify for fast-track must FAIL - and the aggregation
+      // of declared references must not overwrite that failure with success.
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
+      );
+      event.payload.pull_request.base.ref = '30-x-y';
+      event.payload.action = 'synchronize';
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      await robot.receive(event);
+
+      // The fast-track branch must be the sole updater here - exactly one
+      // FAILURE call, never overwritten to SUCCESS by the aggregation block.
+      const validityCalls = vi.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls;
+      expect(validityCalls).toHaveLength(1);
+      expect(validityCalls[0][2]).toMatchObject({
+        title: 'Invalid Backport',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+    });
   });
 });
