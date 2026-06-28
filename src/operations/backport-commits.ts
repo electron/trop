@@ -136,7 +136,17 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
           tree: await Promise.all(
             changedFiles.map(async (changedFile) => {
               const onDiskPath = path.resolve(options.dir, changedFile);
-              if (!fs.existsSync(onDiskPath)) {
+
+              // Use lstat (not stat/existsSync) so we never follow symbolic
+              // links. The commit content is attacker-controlled, so a PR can
+              // add a git symlink (mode 120000) pointing at an absolute path on
+              // the trop host (e.g. /proc/self/environ or a secret/token file).
+              // Dereferencing it would upload that file's contents into the
+              // public backport PR. Instead we reproduce the symlink as-is.
+              let stat: fs.Stats;
+              try {
+                stat = await fs.promises.lstat(onDiskPath);
+              } catch {
                 return {
                   path: changedFile,
                   mode: '100644',
@@ -144,8 +154,31 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
                   sha: null,
                 };
               }
+
+              // Preserve symbolic links as git symlink blobs (mode 120000)
+              // whose content is the link target string itself. readlink does
+              // not dereference the link, so the target file is never read.
+              if (stat.isSymbolicLink()) {
+                const linkTarget = await fs.promises.readlink(onDiskPath);
+                return {
+                  path: changedFile,
+                  mode: '120000',
+                  type: 'blob',
+                  content: linkTarget,
+                };
+              }
+
+              // Only ever read the bytes of regular files.
+              if (!stat.isFile()) {
+                return {
+                  path: changedFile,
+                  mode: '100644',
+                  type: 'blob',
+                  sha: null,
+                };
+              }
+
               const fileContents = await fs.promises.readFile(onDiskPath);
-              const stat = await fs.promises.stat(onDiskPath);
               const userMode = (stat.mode & parseInt('777', 8)).toString(8)[0];
               if (isUtf8(fileContents)) {
                 return {
