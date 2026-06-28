@@ -190,7 +190,11 @@ const applyPatchesChanges = async (
       );
       continue;
     }
-    await git.add(patchesPath);
+    // Stage via a raw invocation with an explicit end-of-options separator and
+    // the validated absolute path. The untrusted patch-derived path may begin
+    // with a dash (e.g. `--foo/.patches`); without `--`, git would parse it as
+    // a command-line option rather than a pathspec (CWE-88 argument injection).
+    await git.raw(['add', '--', absPath]);
     shouldAmend = true;
   }
 
