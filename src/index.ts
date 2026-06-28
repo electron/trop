@@ -333,27 +333,45 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
               failureMap.set(oldPRNumber, cause);
             }
           }
-        }
 
-        for (const oldPRNumber of oldPRNumbers) {
-          if (failureMap.has(oldPRNumber)) {
+          // The validity check must reflect the worst-case result across ALL
+          // declared backport references. If any referenced PR is invalid the
+          // aggregate check must conclude FAILURE regardless of the order in
+          // which the references appear in the PR body. Compute a single
+          // conclusion from the full failureMap rather than overwriting the
+          // same check run once per reference (which would be last-write-wins
+          // and let an author bury an invalid reference behind a valid one).
+          const invalidPRNumbers = oldPRNumbers.filter((oldPRNumber) =>
+            failureMap.has(oldPRNumber),
+          );
+
+          if (invalidPRNumbers.length > 0) {
+            const firstInvalid = invalidPRNumbers[0];
             robot.log(
               `#${pr.number} is targeting a branch that is not ${
                 pr.base.repo.default_branch
-              } - ${failureMap.get(oldPRNumber)}`,
+              } - ${failureMap.get(firstInvalid)}`,
             );
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Invalid Backport',
               summary: `This PR is targeting a branch that is not ${
                 pr.base.repo.default_branch
-              } but ${failureMap.get(oldPRNumber)}`,
+              } but ${failureMap.get(firstInvalid)}`,
               conclusion: CheckRunStatus.FAILURE,
             });
           } else {
-            robot.log(`#${pr.number} is a valid backport of #${oldPRNumber}`);
+            robot.log(
+              `#${pr.number} is a valid backport of ${oldPRNumbers
+                .map((oldPRNumber) => `#${oldPRNumber}`)
+                .join(', ')}`,
+            );
             await updateBackportValidityCheck(context, checkRun, {
               title: 'Valid Backport',
-              summary: `This PR is declared as backporting "#${oldPRNumber}" which is a valid PR that has been merged into ${pr.base.repo.default_branch}`,
+              summary: `This PR is declared as backporting ${oldPRNumbers
+                .map((oldPRNumber) => `"#${oldPRNumber}"`)
+                .join(
+                  ', ',
+                )} which is a valid PR that has been merged into ${pr.base.repo.default_branch}`,
               conclusion: CheckRunStatus.SUCCESS,
             });
           }
