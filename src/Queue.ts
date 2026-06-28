@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { log } from './utils/log-util';
+import { scrubValueForLog } from './utils/scrub-util';
 import { LogLevel } from './enums';
 
 export type Executor = () => Promise<void>;
@@ -38,11 +39,11 @@ export class ExecutionQueue extends EventEmitter {
       .then(() => this.runNext(fns[0]))
       .catch((err: unknown) => {
         if (!process.env.SPEC_RUNNING) {
-          console.error(err);
+          console.error(scrubValueForLog(err));
         }
         fns[2](err)
           .catch((e) => {
-            if (!process.env.SPEC_RUNNING) console.error(e);
+            if (!process.env.SPEC_RUNNING) console.error(scrubValueForLog(e));
           })
           .then(() => this.runNext(fns[0]));
       });

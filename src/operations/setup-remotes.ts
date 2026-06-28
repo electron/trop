@@ -1,6 +1,6 @@
-import simpleGit from 'simple-git';
 import { RemotesOptions } from '../interfaces';
 import { log } from '../utils/log-util';
+import { authenticatedGit } from '../utils/git-util';
 import { LogLevel } from '../enums';
 
 /**
@@ -14,7 +14,7 @@ import { LogLevel } from '../enums';
 export const setupRemotes = async (options: RemotesOptions) => {
   log('setupRemotes', LogLevel.INFO, 'Setting up git remotes');
 
-  const git = simpleGit(options.dir);
+  const git = authenticatedGit(options.dir, options.accessToken);
 
   // Add git remotes.
   for (const remote of options.remotes) {

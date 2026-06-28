@@ -1,4 +1,5 @@
 import { LogLevel } from '../enums';
+import { scrubCredentials } from './scrub-util';
 
 /**
  * Logs information about different actions taking place to console.
@@ -12,7 +13,7 @@ export const log = (
   logLevel: LogLevel,
   ...message: unknown[]
 ) => {
-  const output = `${functionName}: ${message}`;
+  const output = scrubCredentials(`${functionName}: ${message}`);
 
   if (logLevel === LogLevel.INFO) {
     console.info(output);

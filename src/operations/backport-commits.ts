@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import simpleGit from 'simple-git';
 import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
+import { authenticatedGit } from '../utils/git-util';
 import { LogLevel } from '../enums';
 import { isUtf8 } from 'buffer';
 import { defaultExtensions } from '../extensions';
@@ -35,7 +35,7 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
     `Backporting ${options.patches.length} commits to ${options.targetBranch}`,
   );
 
-  const git = simpleGit(options.dir);
+  const git = authenticatedGit(options.dir, options.accessToken);
 
   // Abort previous patch attempts
   try {

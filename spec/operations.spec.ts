@@ -119,6 +119,7 @@ describe('runner', () => {
     it('should set new remotes correctly', async () => {
       await setupRemotes({
         dir,
+        accessToken: '',
         remotes: [
           {
             name: 'origin',
@@ -224,6 +225,7 @@ describe('runner', () => {
       const result = await backportCommitsToBranch({
         context: {} as never,
         dir: workDir,
+        accessToken: '',
         github: {} as never,
         patches: [patch],
         shouldPush: false,
@@ -449,6 +451,7 @@ describe('runner', () => {
       const result = await backportCommitsToBranch({
         context: {} as never,
         dir: workDir,
+        accessToken: '',
         github: {} as never,
         patches: [featurePatch],
         shouldPush: false,

@@ -17,6 +17,7 @@ import * as labelUtils from './utils/label-utils';
 import { initRepo } from './operations/init-repo';
 import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
+import { repoCloneUrl } from './utils/git-util';
 import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { getOrCreateCheckRun } from './utils/checks-util';
@@ -183,6 +184,7 @@ and must be performed manually.',
   const success = await backportCommitsToBranch({
     dir: opts.dir,
     slug: opts.slug,
+    accessToken: opts.repoAccessToken,
     targetBranch: opts.targetBranch,
     tempBranch: opts.tempBranch,
     patches,
@@ -248,6 +250,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
   const success = await backportCommitsToBranch({
     dir: opts.dir,
     slug: opts.slug,
+    accessToken: opts.repoAccessToken,
     targetBranch: opts.targetBranch,
     tempBranch: opts.tempBranch,
     patches: [patch],
@@ -584,9 +587,10 @@ export const backportImpl = async (
       createdDir = dir;
       log('backportImpl', LogLevel.INFO, `Working directory cleaned: ${dir}`);
 
-      const targetRepoRemote = `https://x-access-token:${repoAccessToken}@github.com/${slug}.git`;
+      const targetRepoRemote = repoCloneUrl(slug);
       await setupRemotes({
         dir,
+        accessToken: repoAccessToken,
         remotes: [
           {
             name: 'target_repo',

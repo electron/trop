@@ -7,6 +7,7 @@ import {
 
 export interface RemotesOptions {
   dir: string;
+  accessToken: string;
   remotes: {
     name: string;
     value: string;
@@ -21,6 +22,7 @@ export interface InitRepoOptions {
 export interface BackportOptions {
   dir: string;
   slug: string;
+  accessToken: string;
   targetRemote: string;
   targetBranch: string;
   tempBranch: string;
