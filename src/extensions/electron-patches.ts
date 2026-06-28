@@ -14,6 +14,19 @@ const getChangedPatchesFiles = (patchContents: string): string[] => {
     .filter((file, idx, arr) => arr.indexOf(file) === idx); // no dupes
 };
 
+// Patch text is fully attacker-controlled (the `diff --git` regex above also
+// matches lines in the commit message body, not just real diff headers), so any
+// path derived from it is untrusted. Returns true only when `candidate`
+// resolves to a location strictly inside `root`, rejecting absolute paths and
+// any `..` traversal that would escape the per-job working directory.
+const isWithinDir = (root: string, candidate: string): boolean => {
+  if (path.isAbsolute(candidate)) return false;
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(resolvedRoot, candidate);
+  const rel = path.relative(resolvedRoot, resolved);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+};
+
 // Handles a special case for Electron `.patches` files: `git am` can pull
 // in extra context lines. But this breaks us because those extra lines
 // are for .patch files that don't exist in the target branch.
@@ -28,6 +41,16 @@ const applyPatchesChanges = async (
   let shouldAmend = false;
 
   for (const patchesPath of getChangedPatchesFiles(patchContents)) {
+    // Never touch a path that escapes the per-job repo directory.
+    if (!isWithinDir(repoDir, patchesPath)) {
+      log(
+        'backportCommitsToBranch',
+        LogLevel.WARN,
+        `Ignoring out-of-tree .patches path derived from patch contents: ${patchesPath}`,
+      );
+      continue;
+    }
+
     const patchDir = path.posix.dirname(patchesPath);
     const absPath = path.resolve(repoDir, patchesPath);
     const current = fs.existsSync(absPath)
@@ -41,9 +64,11 @@ const applyPatchesChanges = async (
       .split(/\r?\n/)
       .filter((line) => {
         const trimmed = line.trim();
+        const relPath = path.posix.join(patchDir, trimmed);
         return (
           !isPatchFile(trimmed) ||
-          fs.existsSync(path.resolve(repoDir, patchDir, trimmed))
+          (isWithinDir(repoDir, relPath) &&
+            fs.existsSync(path.resolve(repoDir, relPath)))
         );
       })
       .join(newline);
