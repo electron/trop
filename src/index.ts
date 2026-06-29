@@ -154,8 +154,9 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     }
   };
 
-  const gitExists = execSync('which git', { encoding: 'utf-8' }).trim();
-  if (/git not found/.test(gitExists)) {
+  try {
+    execSync('git --version', { stdio: 'ignore' });
+  } catch {
     robot.log('Git not found - unable to proceed with backporting');
     process.exit(1);
   }
@@ -268,7 +269,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
 
         const FASTTRACK_PREFIXES = ['build:', 'ci:'];
         const FASTTRACK_USERS = [getEnvVar('BOT_USER_NAME')];
-        const FASTTRACK_LABELS: string[] = ['fast-track 🚅'];
+        const FASTTRACK_LABELS: string[] = ['fast-track \u{1F685}'];
 
         const failureMap = new Map();
 
