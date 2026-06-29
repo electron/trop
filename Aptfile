@@ -1,2 +1,2 @@
 # Heroku-24 stack doesn't include git by default.
-git-all
+git
