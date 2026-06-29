@@ -269,7 +269,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
 
         const FASTTRACK_PREFIXES = ['build:', 'ci:'];
         const FASTTRACK_USERS = [getEnvVar('BOT_USER_NAME')];
-        const FASTTRACK_LABELS: string[] = ['fast-track \u{1F685}'];
+        const FASTTRACK_LABELS: string[] = ['fast-track 🚅'];
 
         const failureMap = new Map();
 
