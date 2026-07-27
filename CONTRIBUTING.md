@@ -6,10 +6,6 @@
 
 Hi there! We're thrilled that you'd like to contribute to this project. Your help is essential for keeping it great.
 
-This project adheres to the Contributor Covenant
-[code of conduct](https://github.com/electron/electron/blob/main/CODE_OF_CONDUCT.md).
-By participating, you are expected to uphold this code.
-
 ## Submitting a pull request
 
 1. [Fork][fork] and clone the repository
