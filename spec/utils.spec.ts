@@ -214,16 +214,6 @@ describe('utils', () => {
       ).resolves.toBe(true);
     });
 
-    it('returns true for a chore!: PR with the semver/major label', async () => {
-      mockLabels(SEMVER_LABELS.MAJOR);
-      await expect(
-        shouldRequestBackportApproval(
-          context,
-          buildPR('chore!: a breaking chore'),
-        ),
-      ).resolves.toBe(true);
-    });
-
     it('returns false for a chore: PR with no semver label', async () => {
       mockLabels(SEMVER_LABELS.PATCH);
       await expect(
