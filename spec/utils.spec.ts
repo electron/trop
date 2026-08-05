@@ -199,16 +199,6 @@ describe('utils', () => {
       ).resolves.toBe(true);
     });
 
-    it('returns true when the PR has the legacy semver-minor label', async () => {
-      mockLabels('semver-minor');
-      await expect(
-        shouldRequestBackportApproval(
-          context,
-          buildPR('refactor: minor change'),
-        ),
-      ).resolves.toBe(true);
-    });
-
     it('returns true when the PR title starts with feat:', async () => {
       await expect(
         shouldRequestBackportApproval(context, buildPR('feat: a new feature')),

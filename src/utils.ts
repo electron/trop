@@ -339,18 +339,11 @@ export const shouldRequestBackportApproval = async (
     `Checking if #${pr.number} requires backport approval`,
   );
 
-  // Kept for backwards compatibility with repos using the legacy label.
-  const LEGACY_SEMVER_MINOR_LABEL = 'semver-minor';
-
   const hasPrefix =
     pr.title.startsWith('feat:') || pr.title.startsWith('feat!:');
   if (hasPrefix) return true;
 
-  const approvalLabels = [
-    SEMVER_LABELS.MINOR,
-    SEMVER_LABELS.MAJOR,
-    LEGACY_SEMVER_MINOR_LABEL,
-  ];
+  const approvalLabels = [SEMVER_LABELS.MINOR, SEMVER_LABELS.MAJOR];
   for (const label of approvalLabels) {
     if (await labelUtils.labelExistsOnPR(context, pr.number, label)) {
       return true;
