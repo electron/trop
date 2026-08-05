@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as logUtils from '../src/utils/log-util';
 import { LogLevel } from '../src/enums';
-import { tagBackportReviewers, updatePRBranch } from '../src/utils';
+import {
+  shouldRequestBackportApproval,
+  tagBackportReviewers,
+  updatePRBranch,
+} from '../src/utils';
+import { SEMVER_LABELS } from '../src/constants';
 import type { WebHookPR } from '../src/types';
 
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
@@ -142,6 +147,78 @@ describe('utils', () => {
         issue_number: 1234,
         body: 'I was unable to update this branch with the latest changes from `main`. Please update it manually.',
       });
+    });
+  });
+
+  describe('shouldRequestBackportApproval()', () => {
+    const octokit = {
+      issues: {
+        listLabelsOnIssue: vi.fn(),
+      },
+    };
+
+    const context = {
+      octokit,
+      repo: vi.fn((obj) => obj),
+    } as any;
+
+    const buildPR = (title: string) =>
+      ({
+        number: 1234,
+        title,
+      }) as WebHookPR;
+
+    const mockLabels = (...labels: string[]) => {
+      octokit.issues.listLabelsOnIssue.mockResolvedValue({
+        data: labels.map((name) => ({ name })),
+      });
+    };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockLabels();
+    });
+
+    it('returns true when the PR has the semver/major label', async () => {
+      mockLabels(SEMVER_LABELS.MAJOR);
+      await expect(
+        shouldRequestBackportApproval(
+          context,
+          buildPR('refactor: major change'),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('returns true when the PR has the semver/minor label', async () => {
+      mockLabels(SEMVER_LABELS.MINOR);
+      await expect(
+        shouldRequestBackportApproval(
+          context,
+          buildPR('refactor: minor change'),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('returns true when the PR title starts with feat:', async () => {
+      await expect(
+        shouldRequestBackportApproval(context, buildPR('feat: a new feature')),
+      ).resolves.toBe(true);
+    });
+
+    it('returns true when the PR title starts with feat!:', async () => {
+      await expect(
+        shouldRequestBackportApproval(
+          context,
+          buildPR('feat!: a breaking new feature'),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('returns false for a chore: PR with no semver label', async () => {
+      mockLabels(SEMVER_LABELS.PATCH);
+      await expect(
+        shouldRequestBackportApproval(context, buildPR('chore: a small chore')),
+      ).resolves.toBe(false);
     });
   });
 });

@@ -58,7 +58,7 @@ const buildPatchList = (...entries: string[]) => entries.join('\n');
 
 vi.mock('../src/utils', () => ({
   tagBackportReviewers: vi.fn().mockResolvedValue(undefined),
-  isSemverMinorPR: vi.fn().mockReturnValue(false),
+  shouldRequestBackportApproval: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock('../src/utils/label-utils', () => ({

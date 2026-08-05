@@ -10,6 +10,7 @@ import {
   DEFAULT_BACKPORT_REVIEW_TEAM,
   BACKPORT_LABEL,
   CHECK_PREFIX,
+  SEMVER_LABELS,
 } from './constants';
 import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
@@ -328,25 +329,28 @@ const getOriginalBackportNumber = async (
   return originalPR.number;
 };
 
-export const isSemverMinorPR = async (
+export const shouldRequestBackportApproval = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
 ) => {
   log(
-    'isSemverMinorPR',
+    'shouldRequestBackportApproval',
     LogLevel.INFO,
-    `Checking if #${pr.number} is semver-minor`,
-  );
-  const SEMVER_MINOR_LABEL = 'semver-minor';
-
-  const hasPrefix = pr.title.startsWith('feat:');
-  const hasLabel = await labelUtils.labelExistsOnPR(
-    context,
-    pr.number,
-    SEMVER_MINOR_LABEL,
+    `Checking if #${pr.number} requires backport approval`,
   );
 
-  return hasLabel || hasPrefix;
+  const hasPrefix =
+    pr.title.startsWith('feat:') || pr.title.startsWith('feat!:');
+  if (hasPrefix) return true;
+
+  const approvalLabels = [SEMVER_LABELS.MINOR, SEMVER_LABELS.MAJOR];
+  for (const label of approvalLabels) {
+    if (await labelUtils.labelExistsOnPR(context, pr.number, label)) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 export const checkUserHasWriteAccess = async (
@@ -720,11 +724,11 @@ export const backportImpl = async (
 
         const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];
 
-        if (await isSemverMinorPR(context, pr)) {
+        if (await shouldRequestBackportApproval(context, pr)) {
           log(
             'backportImpl',
             LogLevel.INFO,
-            `Determined that ${pr.number} is semver-minor`,
+            `Determined that ${pr.number} requires backport approval`,
           );
           labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
         }
