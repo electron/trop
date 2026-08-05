@@ -5,7 +5,7 @@ import {
 } from '../constants';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPRContext } from '../types';
-import { isSemverMinorPR, tagBackportReviewers } from '../utils';
+import { shouldRequestBackportApproval, tagBackportReviewers } from '../utils';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 
@@ -97,11 +97,11 @@ export const updateManualBackport = async (
       }
     }
 
-    if (await isSemverMinorPR(context, pr)) {
+    if (await shouldRequestBackportApproval(context, pr)) {
       log(
         'updateManualBackport',
         LogLevel.INFO,
-        `Determined that ${pr.number} is semver-minor`,
+        `Determined that ${pr.number} requires backport approval`,
       );
       newPRLabelsToAdd.push(BACKPORT_REQUESTED_LABEL);
     }
