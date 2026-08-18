@@ -473,7 +473,9 @@ describe('runner', () => {
   describe('updateManualBackport()', { timeout: 30_000 }, () => {
     const octokit = {
       pulls: {
-        get: vi.fn().mockResolvedValue({}),
+        get: vi.fn().mockResolvedValue({
+          data: { user: { login: 'original-author' } },
+        }),
       },
       issues: {
         createComment: vi.fn().mockResolvedValue({}),
@@ -492,6 +494,30 @@ describe('runner', () => {
       expect(tagBackportReviewers).toHaveBeenCalledWith({
         context,
         targetPrNumber: 7,
+        user: 'original-author',
+      });
+    });
+
+    it('does not request review from the original author if they opened the manual backport', async () => {
+      const context = {
+        ...backportPROpenedEvent,
+        octokit: {
+          ...octokit,
+          pulls: {
+            // The author of the manual backport PR in the fixture.
+            get: vi.fn().mockResolvedValue({
+              data: { user: { login: 'codebytere' } },
+            }),
+          },
+        },
+        repo: vi.fn(),
+      };
+      await updateManualBackport(context, PRChange.OPEN, 1234);
+      expect(tagBackportReviewers).toHaveBeenCalled();
+      expect(tagBackportReviewers).toHaveBeenCalledWith({
+        context,
+        targetPrNumber: 7,
+        user: undefined,
       });
     });
 
