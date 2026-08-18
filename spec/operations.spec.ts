@@ -483,7 +483,7 @@ describe('runner', () => {
       },
     };
 
-    it('tags reviewers on manual backport creation', async () => {
+    it('tags reviewers and requests review from the original author on manual backport creation', async () => {
       const context = {
         ...backportPROpenedEvent,
         octokit,
