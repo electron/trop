@@ -139,10 +139,17 @@ please check out #${pr.number}`;
       );
     }
 
-    // Tag default reviewers to manual backport
+    // Tag default reviewers to manual backport, as well as the original
+    // PR author if they have write access. GitHub doesn't allow requesting
+    // a review from the PR author, so skip that if they backported it
+    // themselves.
     await tagBackportReviewers({
       context,
       targetPrNumber: pr.number,
+      user:
+        originalPR.user?.login === pr.user.login
+          ? undefined
+          : originalPR.user?.login,
     });
   } else if (type === PRChange.MERGE) {
     log(
