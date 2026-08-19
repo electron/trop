@@ -554,12 +554,44 @@ describe('trop', () => {
         .get(
           `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
         )
-        .reply(200, []);
+        .reply(200, [backportRequestedLabel]);
 
       await robot.receive(event);
 
-      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
+      // Once to create the missing check run, once to (re-)assert the
+      // pending state after evaluating the live labels.
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(2);
       expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
+    });
+
+    it('does not conclude "Not Required" when "backport/requested" was added after the payload snapshot', async () => {
+      // Regression test for the manual-backport race: the `opened` handler
+      // itself adds `backport/requested` via updateManualBackport, so the
+      // payload's label snapshot can never contain it. The verdict must be
+      // evaluated from the live labels, not the stale snapshot.
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      // Live labels include `backport/requested` even though the payload
+      // snapshot (fixture) does not.
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/issues/7/labels?per_page=100&page=1',
+        )
+        .reply(200, [backportRequestedLabel]);
+
+      await robot.receive(backportPROpenedEvent);
+
+      expect(updateManualBackport).toHaveBeenCalled();
+      expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(2);
     });
 
     it('passes the backport approval check if the "backport/approved" label is on a new backport PR', async () => {
@@ -583,7 +615,7 @@ describe('trop', () => {
         .get(
           `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
         )
-        .reply(200, []);
+        .reply(200, [backportApprovedLabel]);
 
       await robot.receive(event);
 
@@ -624,7 +656,7 @@ describe('trop', () => {
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
       );
 
-      event.payload.label = backportApprovedLabel;
+      event.payload.label = backportRequestedLabel;
       event.payload.pull_request.labels = [backportRequestedLabel];
 
       nock(GH_API)
@@ -654,12 +686,111 @@ describe('trop', () => {
         .get(
           `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
         )
-        .reply(200, MOCK_PR.labels);
+        .reply(200, [backportRequestedLabel]);
 
       await robot.receive(event);
 
       expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
       expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
+    });
+
+    it('re-asserts the pending state even when the check run is already queued', async () => {
+      // Regression test: this previously no-op'd when the run was already
+      // `queued`, letting a slower concurrent invocation holding a stale
+      // payload complete the run last with an incorrect conclusion.
+      const event = JSON.parse(
+        await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
+      );
+
+      event.payload.label = backportRequestedLabel;
+      event.payload.pull_request.labels = [backportRequestedLabel];
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+              status: 'queued',
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, [backportRequestedLabel]);
+
+      await robot.receive(event);
+
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
+      expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
+    });
+
+    it('completes a queued check when the "backport/approved" label is added', async () => {
+      const event = JSON.parse(
+        await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
+      );
+
+      event.payload.label = backportApprovedLabel;
+      event.payload.pull_request.labels = [backportApprovedLabel];
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+              status: 'queued',
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, [backportApprovedLabel]);
+
+      await robot.receive(event);
+
+      expect(checkUtils.queueBackportApprovalCheck).not.toHaveBeenCalled();
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportApprovalCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Approved',
+        summary: 'This PR has been approved for backporting.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
     });
 
     it('passes the backport approval check if the "backport/approved" label is added', async () => {
@@ -691,7 +822,7 @@ describe('trop', () => {
         .get(
           `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
         )
-        .reply(200, MOCK_PR.labels);
+        .reply(200, [backportApprovedLabel]);
 
       await robot.receive(event);
 

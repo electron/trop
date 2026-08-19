@@ -378,11 +378,21 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
           }
         }
 
-        const isBackportApproved = pr.labels.some(
-          (prLabel) => prLabel.name === BACKPORT_APPROVED_LABEL,
+        // Evaluate the approval verdict from the live labels on the PR
+        // rather than the webhook payload's label snapshot. The payload is
+        // frozen at delivery time, so it can never contain a label added
+        // mid-handler (e.g. `backport/requested` added for a manual backport
+        // by updateManualBackport above) and a slow invocation racing with
+        // other deliveries would otherwise stamp a stale verdict last.
+        const isBackportApproved = await labelExistsOnPR(
+          context,
+          pr.number,
+          BACKPORT_APPROVED_LABEL,
         );
-        const isBackportRequested = pr.labels.some(
-          (prLabel) => prLabel.name === BACKPORT_REQUESTED_LABEL,
+        const isBackportRequested = await labelExistsOnPR(
+          context,
+          pr.number,
+          BACKPORT_REQUESTED_LABEL,
         );
 
         if (isBackportApproved) {
@@ -396,22 +406,30 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             conclusion: CheckRunStatus.SUCCESS,
           });
         } else if (!isBackportRequested) {
-          // If backport/approved was removed, add backport/requested back
           if (
             action === 'unlabeled' &&
             label?.name === BACKPORT_APPROVED_LABEL
           ) {
+            // If backport/approved was removed, add backport/requested back
+            // and keep the check pending - the same invocation that flags a
+            // PR as needing approval must never conclude that approval is
+            // not required.
             await addLabels(context, pr.number, [BACKPORT_REQUESTED_LABEL]);
-          }
-          await updateBackportApprovalCheck(context, backportApprovalCheck, {
-            title: 'Backport Approval Not Required',
-            summary: 'This PR does not need backport approval.',
-            conclusion: CheckRunStatus.SUCCESS,
-          });
-        } else {
-          if (backportApprovalCheck.status !== 'queued') {
             await queueBackportApprovalCheck(context);
+          } else {
+            await updateBackportApprovalCheck(context, backportApprovalCheck, {
+              title: 'Backport Approval Not Required',
+              summary: 'This PR does not need backport approval.',
+              conclusion: CheckRunStatus.SUCCESS,
+            });
           }
+        } else {
+          // Always (re-)assert the pending state, even when the check run
+          // already appears queued in our snapshot - a concurrent invocation
+          // holding a stale payload may have completed it (or may be about
+          // to). An idempotent write of the queued state corrects a stale
+          // conclusion instead of silently trusting the snapshot.
+          await queueBackportApprovalCheck(context);
         }
       } else {
         // If we're somehow targeting main and have a check run,

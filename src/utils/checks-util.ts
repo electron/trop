@@ -141,16 +141,39 @@ export async function updateBackportApprovalCheck(
 export async function queueBackportApprovalCheck(context: WebHookPRContext) {
   const pr = context.payload.pull_request;
 
+  const output = {
+    title: 'Needs Backport Approval',
+    summary: 'This PR requires backport approval.',
+  };
+
+  // Re-fetch the existing check run immediately before writing - concurrent
+  // webhook deliveries race through check-then-create and would otherwise
+  // create duplicate check runs for the same head SHA (branch protection
+  // only consults the latest run per name). If a run already exists - even
+  // one a stale invocation already completed - reset it to queued by id
+  // instead of creating another.
+  const existingCheck = await getBackportApprovalCheck(context);
+
+  if (existingCheck) {
+    await context.octokit.checks.update(
+      context.repo({
+        check_run_id: existingCheck.id,
+        name: existingCheck.name,
+        status: 'queued' as 'queued',
+        details_url: 'https://github.com/electron/trop',
+        output,
+      }),
+    );
+    return;
+  }
+
   await context.octokit.checks.create(
     context.repo({
       name: BACKPORT_APPROVAL_CHECK,
       head_sha: pr.head.sha,
       status: 'queued',
       details_url: 'https://github.com/electron/trop',
-      output: {
-        title: 'Needs Backport Approval',
-        summary: 'This PR requires backport approval.',
-      },
+      output,
     }),
   );
 }
