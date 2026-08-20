@@ -418,15 +418,28 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             await queueBackportApprovalCheck(context);
           } else if (
             action === 'opened' &&
-            pr.user.login === getEnvVar('BOT_USER_NAME')
+            getPRNumbersFromPRBody(pr).length > 0
           ) {
-            // trop labels its own backport PRs in a separate API call
-            // shortly after creating them, so when the `opened` event for a
-            // trop-created backport is evaluated the live labels are still
-            // empty and a "not required" verdict would be premature. Keep
-            // the check pending instead - the labeled events that follow
-            // trop's own label writes re-evaluate and settle the verdict.
-            await queueBackportApprovalCheck(context);
+            // A declared backport's labels are written by trop, not by its
+            // author: backportImpl labels trop-created backports in a
+            // separate API call shortly after opening them, and
+            // updateManualBackport labels manually-opened backports (with
+            // at least the base-ref label). On `opened` those labels may
+            // still be in flight, so an empty label set must not conclude
+            // "not required" - keep the check pending and let the labeled
+            // events that follow trop's label writes settle the verdict.
+            // This applies to every declared backport regardless of author;
+            // PRs without a backport declaration (e.g. fast-track PRs) get
+            // no guaranteed labeled event, so they still conclude below.
+            //
+            // Webhook deliveries can be reordered: when a labeled delivery
+            // was processed before this `opened` one, the verdict was
+            // already settled from the same live labels consulted above -
+            // don't supersede a concluded run with a queued one that no
+            // follow-up event would ever complete.
+            if (backportApprovalCheck.status !== 'completed') {
+              await queueBackportApprovalCheck(context);
+            }
           } else {
             await updateBackportApprovalCheck(context, backportApprovalCheck, {
               title: 'Backport Approval Not Required',
