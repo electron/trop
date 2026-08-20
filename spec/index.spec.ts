@@ -594,6 +594,41 @@ describe('trop', () => {
       expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(2);
     });
 
+    it('keeps the backport approval check pending when trop opens its own backport before labeling it', async () => {
+      // Regression test for electron/electron#53035: trop labels its own
+      // backport PRs in a separate API call shortly after creating them,
+      // so the `opened` evaluation of a trop-created backport sees no
+      // labels at all. Concluding "not required" in that window is
+      // premature - the verdict must stay pending until the labeled
+      // events that follow trop's own label writes settle it.
+      const event = JSON.parse(JSON.stringify(backportPROpenedEvent));
+      event.payload.pull_request.user.login = BOT_USER_NAME;
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      // trop has not added any labels to the freshly-created PR yet.
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/issues/7/labels?per_page=100&page=1',
+        )
+        .reply(200, []);
+
+      await robot.receive(event);
+
+      expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
+      // Once to create the missing check run, once to (re-)assert the
+      // pending state after evaluating the live labels.
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(2);
+    });
+
     it('passes the backport approval check if the "backport/approved" label is on a new backport PR', async () => {
       const event = JSON.parse(
         await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
@@ -715,6 +750,56 @@ describe('trop', () => {
             {
               name: BACKPORT_APPROVAL_CHECK,
               status: 'queued',
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, [backportRequestedLabel]);
+
+      await robot.receive(event);
+
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
+      expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
+    });
+
+    it('re-asserts the pending state when a stale run already concluded success', async () => {
+      // Mirrors electron/electron#53035: the `opened` evaluation of a
+      // trop-created backport concluded success before trop added its
+      // labels. The subsequent labeled event must still (re-)assert the
+      // pending state so queueBackportApprovalCheck can supersede the
+      // completed run with a fresh queued one.
+      const event = JSON.parse(
+        await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
+      );
+
+      event.payload.label = backportRequestedLabel;
+      event.payload.pull_request.labels = [backportRequestedLabel];
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+              status: 'completed',
+              conclusion: 'success',
             },
           ],
         });

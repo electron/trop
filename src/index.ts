@@ -416,6 +416,17 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             // not required.
             await addLabels(context, pr.number, [BACKPORT_REQUESTED_LABEL]);
             await queueBackportApprovalCheck(context);
+          } else if (
+            action === 'opened' &&
+            pr.user.login === getEnvVar('BOT_USER_NAME')
+          ) {
+            // trop labels its own backport PRs in a separate API call
+            // shortly after creating them, so when the `opened` event for a
+            // trop-created backport is evaluated the live labels are still
+            // empty and a "not required" verdict would be premature. Keep
+            // the check pending instead - the labeled events that follow
+            // trop's own label writes re-evaluate and settle the verdict.
+            await queueBackportApprovalCheck(context);
           } else {
             await updateBackportApprovalCheck(context, backportApprovalCheck, {
               title: 'Backport Approval Not Required',
