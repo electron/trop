@@ -149,12 +149,11 @@ export async function queueBackportApprovalCheck(context: WebHookPRContext) {
   // Re-fetch the existing check run immediately before writing - concurrent
   // webhook deliveries race through check-then-create and would otherwise
   // create duplicate check runs for the same head SHA (branch protection
-  // only consults the latest run per name). If a run already exists - even
-  // one a stale invocation already completed - reset it to queued by id
-  // instead of creating another.
+  // only consults the latest run per name). If a run already exists and is
+  // still pending, reset it to queued by id instead of creating another.
   const existingCheck = await getBackportApprovalCheck(context);
 
-  if (existingCheck) {
+  if (existingCheck && existingCheck.status !== 'completed') {
     await context.octokit.checks.update(
       context.repo({
         check_run_id: existingCheck.id,
@@ -167,6 +166,12 @@ export async function queueBackportApprovalCheck(context: WebHookPRContext) {
     return;
   }
 
+  // A completed check run is terminal in the Checks API: a PATCH asking to
+  // move it back to 'queued' succeeds and applies the output, but silently
+  // keeps the old status and conclusion. Updating a stale completed run
+  // would therefore leave a green check that claims to need approval, so
+  // create a fresh queued run instead - branch protection only consults
+  // the latest run per name, so the new run supersedes the completed one.
   await context.octokit.checks.create(
     context.repo({
       name: BACKPORT_APPROVAL_CHECK,
