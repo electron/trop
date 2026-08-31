@@ -499,19 +499,22 @@ describe('trop', () => {
       expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
     });
 
-    it('keeps the backport approval check pending when a backport is opened before its labels have settled', async () => {
-      // Regression test for electron/electron#53035: a declared backport's
-      // labels are written by trop itself - backportImpl labels trop-created
-      // backports shortly after opening them, and updateManualBackport
-      // labels manually-opened backports. Regardless of author, the
-      // `opened` evaluation can therefore see no labels at all, and
-      // concluding "not required" in that window is premature - the verdict
+    it('keeps the backport approval check pending when a trop-created backport is opened before its labels have settled', async () => {
+      // Regression test for electron/electron#53035: backportImpl labels
+      // trop-created backports in a separate API call shortly after opening
+      // them, so the `opened` evaluation can see no labels at all.
+      // Concluding "not required" in that window is premature - the verdict
       // must stay pending until the labeled events that follow trop's label
       // writes settle it.
       getBackportApprovalCheck.mockResolvedValueOnce({
         name: BACKPORT_APPROVAL_CHECK,
         status: 'queued',
       });
+
+      const event = JSON.parse(
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
+      );
+      event.payload.pull_request.user.login = BOT_USER_NAME;
 
       nock(GH_API)
         .persist()
@@ -530,12 +533,61 @@ describe('trop', () => {
         )
         .reply(200, []);
 
-      await robot.receive(backportPROpenedEvent);
+      await robot.receive(event);
 
       expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
       // Once to create the missing check run, once to (re-)assert the
-      // pending state after evaluating the live labels.
+      // pending state after evaluating the live labels. Neither may
+      // supersede a run that a concurrent labeled delivery already
+      // concluded.
       expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(2);
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        { supersedeCompleted: false },
+      );
+    });
+
+    it('concludes "Not Required" on opened for a manual backport whose live labels do not request approval', async () => {
+      // Regression test for electron/electron#53332: a manually-opened
+      // backport is labeled by updateManualBackport in this same handler,
+      // before the live labels are read. The verdict is therefore already
+      // settled on `opened` and must be concluded here - deferring it to a
+      // labeled event that has usually already been processed left the
+      // check queued forever.
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/issues/7/labels?per_page=100&page=1',
+        )
+        .reply(200, [
+          { name: 'backport', color: 'fff' },
+          { name: 'semver/patch', color: 'fff' },
+        ]);
+
+      await robot.receive(backportPROpenedEvent);
+
+      expect(updateManualBackport).toHaveBeenCalled();
+      // Only the creation of the missing check run.
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportApprovalCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Approval Not Required',
+        summary: `This PR does not need backport approval.`,
+        conclusion: CheckRunStatus.SUCCESS,
+      });
     });
 
     it('concludes "Not Required" on opened for a release-branch PR with no backport declaration', async () => {
@@ -543,10 +595,8 @@ describe('trop', () => {
       // are never labeled by trop, so no labeled event is guaranteed to
       // arrive. The `opened` evaluation must conclude for them - leaving
       // the check queued would hang it forever.
-      // Consumed by the manual-backport scan and the declaration guard.
-      vi.mocked(getPRNumbersFromPRBody)
-        .mockReturnValueOnce([])
-        .mockReturnValueOnce([]);
+      // Consumed by the manual-backport scan.
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
 
       nock(GH_API)
         .persist()
@@ -635,12 +685,19 @@ describe('trop', () => {
       expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(2);
     });
 
-    it('does not re-queue a concluded backport approval check when `opened` is delivered late', async () => {
+    it("does not supersede a concluded backport approval check when a trop-created backport's `opened` is delivered late", async () => {
       // Webhook deliveries can be reordered: a labeled delivery processed
       // before the `opened` one has already settled the verdict from the
       // live labels. The late `opened` evaluation must not supersede that
       // concluded run with a queued one - no follow-up event would ever
-      // complete it.
+      // complete it. The snapshot taken at the top of the handler is stale
+      // by the time the verdict is evaluated, so the pending state is
+      // (re-)asserted without permission to supersede and the decision is
+      // made against the live run inside queueBackportApprovalCheck.
+      const event = JSON.parse(
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
+      );
+      event.payload.pull_request.user.login = BOT_USER_NAME;
 
       // Replace the beforeEach interceptor that reports no check runs.
       nock.cleanAll();
@@ -679,10 +736,14 @@ describe('trop', () => {
         )
         .reply(200, [{ name: 'backport', color: 'fff' }]);
 
-      await robot.receive(backportPROpenedEvent);
+      await robot.receive(event);
 
       expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
-      expect(checkUtils.queueBackportApprovalCheck).not.toHaveBeenCalled();
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledTimes(1);
+      expect(checkUtils.queueBackportApprovalCheck).toHaveBeenCalledWith(
+        expect.anything(),
+        { supersedeCompleted: false },
+      );
     });
 
     it('passes the backport approval check if the "backport/approved" label is on a new backport PR', async () => {

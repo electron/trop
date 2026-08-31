@@ -138,7 +138,10 @@ export async function updateBackportApprovalCheck(
   );
 }
 
-export async function queueBackportApprovalCheck(context: WebHookPRContext) {
+export async function queueBackportApprovalCheck(
+  context: WebHookPRContext,
+  { supersedeCompleted = true }: { supersedeCompleted?: boolean } = {},
+) {
   const pr = context.payload.pull_request;
 
   const output = {
@@ -172,6 +175,22 @@ export async function queueBackportApprovalCheck(context: WebHookPRContext) {
   // would therefore leave a green check that claims to need approval, so
   // create a fresh queued run instead - branch protection only consults
   // the latest run per name, so the new run supersedes the completed one.
+  //
+  // Callers that merely want a pending run to exist (rather than to
+  // invalidate a verdict) pass supersedeCompleted: false - a run that
+  // concluded between the caller's snapshot and this re-fetch was settled
+  // from the live labels by a concurrent delivery, and superseding it would
+  // leave a queued run that no follow-up event ever completes
+  // (electron/electron#53332).
+  if (existingCheck && !supersedeCompleted) {
+    log(
+      'queueBackportApprovalCheck',
+      LogLevel.INFO,
+      `Backport approval check run (${existingCheck.id}) for #${pr.number} already concluded '${existingCheck.conclusion}' - not superseding it`,
+    );
+    return;
+  }
+
   await context.octokit.checks.create(
     context.repo({
       name: BACKPORT_APPROVAL_CHECK,
