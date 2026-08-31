@@ -100,5 +100,63 @@ describe('checks-util', () => {
         }),
       );
     });
+
+    it('leaves a completed check run alone when superseding is not permitted', async () => {
+      // Regression test for electron/electron#53332: a caller that only
+      // wants a pending run to exist must not turn a verdict that a
+      // concurrent delivery already settled back into a queued run that no
+      // follow-up event would complete.
+      octokit.checks.listForRef.mockResolvedValue({
+        data: {
+          check_runs: [
+            {
+              id: 12345,
+              name: BACKPORT_APPROVAL_CHECK,
+              status: 'completed',
+              conclusion: 'success',
+            },
+          ],
+        },
+      });
+
+      await queueBackportApprovalCheck(context, { supersedeCompleted: false });
+
+      expect(octokit.checks.update).not.toHaveBeenCalled();
+      expect(octokit.checks.create).not.toHaveBeenCalled();
+    });
+
+    it('still creates a queued check run when none exists and superseding is not permitted', async () => {
+      octokit.checks.listForRef.mockResolvedValue({
+        data: { check_runs: [] },
+      });
+
+      await queueBackportApprovalCheck(context, { supersedeCompleted: false });
+
+      expect(octokit.checks.create).toHaveBeenCalledTimes(1);
+      expect(octokit.checks.update).not.toHaveBeenCalled();
+    });
+
+    it('still resets a pending check run when superseding is not permitted', async () => {
+      octokit.checks.listForRef.mockResolvedValue({
+        data: {
+          check_runs: [
+            {
+              id: 12345,
+              name: BACKPORT_APPROVAL_CHECK,
+              status: 'queued',
+              conclusion: null,
+            },
+          ],
+        },
+      });
+
+      await queueBackportApprovalCheck(context, { supersedeCompleted: false });
+
+      expect(octokit.checks.create).not.toHaveBeenCalled();
+      expect(octokit.checks.update).toHaveBeenCalledTimes(1);
+      expect(octokit.checks.update).toHaveBeenCalledWith(
+        expect.objectContaining({ check_run_id: 12345, status: 'queued' }),
+      );
+    });
   });
 });

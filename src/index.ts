@@ -223,7 +223,12 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
 
       if (pr.base.ref !== pr.base.repo.default_branch) {
         if (!backportApprovalCheck) {
-          await queueBackportApprovalCheck(context);
+          // Only ensure a run exists here - a concurrent delivery may have
+          // created and concluded one since the snapshot above, and that
+          // verdict must not be superseded by a queued run.
+          await queueBackportApprovalCheck(context, {
+            supersedeCompleted: false,
+          });
           backportApprovalCheck = (await getBackportApprovalCheck(context))!;
         }
 
@@ -418,28 +423,32 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             await queueBackportApprovalCheck(context);
           } else if (
             action === 'opened' &&
-            getPRNumbersFromPRBody(pr).length > 0
+            pr.user.login === getEnvVar('BOT_USER_NAME')
           ) {
-            // A declared backport's labels are written by trop, not by its
-            // author: backportImpl labels trop-created backports in a
-            // separate API call shortly after opening them, and
-            // updateManualBackport labels manually-opened backports (with
-            // at least the base-ref label). On `opened` those labels may
-            // still be in flight, so an empty label set must not conclude
-            // "not required" - keep the check pending and let the labeled
-            // events that follow trop's label writes settle the verdict.
-            // This applies to every declared backport regardless of author;
-            // PRs without a backport declaration (e.g. fast-track PRs) get
-            // no guaranteed labeled event, so they still conclude below.
+            // A trop-created backport is labeled by backportImpl in a
+            // separate API call shortly after the PR is opened, so on
+            // `opened` the live labels may still be empty and an empty label
+            // set must not conclude "not required" - keep the check pending
+            // and let the labeled events that follow trop's label writes
+            // settle the verdict.
             //
-            // Webhook deliveries can be reordered: when a labeled delivery
-            // was processed before this `opened` one, the verdict was
-            // already settled from the same live labels consulted above -
-            // don't supersede a concluded run with a queued one that no
-            // follow-up event would ever complete.
-            if (backportApprovalCheck.status !== 'completed') {
-              await queueBackportApprovalCheck(context);
-            }
+            // This is specific to trop-authored PRs: a manually-opened
+            // backport is labeled by updateManualBackport *in this same
+            // handler* before the live labels were read above, so its
+            // verdict is already settled and it concludes below. PRs without
+            // a backport declaration (e.g. fast-track PRs) get no guaranteed
+            // labeled event at all, so they must conclude below too.
+            //
+            // Deliveries race: the labeled events may already have been
+            // processed and concluded the run by the time this slow `opened`
+            // handler gets here (it ran the manual-backport bookkeeping
+            // first). Never supersede a concluded run from this path - the
+            // snapshot taken above is stale, so the decision is made against
+            // the live run inside queueBackportApprovalCheck
+            // (electron/electron#53332).
+            await queueBackportApprovalCheck(context, {
+              supersedeCompleted: false,
+            });
           } else {
             await updateBackportApprovalCheck(context, backportApprovalCheck, {
               title: 'Backport Approval Not Required',
