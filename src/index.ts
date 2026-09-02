@@ -94,13 +94,17 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     );
     await handleClosedPRLabels(context, pr, change);
 
-    robot.log(`Deleting base branch: ${pr.head.ref}`);
-    try {
-      await context.octokit.git.deleteRef(
-        context.repo({ ref: `heads/${pr.head.ref}` }),
-      );
-    } catch (e) {
-      robot.log('Failed to delete backport branch: ', e);
+    // Merged PRs will automatically delete their head branch, we only
+    // need to clean up after PRs which were closed without merging.
+    if (change === PRChange.CLOSE) {
+      robot.log(`Deleting head branch: ${pr.head.ref}`);
+      try {
+        await context.octokit.git.deleteRef(
+          context.repo({ ref: `heads/${pr.head.ref}` }),
+        );
+      } catch (e) {
+        robot.log('Failed to delete backport branch: ', e);
+      }
     }
   };
 
