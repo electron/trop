@@ -8,6 +8,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
+    "postinstall": "node scripts/ensure-build-tools.js",
     "start": "probot run ./lib/index.js",
     "prettier:write": "prettier --write \"{src,spec}/**/*.ts\"",
     "lint": "prettier --check \"{src,spec}/**/*.ts\"",
@@ -47,6 +48,10 @@
   },
   "engines": {
     "node": "24.x"
+  },
+  "buildTools": {
+    "repository": "https://github.com/electron/build-tools.git",
+    "sha": "6bd58bb51aedf9029ed495e79b32dcbf63c181da"
   },
   "resolutions": {
     "fsevents": "npm:@electron/fsevents@2.3.3-fork"

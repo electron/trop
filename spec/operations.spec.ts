@@ -12,6 +12,7 @@ import { initRepo } from '../src/operations/init-repo';
 import { setupRemotes } from '../src/operations/setup-remotes';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
 import { tagBackportReviewers } from '../src/utils';
+import { registerPatchesMergeDriver } from '../src/utils/build-tools';
 
 let dirObject: { dir?: string } | null = null;
 
@@ -89,6 +90,21 @@ describe('runner', () => {
       expect(fs.existsSync(path.resolve(dir, '.git'))).toBe(true);
     });
 
+    it('registers the build-tools .patches merge driver in the clone', async () => {
+      const dir = saveDir(
+        await initRepo({
+          slug: 'electron/trop',
+          accessToken: '',
+        }),
+      );
+      expect(
+        runGit(dir, ['config', '--get', 'merge.patches-list.driver']),
+      ).toContain('e-patch-merge-driver.js');
+      expect(
+        runGit(dir, ['check-attr', 'merge', 'patches/chromium/.patches']),
+      ).toBe('patches/chromium/.patches: merge: patches-list');
+    });
+
     it('should fail if the github repository does not exist', async () => {
       await expect(
         initRepo({
@@ -96,6 +112,18 @@ describe('runner', () => {
           accessToken: '',
         }),
       ).rejects.toBeTruthy();
+    });
+  });
+
+  describe('registerPatchesMergeDriver()', () => {
+    it('fails loudly when the directory is not a git checkout', async () => {
+      const dir = await fs.promises.mkdtemp(
+        path.resolve(os.tmpdir(), 'trop-not-a-repo-'),
+      );
+      saveDir({ dir });
+      await expect(registerPatchesMergeDriver(dir)).rejects.toThrow(
+        `Failed to register build-tools' .patches merge driver in ${dir}`,
+      );
     });
   });
 
@@ -182,6 +210,13 @@ describe('runner', () => {
     const setupAndBackport = async (opts: {
       initial: Record<string, string>;
       changes: Record<string, string>;
+      // Changes committed on the target branch (42-x-y) before the backport,
+      // so that the source and target diverge and `git am -3` has to fall
+      // back to a three-way merge. A `null` value deletes the file.
+      targetChanges?: Record<string, string | null>;
+      // Register build-tools' .patches merge driver in the work clone, as
+      // initRepo does in production. Set to false to observe `merge=union`.
+      registerMergeDriver?: boolean;
     }): Promise<string> => {
       const remoteDir = await makeTempDir('trop-remote-');
       const targetDir = await makeTempDir('trop-target-');
@@ -199,6 +234,20 @@ describe('runner', () => {
         runGit(dir, ['commit', '-m', 'initial']);
       }
       runGit(targetDir, ['branch', '42-x-y']);
+
+      if (opts.targetChanges) {
+        runGit(targetDir, ['checkout', '42-x-y']);
+        for (const [file, content] of Object.entries(opts.targetChanges)) {
+          if (content === null) {
+            await fs.promises.rm(path.join(targetDir, file));
+          } else {
+            await writeRepoFile(targetDir, file, content);
+          }
+        }
+        runGit(targetDir, ['add', '-A', ...Object.keys(opts.targetChanges)]);
+        runGit(targetDir, ['commit', '-m', 'target change']);
+        runGit(targetDir, ['checkout', 'main']);
+      }
 
       for (const [file, content] of Object.entries(opts.changes)) {
         await writeRepoFile(sourceDir, file, content);
@@ -220,6 +269,9 @@ describe('runner', () => {
       runGit(workDir, ['config', 'user.email', 'trop@example.com']);
       runGit(workDir, ['remote', 'add', 'target_repo', remoteDir]);
       runGit(workDir, ['fetch', 'target_repo']);
+      if (opts.registerMergeDriver ?? true) {
+        await registerPatchesMergeDriver(workDir);
+      }
 
       const result = await backportCommitsToBranch({
         context: {} as never,
@@ -387,6 +439,84 @@ describe('runner', () => {
       expect(await readFile(workDir, '.patches')).toBe(
         `${expectedShearedPatches}\n`,
       );
+    });
+
+    // electron/electron commits `merge=union` for its .patches lists; the
+    // build-tools driver registered on every backport clone overrides it.
+    const unionAttributes = 'patches/**/.patches merge=union\n';
+    const chromium = 'patches/chromium';
+    const chromiumPatches = `${chromium}/.patches`;
+    const listWithNewline = (...entries: string[]) =>
+      `${buildPatchList(...entries)}\n`;
+    const baseEntries = ['a.patch', 'b.patch', 'c.patch'];
+
+    // The target branch already carries x.patch (e.g. from a manual backport)
+    // earlier in the list, and the backported commit appends the same patch.
+    const duplicateAddition = {
+      initial: {
+        '.gitattributes': unionAttributes,
+        [chromiumPatches]: listWithNewline(...baseEntries),
+        ...patchFiles(chromium, baseEntries),
+      },
+      targetChanges: {
+        [chromiumPatches]: listWithNewline(
+          'a.patch',
+          'b.patch',
+          'x.patch',
+          'c.patch',
+        ),
+        [`${chromium}/x.patch`]: 'x\n',
+      },
+      changes: {
+        [chromiumPatches]: listWithNewline(...baseEntries, 'x.patch'),
+        [`${chromium}/x.patch`]: 'x\n',
+      },
+    };
+
+    it('merges a diverged .patches list as a list instead of with union', async () => {
+      const workDir = await setupAndBackport(duplicateAddition);
+      expect(await readFile(workDir, chromiumPatches)).toBe(
+        listWithNewline('a.patch', 'b.patch', 'x.patch', 'c.patch'),
+      );
+      expect(await readFile(workDir, `${chromium}/x.patch`)).toBe('x\n');
+      expect(runGit(workDir, ['status', '--porcelain'])).toBe('');
+    });
+
+    it('would duplicate the entry with the committed union driver', async () => {
+      // Control: the same fixture without build-tools' driver reproduces the
+      // `merge=union` behaviour the driver exists to replace.
+      const workDir = await setupAndBackport({
+        ...duplicateAddition,
+        registerMergeDriver: false,
+      });
+      expect(await readFile(workDir, chromiumPatches)).toBe(
+        listWithNewline('a.patch', 'b.patch', 'x.patch', 'c.patch', 'x.patch'),
+      );
+    });
+
+    it('keeps an entry removed on the target branch out of the merged .patches list', async () => {
+      const workDir = await setupAndBackport({
+        initial: {
+          '.gitattributes': unionAttributes,
+          [chromiumPatches]: listWithNewline(...baseEntries),
+          ...patchFiles(chromium, baseEntries),
+        },
+        targetChanges: {
+          [chromiumPatches]: listWithNewline('a.patch', 'b.patch'),
+          [`${chromium}/c.patch`]: null,
+        },
+        changes: {
+          [chromiumPatches]: listWithNewline(...baseEntries, 'd.patch'),
+          [`${chromium}/d.patch`]: 'd\n',
+        },
+      });
+      expect(await readFile(workDir, chromiumPatches)).toBe(
+        listWithNewline('a.patch', 'b.patch', 'd.patch'),
+      );
+      expect(fs.existsSync(path.join(workDir, chromium, 'c.patch'))).toBe(
+        false,
+      );
+      expect(await readFile(workDir, `${chromium}/d.patch`)).toBe('d\n');
     });
 
     it('applies only non-merge-commit patches when merge commits are filtered', async () => {
