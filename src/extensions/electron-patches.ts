@@ -123,7 +123,10 @@ const writeFileNoFollow = async (
 // Handles a special case for Electron `.patches` files: `git am` can pull
 // in extra context lines. But this breaks us because those extra lines
 // are for .patch files that don't exist in the target branch.
-// This function removes those lines.
+// This function removes those lines. It also collapses duplicate entries:
+// `.patches` files merge with git's `union` driver, which can emit the same
+// `*.patch` line twice when both sides added it, so only the first
+// occurrence of each entry is kept.
 const applyPatchesChanges = async (
   git: SimpleGit,
   repoDir: string,
@@ -161,11 +164,16 @@ const applyPatchesChanges = async (
     const isPatchFile = (f: string): boolean =>
       !f.startsWith('#') && f.endsWith('.patch');
     const newline = current.includes(crlf) ? crlf : lf;
+    const seen = new Set<string>();
     const newContent = current
       .split(/\r?\n/)
       .filter((line) => {
         const trimmed = line.trim();
         if (!isPatchFile(trimmed)) return true;
+        // Drop repeated entries, keeping the first occurrence. Comments and
+        // blank lines are never deduplicated.
+        if (seen.has(trimmed)) return false;
+        seen.add(trimmed);
         // `trimmed` is sibling-file content from the (untrusted) patch; only
         // probe paths that stay within the working tree.
         const candidate = path.resolve(repoRealDir, patchDir, trimmed);

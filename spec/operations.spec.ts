@@ -389,6 +389,88 @@ describe('runner', () => {
       );
     });
 
+    it('collapses duplicate .patches entries to the first occurrence', async () => {
+      const workDir = await setupAndBackport({
+        initial: {
+          '.patches': sharedPatches,
+          ...patchFiles('', sharedEntries),
+        },
+        changes: {
+          '.patches': buildPatchList(
+            'shared1.patch',
+            'shared2.patch',
+            'shared3.patch',
+            'shared1.patch',
+            'backport.patch',
+            'shared2.patch',
+          ),
+          'backport.patch': patchBackportContents,
+        },
+      });
+      expect(await readFile(workDir, '.patches')).toBe(
+        buildPatchList(...sharedEntries, 'backport.patch'),
+      );
+    });
+
+    it('drops a duplicated .patches entry whose patch file is missing', async () => {
+      const workDir = await setupAndBackport({
+        initial: {
+          '.patches': sharedPatches,
+          ...patchFiles('', sharedEntries),
+        },
+        changes: {
+          '.patches': buildPatchList(
+            ...sharedEntries,
+            'no-backport.patch',
+            'backport.patch',
+            'no-backport.patch',
+          ),
+          'backport.patch': patchBackportContents,
+        },
+      });
+      expect(await readFile(workDir, '.patches')).toBe(expectedShearedPatches);
+      expect(fs.existsSync(path.join(workDir, 'no-backport.patch'))).toBe(
+        false,
+      );
+    });
+
+    it('dedupes .patches while preserving CRLF, comments and blank lines', async () => {
+      const crlf = (...lines: string[]) => lines.join('\r\n');
+      const workDir = await setupAndBackport({
+        initial: {
+          '.patches': crlf('# chromium', ...sharedEntries, ''),
+          ...patchFiles('', sharedEntries),
+        },
+        changes: {
+          '.patches': crlf(
+            '# chromium',
+            'shared1.patch',
+            'shared2.patch',
+            '',
+            '# chromium',
+            'shared3.patch',
+            'shared2.patch',
+            'backport.patch',
+            'shared1.patch',
+            '',
+          ),
+          'backport.patch': patchBackportContents,
+        },
+      });
+      expect(await readFile(workDir, '.patches')).toBe(
+        crlf(
+          '# chromium',
+          'shared1.patch',
+          'shared2.patch',
+          '',
+          '# chromium',
+          'shared3.patch',
+          'backport.patch',
+          '',
+        ),
+      );
+    });
+
     it('applies only non-merge-commit patches when merge commits are filtered', async () => {
       const remoteDir = await makeTempDir('trop-remote-');
       const sourceDir = await makeTempDir('trop-source-');
