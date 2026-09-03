@@ -6,6 +6,7 @@ import simpleGit, { CheckRepoActions } from 'simple-git';
 import { InitRepoOptions } from '../interfaces';
 import { LogLevel } from '../enums';
 import { log } from '../utils/log-util';
+import { registerPatchesMergeDriver } from '../utils/build-tools';
 import { Mutex } from 'async-mutex';
 
 const baseDir =
@@ -69,6 +70,12 @@ export const initRepo = async ({
   const { tropEmail, tropName } = parse(config);
   await git.addConfig('user.email', tropEmail || 'trop@example.com');
   await git.addConfig('user.name', tropName || 'Trop Bot');
+
+  // Merge `patches/**/.patches` files as ordered lists rather than with the
+  // `merge=union` driver committed in electron/electron, so that `git am -3`
+  // neither resurrects entries removed on the target branch nor duplicates
+  // entries added on both sides.
+  await registerPatchesMergeDriver(dir);
 
   return { dir };
 };

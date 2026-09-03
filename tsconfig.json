@@ -18,6 +18,8 @@
 	},
 	"exclude": [
 		"node_modules",
+		".build-tools",
+		"scripts",
 		"spec",
 		"lib",
 		"working",

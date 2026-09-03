@@ -8,6 +8,13 @@ $ cd trop
 $ npm install
 ```
 
+Installing also vendors [electron/build-tools](https://github.com/electron/build-tools)
+into `.build-tools/` at the commit pinned under `buildTools.sha` in `package.json`
+and builds it (`scripts/ensure-build-tools.js`, trop's `postinstall`). trop uses
+it to register build-tools' list-aware merge driver for `patches/**/.patches`
+files in every backport clone, so `git` and network access to GitHub are needed
+at install time. To move the pin, change the SHA and run the install again.
+
 ### Configuring the GitHub App
 
 To run your app in development, you will need to configure a GitHub App to deliver webhooks to your local machine.
