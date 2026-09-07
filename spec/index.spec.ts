@@ -1126,6 +1126,64 @@ describe('trop', () => {
 
       await robot.receive(event);
     });
+
+    it('removes label if a stacked PR is trying to backport to its own stack base branch', async () => {
+      const event = JSON.parse(
+        await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
+      );
+
+      // The PR itself targets the PR below it in the stack; the stack lands
+      // on a release branch.
+      event.payload.pull_request.base.ref = 'fix/some-parent';
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: '36-x-y', sha: 'DEF' },
+      };
+
+      // Add label targeting the base branch of the stack
+      const label = {
+        name: `target/${event.payload.pull_request.stack.base.ref}`,
+        color: 'fff',
+      };
+
+      event.payload.label = label;
+      event.payload.pull_request.labels = [label];
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [] });
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/12345')
+        .reply(200, MOCK_PR);
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      const removeLabelScope = nock(GH_API)
+        .delete(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels/${encodeURIComponent(label.name)}`,
+        )
+        .reply(200);
+
+      await robot.receive(event);
+
+      expect(removeLabelScope.isDone()).toBe(true);
+    });
   });
 
   describe('pull_request.unlabeled event', () => {

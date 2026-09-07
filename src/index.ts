@@ -253,7 +253,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             const targetBranch = labelToTargetBranch(label, labelPrefix);
             if (
               isBranchSupported(targetBranch) &&
-              targetBranch === pr.base.ref
+              targetBranch === effectiveBaseRef
             ) {
               robot.log(
                 `#${pr.number} is trying to backport to itself - this is not allowed`,
