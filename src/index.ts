@@ -31,6 +31,7 @@ import {
 } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
 import { getSupportedBranches, isBranchSupported } from './utils/branch-util';
+import { getEffectiveBaseRef } from './utils/stack-util';
 import {
   getBackportApprovalCheck,
   getBackportInformationCheck,
@@ -175,9 +176,15 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       'pull_request.synchronize',
       'pull_request.labeled',
       'pull_request.unlabeled',
+      // Fired when a PR joins, moves within or leaves a stack; newer than the
+      // event names known to @octokit/webhooks-types, hence the cast.
+      'pull_request.stacked' as 'pull_request.edited',
     ],
     async (context) => {
       const { pull_request: pr, action } = context.payload;
+      // A stacked PR targets the PR below it; decide whether it is a backport
+      // by the branch the whole stack lands on.
+      const effectiveBaseRef = getEffectiveBaseRef(pr);
       let label: Label | undefined = undefined;
       if ('label' in context.payload) {
         label = context.payload.label;
@@ -225,7 +232,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
         checkRun = response.data;
       }
 
-      if (pr.base.ref !== pr.base.repo.default_branch) {
+      if (effectiveBaseRef !== pr.base.repo.default_branch) {
         if (!backportApprovalCheck) {
           // Only ensure a run exists here - a concurrent delivery may have
           // created and concluded one since the snapshot above, and that
@@ -471,12 +478,14 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       } else {
         // If we're somehow targeting main and have a check run,
         // we mark this check as cancelled.
+        const viaStack =
+          effectiveBaseRef !== pr.base.ref ? 'part of a stack ' : '';
         robot.log(
-          `#${pr.number} is targeting '${pr.base.repo.default_branch}' and is not a backport - marking as cancelled`,
+          `#${pr.number} is ${viaStack}targeting '${pr.base.repo.default_branch}' and is not a backport - marking as cancelled`,
         );
         await updateBackportValidityCheck(context, checkRun, {
           title: 'Cancelled',
-          summary: `This PR is targeting '${pr.base.repo.default_branch}' and is not a backport`,
+          summary: `This PR is ${viaStack}targeting '${pr.base.repo.default_branch}' and is not a backport`,
           conclusion: CheckRunStatus.NEUTRAL,
         });
       }

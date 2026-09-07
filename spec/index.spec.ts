@@ -1551,6 +1551,157 @@ Notes: <!-- One-line Change Summary Here-->`,
       });
     });
 
+    it('cancels the backport validity check for a stacked PR whose stack targets main', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
+      );
+      event.payload.action = 'stacked';
+      event.payload.pull_request.base.ref = 'fix/some-parent';
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: 'main', sha: 'DEF' },
+      };
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      await robot.receive(event);
+
+      const validityCalls = vi.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls;
+      expect(validityCalls).toHaveLength(1);
+      expect(validityCalls[0][2]).toMatchObject({
+        title: 'Cancelled',
+        summary:
+          "This PR is part of a stack targeting 'main' and is not a backport",
+        conclusion: CheckRunStatus.NEUTRAL,
+      });
+    });
+
+    it('fails the backport validity check for a stacked PR whose stack targets a release branch with no backport declaration', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
+      );
+      event.payload.action = 'synchronize';
+      event.payload.pull_request.base.ref = 'fix/some-parent';
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: '36-x-y', sha: 'DEF' },
+      };
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      await robot.receive(event);
+
+      const validityCalls = vi.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls;
+      expect(validityCalls).toHaveLength(1);
+      expect(validityCalls[0][2]).toMatchObject({
+        title: 'Invalid Backport',
+        summary:
+          'This PR is targeting a branch that is not main but is missing a "Backport of #{N}" declaration.  Check out the trop documentation linked below for more information.',
+        conclusion: CheckRunStatus.FAILURE,
+      });
+    });
+
+    it('succeeds the backport validity check for a stacked PR whose stack targets a release branch with a valid declaration', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
+      );
+      event.payload.action = 'synchronize';
+      event.payload.pull_request.base.ref = 'fix/some-parent';
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: '36-x-y', sha: 'DEF' },
+      };
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/1234')
+        .reply(200, {
+          merged: true,
+          base: {
+            ref: 'main',
+          },
+        });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, {
+          check_runs: [
+            {
+              name: BACKPORT_APPROVAL_CHECK,
+            },
+          ],
+        });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      await robot.receive(event);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Valid Backport',
+        summary:
+          'This PR is declared as backporting "#1234" which is a valid PR that has been merged into main',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+
     it('fails the backport validity check if old PR was not merged to a supported release branch', async () => {
       vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234]);
 
