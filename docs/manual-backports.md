@@ -23,6 +23,10 @@ Backport of https://github.com/electron/electron/pull/21813
 If you raise a PR to a branch that isn't `main` or a release branch without including a valid reference as above, `trop` will create a
 "failed" check on that PR to prevent it being merged.
 
+PRs that are part of a [stacked pull request](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) are judged by the
+branch the whole stack lands on rather than the branch of the PR below them: a stack landing on `main` is not a backport, while a stack
+landing on a release branch is validated like any other backport.
+
 ## Build Tools Backport Command
 
 You can use the `e backport <PR>` command to backport PRs. [This command](https://github.com/electron/build-tools?tab=readme-ov-file#e-backport-pr) manually backports PRs by automating the steps above.
