@@ -1,6 +1,5 @@
 import { promises as fs } from 'fs';
 import { posix as path } from 'path';
-import { execSync } from 'child_process';
 
 import nock from 'nock';
 import { Probot, ProbotOctokit } from 'probot';
@@ -157,7 +156,7 @@ describe('trop', () => {
   let robot: Probot;
   process.env = { ...process.env, BOT_USER_NAME };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     nock.disableNetConnect();
 
@@ -168,11 +167,11 @@ describe('trop', () => {
         throttle: { enabled: false },
       }),
     });
-    robot.load(trop);
+    await robot.load(trop);
   });
 
   afterEach(() => {
-    expect(nock.isDone(), 'Not all Nock interceptors used');
+    expect(nock.isDone(), 'Not all Nock interceptors used').toBe(true);
     nock.cleanAll();
     nock.enableNetConnect();
   });
@@ -1038,6 +1037,7 @@ describe('trop', () => {
       });
     });
 
+    // oxlint-disable-next-line vitest/expect-expect -- asserted via nock.isDone() in afterEach
     it('removes the "backport/requested" label if the "backport/approved" label is added', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
@@ -1081,6 +1081,7 @@ describe('trop', () => {
       await robot.receive(event);
     });
 
+    // oxlint-disable-next-line vitest/expect-expect -- asserted via nock.isDone() in afterEach
     it('removes label if PR is trying to backport to its own base branch', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),

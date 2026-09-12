@@ -80,7 +80,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     pr: WebHookPR,
   ) => {
     for (const label of pr.labels) {
-      backportToLabel(robot, context, pr, label);
+      void backportToLabel(robot, context, pr, label);
     }
   };
 
@@ -224,7 +224,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
           context.repo({
             name: VALID_BACKPORT_CHECK_NAME,
             head_sha: pr.head.sha,
-            status: 'queued' as 'queued',
+            status: 'queued' as const,
             details_url: 'https://github.com/electron/trop',
           }),
         );
@@ -493,7 +493,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       // Only run the backportable checks on "opened" and "synchronize"
       // an "edited" change can not impact backportability.
       if (['edited', 'synchronize'].includes(action)) {
-        maybeRunCheck(context);
+        void maybeRunCheck(context);
       }
     },
   );
@@ -713,7 +713,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
 
             try {
               await context.octokit.repos.getBranch(context.repo({ branch }));
-            } catch (err) {
+            } catch {
               robot.log(
                 `${branch} does not exist - no backport will be initiated`,
               );
@@ -741,7 +741,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
               context.repo({ pull_number: issue.number }),
             );
 
-            backportToBranch(robot, context, pr as WebHookPR, branch);
+            void backportToBranch(robot, context, pr as WebHookPR, branch);
           }
           return true;
         },
