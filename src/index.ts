@@ -503,9 +503,9 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   robot.on('pull_request.unlabeled', maybeRunCheck);
 
   /**
-   * Checks that a PR done to `main` contains the required
-   * backport information, i.e.: at least a `no-backport` or
-   * a `target/XYZ` labels.
+   * Checks that a PR done to `main` (directly or via a stack that lands on
+   * `main`) contains the required backport information, i.e.: at least a
+   * `no-backport` or a `target/XYZ` labels.
    */
   robot.on(
     [
@@ -514,11 +514,16 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       'pull_request.labeled',
       'pull_request.unlabeled',
       'pull_request.synchronize',
+      // Fired when a PR joins, moves within or leaves a stack; newer than the
+      // event names known to @octokit/webhooks-types, hence the cast.
+      'pull_request.stacked' as 'pull_request.edited',
     ],
     async (context) => {
       const pr = context.payload.pull_request;
 
-      if (pr.base.ref !== pr.base.repo.default_branch) {
+      // A stacked PR targets the PR below it; use the branch the whole stack
+      // lands on to decide whether backport information is required.
+      if (getEffectiveBaseRef(pr) !== pr.base.repo.default_branch) {
         return;
       }
 
