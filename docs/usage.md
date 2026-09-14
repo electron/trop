@@ -19,6 +19,13 @@ Welcome! We're glad you want to try out `trop`.
 so that you or another contributor and perform the backport manually.  Trop will keep track of manual backports
 and update the labels appropriately.
 
+**Stacked pull requests**: a [stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) is backported as a unit.
+Add the `target/*` label(s) to the **top** pull request of the stack only - `target/*` labels on lower pull requests are ignored, and
+their `Backport Labels Added` check passes on its own. When the top pull request is merged, `trop` opens one backport pull request per
+target branch containing the commits of every pull request in the stack, bottom to top; the lower pull requests are not backported
+individually but are labeled (`in-flight/*`, `merged/*`) along with the top one. `/trop run backport` and `/trop run backport-to`
+must also be run on the top pull request.
+
 **Manual Triggering With Labels**:
 1. Open a bugfix or feature pull request to `main`
 2. Your pull request is reviewed and you or a co-contributor merges it into `main`
