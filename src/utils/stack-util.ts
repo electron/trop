@@ -49,6 +49,44 @@ const STACK_FETCH_RETRY_DELAY_MS = 3000;
 const delay = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+const fetchStack = async (
+  context: SimpleWebHookRepoContext,
+  pr: StackablePR,
+): Promise<StackResponse> => {
+  if (!pr.stack) {
+    throw new Error(`#${pr.number} is not part of a stack`);
+  }
+
+  const { data } = await context.octokit.request(
+    'GET /repos/{owner}/{repo}/stacks/{stack_number}',
+    context.repo({
+      stack_number: pr.stack.number,
+      headers: { 'X-GitHub-Api-Version': '2022-11-28' },
+    }),
+  );
+  return data;
+};
+
+/**
+ * Resolves the top PR of the stack `pr` belongs to.
+ */
+export const getStackTopPR = async (
+  context: SimpleWebHookRepoContext,
+  pr: StackablePR,
+): Promise<WebHookPR> => {
+  const stack = await fetchStack(context, pr);
+  const top = stack.pull_requests[stack.pull_requests.length - 1];
+  if (!top) {
+    throw new Error(`Stack #${stack.number} has no pull requests`);
+  }
+  if (top.number === pr.number) return pr;
+
+  const { data } = await context.octokit.pulls.get(
+    context.repo({ pull_number: top.number }),
+  );
+  return data as WebHookPR;
+};
+
 /**
  * Resolves every PR in the stack topped by `topPr`, ordered bottom to top with
  * the given payload as the last entry.
@@ -62,18 +100,7 @@ export const getStackMemberPRs = async (
   topPr: StackablePR,
   { requireMerged = true }: { requireMerged?: boolean } = {},
 ): Promise<WebHookPR[]> => {
-  if (!topPr.stack) {
-    throw new Error(`#${topPr.number} is not part of a stack`);
-  }
-
-  const { data: stack }: { data: StackResponse } =
-    await context.octokit.request(
-      'GET /repos/{owner}/{repo}/stacks/{stack_number}',
-      context.repo({
-        stack_number: topPr.stack.number,
-        headers: { 'X-GitHub-Api-Version': '2022-11-28' },
-      }),
-    );
+  const stack = await fetchStack(context, topPr);
 
   const memberNumbers = stack.pull_requests
     .map((member) => member.number)
@@ -95,7 +122,7 @@ export const getStackMemberPRs = async (
 
     if (attempt >= STACK_FETCH_ATTEMPTS) {
       throw new Error(
-        `Stack #${topPr.stack.number} has unmerged member(s) ${unmerged
+        `Stack #${stack.number} has unmerged member(s) ${unmerged
           .map((member) => `#${member.number}`)
           .join(', ')} - cannot backport #${topPr.number}`,
       );

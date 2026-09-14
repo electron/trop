@@ -36,6 +36,7 @@ import { getSupportedBranches, isBranchSupported } from './utils/branch-util';
 import {
   getEffectiveBaseRef,
   getStackMemberPRs,
+  getStackTopPR,
   isStackedPR,
   isTopOfStack,
   StackablePR,
@@ -162,6 +163,66 @@ you will need to perform this [backport manually](https://github.com/electron/tr
     for (const label of pr.labels) {
       backportStackToLabel(robot, context, prs, label);
     }
+  };
+
+  /**
+   * Concludes the Backport Labels Added check of a lower member of a stack.
+   * Backport targets are read from the top PR, so a lower member passes as
+   * long as its own labels do not disagree with the top PR's.
+   */
+  const updateStackMemberBackportInformationCheck = async (
+    context: WebHookPRContext,
+    member: WebHookPR,
+    topPr: WebHookPR,
+  ) => {
+    let check = await getBackportInformationCheck(context, member.head.sha);
+    if (!check) {
+      await queueBackportInformationCheck(context, member.head.sha);
+      check = (await getBackportInformationCheck(context, member.head.sha))!;
+    }
+
+    const targetLabels = (pr: WebHookPR) =>
+      pr.labels
+        .filter((label) => label.name.startsWith(PRStatus.TARGET))
+        .map((label) => label.name);
+    const hasNoBackport = (pr: WebHookPR) =>
+      pr.labels.some((label) => label.name === NO_BACKPORT_LABEL);
+
+    const memberTargets = targetLabels(member);
+    const topTargets = targetLabels(topPr);
+    const conflicts: string[] = [];
+
+    const extraTargets = memberTargets.filter((t) => !topTargets.includes(t));
+    if (extraTargets.length > 0) {
+      conflicts.push(
+        `This PR has ${extraTargets.join(', ')} which #${topPr.number} does not.`,
+      );
+    }
+    if (hasNoBackport(member) && topTargets.length > 0) {
+      conflicts.push(
+        `This PR has "${NO_BACKPORT_LABEL}" while #${topPr.number} has ${topTargets.join(', ')}.`,
+      );
+    }
+    if (hasNoBackport(topPr) && memberTargets.length > 0) {
+      conflicts.push(
+        `This PR has ${memberTargets.join(', ')} while #${topPr.number} has "${NO_BACKPORT_LABEL}".`,
+      );
+    }
+
+    if (conflicts.length > 0) {
+      await updateBackportInformationCheck(context, check, {
+        title: 'Conflicting Backport Information',
+        summary: `Backport targets for a stack are read from the top pull request (#${topPr.number}). ${conflicts.join(' ')}`,
+        conclusion: CheckRunStatus.FAILURE,
+      });
+      return;
+    }
+
+    await updateBackportInformationCheck(context, check, {
+      title: 'Backport Information Provided',
+      summary: `This PR is part of a stack - backport labels for a stack are read from its top pull request (#${topPr.number}).`,
+      conclusion: CheckRunStatus.SUCCESS,
+    });
   };
 
   const handleTropBackportClosed = async (
@@ -637,14 +698,47 @@ you will need to perform this [backport manually](https://github.com/electron/tr
       }
 
       if (isLowerStackMember(pr)) {
-        await updateBackportInformationCheck(context, backportCheck, {
-          title: 'Backport Information Provided',
-          summary:
-            'This PR is part of a stack - backport labels for a stack are read from its top pull request.',
-          conclusion: CheckRunStatus.SUCCESS,
-        });
+        let topPr: WebHookPR;
+        try {
+          topPr = await getStackTopPR(context, pr);
+        } catch (err) {
+          robot.log(
+            `Failed to resolve the top of the stack #${pr.number} is in - leaving its backport information check queued: ${err}`,
+          );
+          if (backportCheck.status !== 'queued') {
+            await queueBackportInformationCheck(context);
+          }
+          return;
+        }
 
+        await updateStackMemberBackportInformationCheck(context, pr, topPr);
         return;
+      }
+
+      // The verdict of the lower members depends on the top PR's labels, so
+      // re-evaluate them whenever those change.
+      if (
+        isTopOfStack(pr) &&
+        'label' in context.payload &&
+        (context.payload.label.name.startsWith(PRStatus.TARGET) ||
+          context.payload.label.name === NO_BACKPORT_LABEL)
+      ) {
+        try {
+          const members = await getStackMemberPRs(context, pr, {
+            requireMerged: false,
+          });
+          for (const member of members.slice(0, -1)) {
+            await updateStackMemberBackportInformationCheck(
+              context,
+              member,
+              pr,
+            );
+          }
+        } catch (err) {
+          robot.log(
+            `Failed to re-evaluate the backport information of the stack topped by #${pr.number}: ${err}`,
+          );
+        }
       }
 
       const isNoBackport = pr.labels.some(

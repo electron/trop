@@ -4,6 +4,7 @@ import { SimpleWebHookRepoContext } from '../src/types';
 import {
   getEffectiveBaseRef,
   getStackMemberPRs,
+  getStackTopPR,
   isStackedPR,
   isTopOfStack,
   StackablePR,
@@ -164,5 +165,52 @@ describe('getStackMemberPRs', () => {
     await expect(
       getStackMemberPRs(context, { ...topPr, stack: null }),
     ).rejects.toThrow('#30 is not part of a stack');
+  });
+});
+
+describe('getStackTopPR', () => {
+  const lowerPr = {
+    number: 10,
+    base: { ref: 'main' },
+    stack: { number: 8, size: 3, position: 1, base: { ref: 'main', sha: 'X' } },
+  } as unknown as StackablePR;
+
+  const makeContext = () => {
+    const request = vi.fn().mockResolvedValue({
+      data: {
+        number: 8,
+        base: { ref: 'main' },
+        pull_requests: [{ number: 10 }, { number: 20 }, { number: 30 }],
+      },
+    });
+    const get = vi.fn(async ({ pull_number }: { pull_number: number }) => ({
+      data: { number: pull_number, labels: [] },
+    }));
+    return {
+      context: {
+        octokit: { request, pulls: { get } },
+        repo: (obj: object) => ({
+          owner: 'electron',
+          repo: 'electron',
+          ...obj,
+        }),
+        payload: {},
+      } as unknown as SimpleWebHookRepoContext,
+      get,
+    };
+  };
+
+  it('fetches the last member of the stack', async () => {
+    const { context, get } = makeContext();
+    const top = await getStackTopPR(context, lowerPr);
+    expect(top.number).toBe(30);
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the given PR when it already is the top', async () => {
+    const { context, get } = makeContext();
+    const topPr = { ...lowerPr, number: 30 };
+    expect(await getStackTopPR(context, topPr)).toBe(topPr);
+    expect(get).not.toHaveBeenCalled();
   });
 });
