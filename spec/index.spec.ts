@@ -499,6 +499,64 @@ describe('trop', () => {
       expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
     });
 
+    it('passes the check for a stacked PR whose stack targets main', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
+      );
+      event.payload.action = 'stacked';
+      // The PR itself targets the PR below it in the stack.
+      event.payload.pull_request.base.ref = 'fix/some-parent';
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: 'main', sha: 'DEF' },
+      };
+      event.payload.pull_request.labels = [targetLabel];
+
+      await robot.receive(event);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportInformationCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Information Provided',
+        summary: 'This PR contains the required  backport information.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+
+    it('skips the check for a stacked PR whose stack targets a release branch', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
+      );
+      event.payload.pull_request.base.ref = 'fix/some-parent';
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: '30-x-y', sha: 'DEF' },
+      };
+      event.payload.pull_request.labels = [];
+
+      // Consumed by the Valid Backport handler, which also runs for this event.
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      await robot.receive(event);
+
+      expect(checkUtils.queueBackportInformationCheck).not.toHaveBeenCalled();
+      expect(checkUtils.updateBackportInformationCheck).not.toHaveBeenCalled();
+    });
+
     it('keeps the backport approval check pending when a trop-created backport is opened before its labels have settled', async () => {
       // Regression test for electron/electron#53035: backportImpl labels
       // trop-created backports in a separate API call shortly after opening
