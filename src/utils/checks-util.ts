@@ -206,6 +206,7 @@ export async function getOrCreateCheckRun(
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
   targetBranch: string,
+  { supersedeCompleted = false }: { supersedeCompleted?: boolean } = {},
 ) {
   const checkName = `${CHECK_PREFIX}${targetBranch}`;
   const allChecks = await context.octokit.checks.listForRef(
@@ -219,13 +220,21 @@ export async function getOrCreateCheckRun(
     (run) => run.name === checkName,
   );
 
+  // Prefer a run that is still pending over a completed one with the same
+  // name, whatever order GitHub lists them in.
+  let checkRun = matchingRuns.find((run) => run.status !== 'completed');
+
   // A completed check run is terminal in the Checks API: a PATCH moving it
   // back to 'in_progress' is silently ignored, so a run that was concluded
   // (e.g. marked 'Cancelled' after its target label was removed) can never
-  // show as pending again. Reuse a run only while it is still pending and
-  // otherwise create a fresh one, which supersedes the completed run as the
-  // latest run for that name (electron/electron#53925).
-  let checkRun = matchingRuns.find((run) => run.status !== 'completed');
+  // show as pending again. Dry-run checks pass supersedeCompleted so a fresh
+  // run is created instead, which supersedes the completed run as the
+  // latest run for that name (electron/electron#53925). By default the
+  // completed run is reused, so executing a backport on merge rewrites the
+  // dry run's check rather than adding a second run.
+  if (!checkRun && !supersedeCompleted) {
+    checkRun = matchingRuns[0];
+  }
 
   if (!checkRun) {
     const completedRun = matchingRuns[0];

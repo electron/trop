@@ -233,7 +233,26 @@ describe('checks-util', () => {
       },
     );
 
-    it('creates a fresh check run instead of reusing a completed one', async () => {
+    it('reuses a completed check run by default', async () => {
+      // Executing a backport on merge rewrites the dry run's check instead
+      // of adding a second run for the same head SHA.
+      const completed = {
+        id: 12345,
+        name: checkName,
+        status: 'completed',
+        conclusion: 'neutral',
+      };
+      octokit.checks.listForRef.mockResolvedValue({
+        data: { check_runs: [completed] },
+      });
+
+      const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y');
+
+      expect(octokit.checks.create).not.toHaveBeenCalled();
+      expect(checkRun).toBe(completed);
+    });
+
+    it('creates a fresh check run instead of reusing a completed one when superseding is permitted', async () => {
       // Regression test for electron/electron#53925: after a target label is
       // removed the check run is concluded as 'Cancelled', and the Checks API
       // silently ignores a PATCH back to 'in_progress' on a completed run.
@@ -252,7 +271,9 @@ describe('checks-util', () => {
         },
       });
 
-      const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y');
+      const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y', {
+        supersedeCompleted: true,
+      });
 
       expect(octokit.checks.update).not.toHaveBeenCalled();
       expect(octokit.checks.create).toHaveBeenCalledTimes(1);
@@ -266,32 +287,37 @@ describe('checks-util', () => {
       expect(checkRun.id).toBe(999);
     });
 
-    it('prefers a pending check run over a completed one with the same name', async () => {
-      const pending = {
-        id: 67890,
-        name: checkName,
-        status: 'in_progress',
-        conclusion: null,
-      };
-      octokit.checks.listForRef.mockResolvedValue({
-        data: {
-          check_runs: [
-            {
-              id: 12345,
-              name: checkName,
-              status: 'completed',
-              conclusion: 'neutral',
-            },
-            pending,
-          ],
-        },
-      });
+    it.each([false, true])(
+      'prefers a pending check run over a completed one with the same name (supersedeCompleted: %s)',
+      async (supersedeCompleted) => {
+        const pending = {
+          id: 67890,
+          name: checkName,
+          status: 'in_progress',
+          conclusion: null,
+        };
+        octokit.checks.listForRef.mockResolvedValue({
+          data: {
+            check_runs: [
+              {
+                id: 12345,
+                name: checkName,
+                status: 'completed',
+                conclusion: 'neutral',
+              },
+              pending,
+            ],
+          },
+        });
 
-      const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y');
+        const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y', {
+          supersedeCompleted,
+        });
 
-      expect(octokit.checks.create).not.toHaveBeenCalled();
-      expect(checkRun).toBe(pending);
-    });
+        expect(octokit.checks.create).not.toHaveBeenCalled();
+        expect(checkRun).toBe(pending);
+      },
+    );
   });
 
   describe('buildFailedDiffText', () => {

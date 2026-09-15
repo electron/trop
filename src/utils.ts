@@ -567,7 +567,9 @@ export const backportImpl = async (
     `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
-      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
+      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch, {
+        supersedeCompleted: purpose === BackportPurpose.Check,
+      });
       log(
         'backportImpl',
         LogLevel.INFO,
@@ -851,7 +853,9 @@ export const backportImpl = async (
         ]);
       }
 
-      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
+      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch, {
+        supersedeCompleted: purpose === BackportPurpose.Check,
+      });
       await markBackportCheckFailed(context, checkRun, targetBranch, {
         rawDiff: diff ? rawDiff : undefined,
         annotations: annotations ? annotations : undefined,
