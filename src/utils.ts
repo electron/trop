@@ -21,8 +21,10 @@ import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import {
+  CHECK_RUN_MAX_ANNOTATIONS,
   getOrCreateCheckRun,
   markBackportCheckFailed,
+  truncateAnnotationDetails,
 } from './utils/checks-util';
 import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
@@ -818,15 +820,21 @@ export const backportImpl = async (
               end_line: hunk.theirStartLine + Math.max(0, endOffset),
               annotation_level: 'failure',
               message: 'Patch Conflict',
-              raw_details: hunk.lines
-                .filter(
-                  (_: unknown, i: number) =>
-                    i >= startOffset && i <= finalOffset,
-                )
-                .join('\n'),
+              raw_details: truncateAnnotationDetails(
+                hunk.lines
+                  .filter(
+                    (_: unknown, i: number) =>
+                      i >= startOffset && i <= finalOffset,
+                  )
+                  .join('\n'),
+              ),
             });
           }
         }
+
+        // GitHub accepts at most 50 annotations per check run update; the
+        // full conflict is still available in the diff text.
+        annotations = annotations.slice(0, CHECK_RUN_MAX_ANNOTATIONS);
 
         await fs.promises.rm(createdDir, { force: true, recursive: true });
       }

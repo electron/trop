@@ -310,10 +310,43 @@ export function buildFailedDiffText(rawDiff: string): string {
 }
 
 /**
+ * GitHub caps each annotation's `raw_details` (and `message`) at 64 KB and
+ * accepts at most 50 annotations per check run update request. See
+ * https://docs.github.com/en/rest/checks/runs#update-a-check-run
+ */
+export const CHECK_RUN_ANNOTATION_RAW_DETAILS_LIMIT = 64 * 1024;
+export const CHECK_RUN_MAX_ANNOTATIONS = 50;
+
+// Same headroom rationale as FAILED_DIFF_TEXT_BUDGET above.
+const ANNOTATION_RAW_DETAILS_BUDGET = 60000;
+
+/**
+ * Caps an annotation's `raw_details` under GitHub's limit, cutting at a line
+ * boundary where possible and noting how many characters were omitted.
+ */
+export function truncateAnnotationDetails(rawDetails: string): string {
+  if (rawDetails.length <= ANNOTATION_RAW_DETAILS_BUDGET) {
+    return rawDetails;
+  }
+
+  const truncationNote = (omitted: number) =>
+    `\n... (${omitted} characters omitted)`;
+
+  let keep =
+    ANNOTATION_RAW_DETAILS_BUDGET - truncationNote(rawDetails.length).length;
+  const lastNewline = rawDetails.lastIndexOf('\n', keep);
+  if (lastNewline > keep - 500) {
+    keep = lastNewline;
+  }
+
+  return `${rawDetails.slice(0, keep)}${truncationNote(rawDetails.length - keep)}`;
+}
+
+/**
  * Concludes a "Backportable?" check run as 'neutral' with a "Backport Failed"
- * output. If GitHub rejects the rich output (oversized diff text, too many
- * annotations, ...) the update is retried with only the title and summary so
- * the run never stays pending.
+ * output. If GitHub rejects the rich output the update is retried first
+ * without the annotations (whose `raw_details` may be oversized) and then
+ * without the diff text as well, so the run never stays pending.
  */
 export async function markBackportCheckFailed(
   context: SimpleWebHookRepoContext,
@@ -346,27 +379,55 @@ export async function markBackportCheckFailed(
     `Updating check run '${checkRun.name}' (${checkRun.id}) with conclusion 'neutral'`,
   );
 
+  const update = () => context.octokit.checks.update(updateOpts);
+  const output = updateOpts.output!;
+  // Progressively drop the parts of the output GitHub is most likely to
+  // reject, so the run is concluded with as much detail as GitHub accepts.
+  const fallbacks = [
+    {
+      what: 'annotations',
+      present: () => output.annotations !== undefined,
+      drop: () => {
+        output.annotations = undefined;
+      },
+    },
+    {
+      what: 'diff text',
+      present: () => output.text !== undefined,
+      drop: () => {
+        output.text = undefined;
+      },
+    },
+  ];
+
+  let lastError: unknown;
   try {
-    await context.octokit.checks.update(updateOpts);
+    await update();
+    return;
   } catch (err) {
-    // A GitHub error occurred - the run must still be concluded or it stays
-    // pending forever, so retry without the diff text and annotations.
+    lastError = err;
+  }
+
+  for (const fallback of fallbacks) {
+    if (!fallback.present()) continue;
     log(
       'markBackportCheckFailed',
       LogLevel.ERROR,
-      `Failed to update check run '${checkRun.name}' (${checkRun.id}) with diff and annotations, retrying without them: ${err}`,
+      `GitHub rejected the update for check run '${checkRun.name}' (${checkRun.id}), retrying without ${fallback.what}: ${lastError}`,
     );
-    updateOpts.output!.annotations = undefined;
-    updateOpts.output!.text = undefined;
+    fallback.drop();
     try {
-      await context.octokit.checks.update(updateOpts);
-    } catch (retryErr) {
-      log(
-        'markBackportCheckFailed',
-        LogLevel.ERROR,
-        `Failed to conclude check run '${checkRun.name}' (${checkRun.id}): ${retryErr}`,
-      );
-      throw retryErr;
+      await update();
+      return;
+    } catch (err) {
+      lastError = err;
     }
   }
+
+  log(
+    'markBackportCheckFailed',
+    LogLevel.ERROR,
+    `Failed to conclude check run '${checkRun.name}' (${checkRun.id}): ${lastError}`,
+  );
+  throw lastError;
 }

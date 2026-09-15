@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BACKPORT_APPROVAL_CHECK, CHECK_PREFIX } from '../src/constants';
 import {
+  CHECK_RUN_ANNOTATION_RAW_DETAILS_LIMIT,
   CHECK_RUN_OUTPUT_TEXT_LIMIT,
   buildFailedDiffText,
   getOrCreateCheckRun,
   markBackportCheckFailed,
   queueBackportApprovalCheck,
+  truncateAnnotationDetails,
 } from '../src/utils/checks-util';
 
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
@@ -358,6 +360,38 @@ describe('checks-util', () => {
     });
   });
 
+  describe('truncateAnnotationDetails', () => {
+    it('returns short details untouched', () => {
+      const rawDetails = '<<<<<<< HEAD\n=======\n+foo\n>>>>>>> theirs';
+
+      expect(truncateAnnotationDetails(rawDetails)).toBe(rawDetails);
+    });
+
+    it('truncates oversized details to fit the annotation limit', () => {
+      // electron/electron#53925: a single 1,580-line conflicted region in
+      // spec/asar-spec.ts produced ~85 KB of raw_details for one annotation.
+      const line = `+${'x'.repeat(53)}\n`;
+      const rawDetails = line.repeat(Math.ceil(85000 / line.length));
+      expect(rawDetails.length).toBeGreaterThan(
+        CHECK_RUN_ANNOTATION_RAW_DETAILS_LIMIT,
+      );
+
+      const details = truncateAnnotationDetails(rawDetails);
+
+      expect(details.length).toBeLessThanOrEqual(
+        CHECK_RUN_ANNOTATION_RAW_DETAILS_LIMIT,
+      );
+      const match = details.match(/\n\.\.\. \((\d+) characters omitted\)$/);
+      expect(match).not.toBeNull();
+      const omitted = Number(match![1]);
+      const kept = details.length - match![0].length;
+      expect(kept + omitted).toBe(rawDetails.length);
+      expect(details.startsWith(rawDetails.slice(0, kept))).toBe(true);
+      // Truncated at a line boundary.
+      expect(rawDetails[kept]).toBe('\n');
+    });
+  });
+
   describe('markBackportCheckFailed', () => {
     const octokit = {
       checks: {
@@ -399,15 +433,17 @@ describe('checks-util', () => {
       );
     });
 
-    it('retries without the diff and annotations when GitHub rejects the update', async () => {
-      const error = Object.assign(
+    const rejection = () =>
+      Object.assign(
         new Error(
           'Invalid request.\n\nOnly 65535 characters are allowed; 120926 were supplied.',
         ),
         { status: 422 },
       );
+
+    it('retries without the annotations but keeps the diff text when GitHub rejects the update', async () => {
       octokit.checks.update
-        .mockRejectedValueOnce(error)
+        .mockRejectedValueOnce(rejection())
         .mockResolvedValueOnce({ data: {} });
 
       await markBackportCheckFailed(context, checkRun, '30-x-y', {
@@ -424,20 +460,55 @@ describe('checks-util', () => {
         }),
       );
       expect(retryOpts.output.title).toBe('Backport Failed');
+      expect(retryOpts.output.text).toBe(buildFailedDiffText('-a\n+b\n'));
+      expect(retryOpts.output.annotations).toBeUndefined();
+    });
+
+    it('retries without the diff text as well when the second update is also rejected', async () => {
+      octokit.checks.update
+        .mockRejectedValueOnce(rejection())
+        .mockRejectedValueOnce(rejection())
+        .mockResolvedValueOnce({ data: {} });
+
+      await markBackportCheckFailed(context, checkRun, '30-x-y', {
+        rawDiff: '-a\n+b\n',
+        annotations,
+      });
+
+      expect(octokit.checks.update).toHaveBeenCalledTimes(3);
+      const retryOpts = octokit.checks.update.mock.calls[2][0];
+      expect(retryOpts).toEqual(
+        expect.objectContaining({
+          check_run_id: 12345,
+          conclusion: 'neutral',
+        }),
+      );
+      expect(retryOpts.output.title).toBe('Backport Failed');
       expect(retryOpts.output.text).toBeUndefined();
       expect(retryOpts.output.annotations).toBeUndefined();
     });
 
-    it('rethrows when the retry also fails', async () => {
+    it('skips fallback stages that have nothing left to drop', async () => {
+      octokit.checks.update.mockRejectedValue(new Error('boom'));
+
+      await expect(
+        markBackportCheckFailed(context, checkRun, '30-x-y', {}),
+      ).rejects.toThrow('boom');
+
+      expect(octokit.checks.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows when every retry fails', async () => {
       octokit.checks.update.mockRejectedValue(new Error('boom'));
 
       await expect(
         markBackportCheckFailed(context, checkRun, '30-x-y', {
           rawDiff: '-a\n+b\n',
+          annotations,
         }),
       ).rejects.toThrow('boom');
 
-      expect(octokit.checks.update).toHaveBeenCalledTimes(2);
+      expect(octokit.checks.update).toHaveBeenCalledTimes(3);
     });
   });
 });
