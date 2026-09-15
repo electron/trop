@@ -207,6 +207,7 @@ export async function getOrCreateCheckRun(
   pr: WebHookPR,
   targetBranch: string,
 ) {
+  const checkName = `${CHECK_PREFIX}${targetBranch}`;
   const allChecks = await context.octokit.checks.listForRef(
     context.repo({
       ref: pr.head.sha,
@@ -214,14 +215,30 @@ export async function getOrCreateCheckRun(
     }),
   );
 
-  let checkRun = allChecks.data.check_runs.find((run) => {
-    return run.name === `${CHECK_PREFIX}${targetBranch}`;
-  });
+  const matchingRuns = allChecks.data.check_runs.filter(
+    (run) => run.name === checkName,
+  );
+
+  // A completed check run is terminal in the Checks API: a PATCH moving it
+  // back to 'in_progress' is silently ignored, so a run that was concluded
+  // (e.g. marked 'Cancelled' after its target label was removed) can never
+  // show as pending again. Reuse a run only while it is still pending and
+  // otherwise create a fresh one, which supersedes the completed run as the
+  // latest run for that name (electron/electron#53925).
+  let checkRun = matchingRuns.find((run) => run.status !== 'completed');
 
   if (!checkRun) {
+    const completedRun = matchingRuns[0];
+    if (completedRun) {
+      log(
+        'getOrCreateCheckRun',
+        LogLevel.INFO,
+        `Check run '${checkName}' (${completedRun.id}) already concluded '${completedRun.conclusion}' - creating a fresh run to supersede it`,
+      );
+    }
     const response = await context.octokit.checks.create(
       context.repo({
-        name: `${CHECK_PREFIX}${targetBranch}`,
+        name: checkName,
         head_sha: pr.head.sha,
         status: 'queued' as 'queued',
         details_url: 'https://github.com/electron/trop',
@@ -229,11 +246,118 @@ export async function getOrCreateCheckRun(
     );
     checkRun = response.data;
     log(
-      'backportImpl',
+      'getOrCreateCheckRun',
       LogLevel.INFO,
-      `Created check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with status 'queued'`,
+      `Created check run '${checkName}' (${checkRun.id}) with status 'queued'`,
     );
   }
 
   return checkRun;
+}
+
+/**
+ * GitHub rejects check run `output.text` longer than this with a 422
+ * ("Only 65535 characters are allowed").
+ */
+export const CHECK_RUN_OUTPUT_TEXT_LIMIT = 65535;
+
+// Leave headroom under the hard limit for the surrounding markdown, the
+// truncation note and any difference between GitHub's and JavaScript's
+// notion of a "character".
+const FAILED_DIFF_TEXT_BUDGET = 60000;
+
+const FAILED_DIFF_FENCE = '``````````````````````````````';
+
+/**
+ * Renders the conflict diff shown in the "Backport Failed" check run output,
+ * truncating it so the whole text stays under GitHub's check run limit.
+ */
+export function buildFailedDiffText(rawDiff: string): string {
+  const header = `Failed Diff:\n\n${FAILED_DIFF_FENCE}diff\n`;
+  const footer = `\n${FAILED_DIFF_FENCE}`;
+
+  const fullText = `${header}${rawDiff}${footer}`;
+  if (fullText.length <= FAILED_DIFF_TEXT_BUDGET) {
+    return fullText;
+  }
+
+  const truncationNote = (omitted: number) =>
+    `\n... (${omitted} characters omitted, diff truncated to fit GitHub's ${CHECK_RUN_OUTPUT_TEXT_LIMIT} character check run output limit)`;
+
+  // Size the note for the largest possible omitted count so the final text
+  // is guaranteed to fit the budget.
+  const overhead =
+    header.length + truncationNote(rawDiff.length).length + footer.length;
+  let keep = FAILED_DIFF_TEXT_BUDGET - overhead;
+
+  // Prefer cutting at a line boundary so the tail of the diff stays readable.
+  const lastNewline = rawDiff.lastIndexOf('\n', keep);
+  if (lastNewline > keep - 500) {
+    keep = lastNewline;
+  }
+
+  const omitted = rawDiff.length - keep;
+  return `${header}${rawDiff.slice(0, keep)}${truncationNote(omitted)}${footer}`;
+}
+
+/**
+ * Concludes a "Backportable?" check run as 'neutral' with a "Backport Failed"
+ * output. If GitHub rejects the rich output (oversized diff text, too many
+ * annotations, ...) the update is retried with only the title and summary so
+ * the run never stays pending.
+ */
+export async function markBackportCheckFailed(
+  context: SimpleWebHookRepoContext,
+  checkRun: Pick<BackportCheck, 'id' | 'name'>,
+  targetBranch: string,
+  {
+    rawDiff,
+    annotations,
+  }: {
+    rawDiff?: string;
+    annotations?: unknown[];
+  },
+) {
+  const updateOpts = context.repo({
+    check_run_id: checkRun.id,
+    name: checkRun.name,
+    conclusion: 'neutral' as 'neutral',
+    completed_at: new Date().toISOString(),
+    output: {
+      title: 'Backport Failed',
+      summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
+      text: rawDiff !== undefined ? buildFailedDiffText(rawDiff) : undefined,
+      annotations,
+    },
+  });
+
+  log(
+    'markBackportCheckFailed',
+    LogLevel.INFO,
+    `Updating check run '${checkRun.name}' (${checkRun.id}) with conclusion 'neutral'`,
+  );
+
+  try {
+    await context.octokit.checks.update(updateOpts);
+  } catch (err) {
+    // A GitHub error occurred - the run must still be concluded or it stays
+    // pending forever, so retry without the diff text and annotations.
+    log(
+      'markBackportCheckFailed',
+      LogLevel.ERROR,
+      `Failed to update check run '${checkRun.name}' (${checkRun.id}) with diff and annotations, retrying without them: ${err}`,
+    );
+    updateOpts.output!.annotations = undefined;
+    updateOpts.output!.text = undefined;
+    try {
+      await context.octokit.checks.update(updateOpts);
+    } catch (retryErr) {
+      log(
+        'markBackportCheckFailed',
+        LogLevel.ERROR,
+        `Failed to conclude check run '${checkRun.name}' (${checkRun.id}): ${retryErr}`,
+      );
+      throw retryErr;
+    }
+  }
 }
