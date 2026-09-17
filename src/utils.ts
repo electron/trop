@@ -21,6 +21,7 @@ import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import { getOrCreateCheckRun } from './utils/checks-util';
+import { getEffectiveBaseRef } from './utils/stack-util';
 import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
 import { TryBackportOptions } from './interfaces';
@@ -88,32 +89,39 @@ export const labelClosedPR = async (
 };
 
 const tryBackportAllCommits = async (opts: TryBackportOptions) => {
-  log(
-    'backportImpl',
-    LogLevel.INFO,
-    `Getting rev list from: ${opts.pr.base.sha}..${opts.pr.head.sha}`,
-  );
-
   const { context } = opts;
   if (!context) return;
 
-  const allCommits = await context.octokit.paginate(
-    'GET /repos/{owner}/{repo}/pulls/{pull_number}/commits',
-    context.repo({ pull_number: opts.pr.number, per_page: 100 }),
-  );
-
-  const mergeCommits = allCommits.filter((c) => c.parents.length > 1);
-  if (mergeCommits.length > 0) {
+  // Gather the commits of every PR bottom to top so a stack applies in the
+  // order it landed.
+  const commits: string[] = [];
+  for (const pr of opts.prs) {
     log(
       'backportImpl',
       LogLevel.INFO,
-      `Skipping ${mergeCommits.length} merge commit(s) from PR #${opts.pr.number}: ${mergeCommits.map((c) => c.sha).join(', ')}`,
+      `Getting rev list from: ${pr.base.sha}..${pr.head.sha}`,
+    );
+
+    const allCommits = await context.octokit.paginate(
+      'GET /repos/{owner}/{repo}/pulls/{pull_number}/commits',
+      context.repo({ pull_number: pr.number, per_page: 100 }),
+    );
+
+    const mergeCommits = allCommits.filter((c) => c.parents.length > 1);
+    if (mergeCommits.length > 0) {
+      log(
+        'backportImpl',
+        LogLevel.INFO,
+        `Skipping ${mergeCommits.length} merge commit(s) from PR #${pr.number}: ${mergeCommits.map((c) => c.sha).join(', ')}`,
+      );
+    }
+
+    commits.push(
+      ...allCommits
+        .filter((commit) => commit.parents.length <= 1)
+        .map((commit) => commit.sha),
     );
   }
-
-  const commits = allCommits
-    .filter((commit) => commit.parents.length <= 1)
-    .map((commit) => commit.sha);
 
   if (commits.length === 0) {
     log(
@@ -133,7 +141,7 @@ const tryBackportAllCommits = async (opts: TryBackportOptions) => {
     );
     await context.octokit.issues.createComment(
       context.repo({
-        issue_number: opts.pr.number,
+        issue_number: opts.prs[opts.prs.length - 1].number,
         body: 'This PR has exceeded the automatic backport commit limit \
 and must be performed manually.',
       }),
@@ -204,16 +212,8 @@ and must be performed manually.',
   return success;
 };
 
-const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
-  // Fetch the merged squash commit.
-  log('backportImpl', LogLevel.INFO, `Fetching squash commit details`);
-
-  if (!opts.pr.merged) {
-    log('backportImpl', LogLevel.INFO, `PR was not squash merged - aborting`);
-    return false;
-  }
-
-  const patchUrl = `https://api.github.com/repos/${opts.slug}/commits/${opts.pr.merge_commit_sha}`;
+const fetchSquashPatch = async (opts: TryBackportOptions, pr: WebHookPR) => {
+  const patchUrl = `https://api.github.com/repos/${opts.slug}/commits/${pr.merge_commit_sha}`;
   const patchBody = await fetch(patchUrl, {
     headers: {
       Accept: 'application/vnd.github.VERSION.patch',
@@ -229,13 +229,30 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
       subjectLineFound = true;
       const branchAwarePatchLine = patchLine
         // Replace branch references in commit message with new branch
-        .replaceAll(`(${opts.pr.base.ref})`, `${opts.targetBranch}`)
+        .replaceAll(`(${getEffectiveBaseRef(pr)})`, `${opts.targetBranch}`)
         // Replace PR references in squashed message with empty string
         .replaceAll(/ \(#[0-9]+\)$/g, '');
       patch += `${branchAwarePatchLine}\n`;
     } else {
       patch += `${patchLine}\n`;
     }
+  }
+
+  return patch;
+};
+
+const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
+  // Fetch the merged squash commit(s).
+  log('backportImpl', LogLevel.INFO, `Fetching squash commit details`);
+
+  if (opts.prs.some((pr) => !pr.merged)) {
+    log('backportImpl', LogLevel.INFO, `PR was not squash merged - aborting`);
+    return false;
+  }
+
+  const patches: string[] = [];
+  for (const pr of opts.prs) {
+    patches.push(await fetchSquashPatch(opts, pr));
   }
 
   log('backportImpl', LogLevel.INFO, 'Got squash commit details');
@@ -251,7 +268,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
     slug: opts.slug,
     targetBranch: opts.targetBranch,
     tempBranch: opts.tempBranch,
-    patches: [patch],
+    patches,
     targetRemote: 'target_repo',
     shouldPush: opts.purpose === BackportPurpose.ExecuteBackport,
     github: opts.context.octokit,
@@ -372,37 +389,94 @@ export const checkUserHasWriteAccess = async (
   return ['write', 'admin'].includes(userInfo.permission);
 };
 
-const createBackportComment = async (
+const ONELINE_NOTES_PATTERN = /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/i;
+const MULTILINE_NOTES_PATTERN =
+  /(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/i;
+
+/**
+ * Extracts the release notes from a PR body: `raw` is the matched text as it
+ * appears in the body, `bullets` the same notes as `* ` list items.
+ */
+const getReleaseNotes = (body: string | null | undefined) => {
+  const onelineMatch = body?.match(ONELINE_NOTES_PATTERN);
+  if (onelineMatch) {
+    return { raw: onelineMatch[0], bullets: [`* ${onelineMatch[1].trim()}`] };
+  }
+
+  const multilineMatch = body?.match(MULTILINE_NOTES_PATTERN);
+  if (multilineMatch) {
+    return {
+      raw: multilineMatch[0],
+      bullets: multilineMatch[1]
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    };
+  }
+
+  return null;
+};
+
+const NO_NOTES_PATTERN = /^\* (none|no[- ]notes)\.?$/i;
+
+/**
+ * Builds the body of a backport PR for one or more original PRs (a merged
+ * stack is backported as one PR, listed bottom to top).
+ */
+export const createBackportComment = async (
   context: SimpleWebHookRepoContext,
-  pr: WebHookPR,
+  prs: WebHookPR[],
 ) => {
-  const prNumber = await getOriginalBackportNumber(context, pr);
+  const prNumbers: number[] = [];
+  for (const pr of prs) {
+    prNumbers.push(await getOriginalBackportNumber(context, pr));
+  }
 
   log(
     'createBackportComment',
     LogLevel.INFO,
-    `Creating backport comment for #${prNumber}`,
+    `Creating backport comment for ${prNumbers.map((n) => `#${n}`).join(', ')}`,
   );
 
-  let body = `Backport of #${prNumber}\n\nSee that PR for details.`;
-
-  const onelineMatch = pr.body?.match(
-    /(?:(?:\r?\n)|^)notes: (.+?)(?:(?:\r?\n)|$)/gi,
-  );
-  const multilineMatch = pr.body?.match(
-    /(?:(?:\r?\n)Notes:(?:\r?\n)((?:\*.+(?:(?:\r?\n)|$))+))/gi,
-  );
+  let body = prNumbers.map((n) => `Backport of #${n}`).join('\n');
+  body += `\n\nSee ${prs.length > 1 ? 'those PRs' : 'that PR'} for details.`;
 
   // attach release notes to backport PR body
-  if (onelineMatch && onelineMatch[0]) {
-    body += `\n\n${onelineMatch[0]}`;
-  } else if (multilineMatch && multilineMatch[0]) {
-    body += `\n\n${multilineMatch[0]}`;
-  } else {
+  let notes = prs
+    .map((pr) => getReleaseNotes(pr.body))
+    .filter((n): n is NonNullable<typeof n> => n !== null);
+  if (notes.length > 1) {
+    // Combining notes from several PRs: drop the ones that say "none".
+    notes = notes.filter(
+      (n) => !n.bullets.every((b) => NO_NOTES_PATTERN.test(b)),
+    );
+  }
+
+  if (notes.length === 0) {
     body += '\n\nNotes: no-notes';
+  } else if (notes.length === 1) {
+    body += `\n\n${notes[0].raw}`;
+  } else {
+    body += `\n\nNotes:\n${notes.flatMap((n) => n.bullets).join('\n')}\n`;
   }
 
   return body;
+};
+
+/**
+ * The semver label a backport of `prs` should carry: the highest one among
+ * them.
+ */
+const getStackSemverLabel = (prs: WebHookPR[]) => {
+  const labels = prs
+    .map((pr) => labelUtils.getSemverLabel(pr))
+    .filter((label): label is NonNullable<typeof label> => !!label);
+  if (labels.length <= 1) return labels[0];
+
+  const highest = labelUtils.getHighestSemverLabel(
+    ...labels.map((label) => label.name),
+  );
+  return labels.find((label) => label.name === highest);
 };
 
 export const tagBackportReviewers = async ({
@@ -520,7 +594,35 @@ export const backportImpl = async (
   purpose: BackportPurpose,
   labelToRemove?: string,
   labelToAdd?: string,
+) =>
+  backportStackImpl(
+    robot,
+    context,
+    [pr],
+    targetBranch,
+    purpose,
+    labelToRemove,
+    labelToAdd,
+  );
+
+/**
+ * Backports one or more PRs to `targetBranch` as a single pull request.
+ *
+ * `prs` is ordered bottom to top; the last entry is the PR that drives the
+ * backport (check run, title, reviewer, comments) - for a stack that is the
+ * top PR, whose merge landed the whole stack.
+ */
+export const backportStackImpl = async (
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  prs: WebHookPR[],
+  targetBranch: string,
+  purpose: BackportPurpose,
+  labelToRemove?: string,
+  labelToAdd?: string,
 ) => {
+  const pr = prs[prs.length - 1];
+
   // Optionally disallow backports to EOL branches
   const noEOLSupport = getEnvVar('NO_EOL_SUPPORT', '');
   if (noEOLSupport) {
@@ -555,7 +657,9 @@ export const backportImpl = async (
 
   const base = pr.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
-  const bp = `backport from PR #${pr.number} to "${targetBranch}"`;
+  const bp = `backport from PR ${prs
+    .map((p) => `#${p.number}`)
+    .join(', ')} to "${targetBranch}"`;
   log('backportImpl', LogLevel.INFO, `Queuing ${bp} for "${slug}"`);
 
   let createdDir: string | null = null;
@@ -612,7 +716,7 @@ export const backportImpl = async (
         context,
         repoAccessToken,
         purpose,
-        pr,
+        prs,
         dir,
         slug,
         targetBranch,
@@ -627,7 +731,7 @@ export const backportImpl = async (
           context,
           repoAccessToken,
           purpose,
-          pr,
+          prs,
           dir,
           slug,
           targetBranch,
@@ -661,7 +765,7 @@ export const backportImpl = async (
         log('backportImpl', LogLevel.INFO, 'Creating Pull Request');
 
         const branchAwarePrTitle = pr.title.replaceAll(
-          `(${pr.base.ref})`,
+          `(${getEffectiveBaseRef(pr)})`,
           `(${targetBranch})`,
         );
 
@@ -670,7 +774,7 @@ export const backportImpl = async (
             head: `${tempBranch}`,
             base: targetBranch,
             title: branchAwarePrTitle,
-            body: await createBackportComment(context, pr),
+            body: await createBackportComment(context, prs),
             maintainer_can_modify: false,
           }),
         );
@@ -694,46 +798,52 @@ export const backportImpl = async (
           }),
         );
 
-        // TODO(codebytere): getOriginalBackportNumber doesn't support multi-backports yet,
-        // so only try if the backport is a single backport.
-        const backportNumbers = getPRNumbersFromPRBody(pr);
-        const originalPRNumber =
-          backportNumbers.length === 1
-            ? await getOriginalBackportNumber(context, pr)
-            : pr.number;
+        // Every backported PR gets its labels updated, not only the top one.
+        for (const member of prs) {
+          // TODO(codebytere): getOriginalBackportNumber doesn't support multi-backports yet,
+          // so only try if the backport is a single backport.
+          const backportNumbers = getPRNumbersFromPRBody(member);
+          const originalPRNumber =
+            backportNumbers.length === 1
+              ? await getOriginalBackportNumber(context, member)
+              : member.number;
 
-        if (labelToAdd) {
-          await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
-        }
+          if (labelToAdd) {
+            await labelUtils.addLabels(context, originalPRNumber, [labelToAdd]);
+          }
 
-        if (labelToRemove) {
-          await labelUtils.removeLabel(
-            context,
-            originalPRNumber,
-            labelToRemove,
-          );
-        }
+          if (labelToRemove) {
+            await labelUtils.removeLabel(
+              context,
+              originalPRNumber,
+              labelToRemove,
+            );
+          }
 
-        if (labelToAdd?.startsWith(PRStatus.IN_FLIGHT)) {
-          await labelUtils.removeLabel(
-            context,
-            originalPRNumber,
-            `${PRStatus.NEEDS_MANUAL}${targetBranch}`,
-          );
+          if (labelToAdd?.startsWith(PRStatus.IN_FLIGHT)) {
+            await labelUtils.removeLabel(
+              context,
+              originalPRNumber,
+              `${PRStatus.NEEDS_MANUAL}${targetBranch}`,
+            );
+          }
         }
 
         const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];
 
-        if (await shouldRequestBackportApproval(context, pr)) {
-          log(
-            'backportImpl',
-            LogLevel.INFO,
-            `Determined that ${pr.number} requires backport approval`,
-          );
-          labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
+        for (const member of prs) {
+          if (await shouldRequestBackportApproval(context, member)) {
+            log(
+              'backportImpl',
+              LogLevel.INFO,
+              `Determined that ${member.number} requires backport approval`,
+            );
+            labelsToAdd.push(BACKPORT_REQUESTED_LABEL);
+            break;
+          }
         }
 
-        const semverLabel = labelUtils.getSemverLabel(pr);
+        const semverLabel = getStackSemverLabel(prs);
         if (semverLabel) {
           // If the new PR for some reason has a semver label already, then
           // we need to compare the two semver labels and ensure the higher one
@@ -836,16 +946,18 @@ export const backportImpl = async (
         );
 
         const labelToRemove = PRStatus.TARGET + targetBranch;
-        await labelUtils.removeLabel(context, pr.number, labelToRemove);
-
         const labelToAdd = PRStatus.NEEDS_MANUAL + targetBranch;
-        const originalBackportNumber = await getOriginalBackportNumber(
-          context,
-          pr,
-        );
-        await labelUtils.addLabels(context, originalBackportNumber, [
-          labelToAdd,
-        ]);
+        for (const member of prs) {
+          await labelUtils.removeLabel(context, member.number, labelToRemove);
+
+          const originalBackportNumber = await getOriginalBackportNumber(
+            context,
+            member,
+          );
+          await labelUtils.addLabels(context, originalBackportNumber, [
+            labelToAdd,
+          ]);
+        }
       }
 
       const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
