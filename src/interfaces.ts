@@ -34,7 +34,8 @@ export interface TryBackportOptions {
   context: SimpleWebHookRepoContext;
   repoAccessToken: string;
   purpose: BackportPurpose;
-  pr: WebHookPR;
+  // Every PR whose commits are backported together, ordered bottom to top.
+  prs: WebHookPR[];
   dir: string;
   slug: string;
   targetBranch: string;

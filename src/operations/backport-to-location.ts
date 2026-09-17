@@ -1,7 +1,7 @@
 import { PRStatus, BackportPurpose, LogLevel } from '../enums';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
-import { backportImpl } from '../utils';
+import { backportStackImpl } from '../utils';
 import { Probot } from 'probot';
 import { SimpleWebHookRepoContext, WebHookPR } from '../types';
 
@@ -16,6 +16,17 @@ export const backportToLabel = async (
   robot: Probot,
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
+  label: { name: string },
+) => backportStackToLabel(robot, context, [pr], label);
+
+/**
+ * Backports a merged stack of PRs (ordered bottom to top) as one pull request
+ * to the branch a label represents.
+ */
+export const backportStackToLabel = async (
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  prs: WebHookPR[],
   label: { name: string },
 ) => {
   log(
@@ -45,10 +56,10 @@ export const backportToLabel = async (
 
   const labelToRemove = label.name;
   const labelToAdd = label.name.replace(PRStatus.TARGET, PRStatus.IN_FLIGHT);
-  await backportImpl(
+  await backportStackImpl(
     robot,
     context,
-    pr,
+    prs,
     targetBranch,
     BackportPurpose.ExecuteBackport,
     labelToRemove,
@@ -68,6 +79,17 @@ export const backportToBranch = async (
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
   targetBranch: string,
+) => backportStackToBranch(robot, context, [pr], targetBranch);
+
+/**
+ * Backports a merged stack of PRs (ordered bottom to top) as one pull request
+ * to the given branch.
+ */
+export const backportStackToBranch = async (
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  prs: WebHookPR[],
+  targetBranch: string,
 ) => {
   log(
     'backportToBranch',
@@ -77,10 +99,10 @@ export const backportToBranch = async (
 
   const labelToRemove = undefined;
   const labelToAdd = PRStatus.IN_FLIGHT + targetBranch;
-  await backportImpl(
+  await backportStackImpl(
     robot,
     context,
-    pr,
+    prs,
     targetBranch,
     BackportPurpose.ExecuteBackport,
     labelToRemove,

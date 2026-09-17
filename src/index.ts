@@ -1,7 +1,7 @@
 import { ApplicationFunction } from 'probot';
 
 import {
-  backportImpl,
+  backportStackImpl,
   checkUserHasWriteAccess,
   getPRNumbersFromPRBody,
   labelClosedPR,
@@ -28,10 +28,19 @@ import { Label } from '@octokit/webhooks-types';
 import {
   backportToLabel,
   backportToBranch,
+  backportStackToBranch,
+  backportStackToLabel,
 } from './operations/backport-to-location';
 import { updateManualBackport } from './operations/update-manual-backport';
 import { getSupportedBranches, isBranchSupported } from './utils/branch-util';
-import { getEffectiveBaseRef } from './utils/stack-util';
+import {
+  getEffectiveBaseRef,
+  getStackMemberPRs,
+  getStackTopPR,
+  isStackedPR,
+  isTopOfStack,
+  StackablePR,
+} from './utils/stack-util';
 import {
   getBackportApprovalCheck,
   getBackportInformationCheck,
@@ -84,6 +93,140 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     }
   };
 
+  // A stack is backported once, driven by its top PR: the `target/*` labels
+  // of lower members are ignored.
+  const isLowerStackMember = (pr: StackablePR) =>
+    isStackedPR(pr) && !isTopOfStack(pr);
+
+  /**
+   * Resolves the PRs a merged PR should be backported with: the whole stack
+   * (bottom to top) for the top PR of a stack, otherwise just the PR itself.
+   * Returns null when the stack could not be resolved, after flagging the top
+   * PR for manual backports.
+   */
+  const getMergedBackportPRs = async (
+    context: SimpleWebHookRepoContext,
+    pr: WebHookPR,
+  ): Promise<WebHookPR[] | null> => {
+    if (!isTopOfStack(pr)) return [pr];
+
+    try {
+      return await getStackMemberPRs(context, pr);
+    } catch (err) {
+      robot.log(
+        `Failed to resolve the stack topped by #${pr.number}: ${String(err)}`,
+      );
+      await context.octokit.issues.createComment(
+        context.repo({
+          issue_number: pr.number,
+          body: `I was unable to resolve the pull requests in this stack, so it could not be backported; \
+you will need to perform this [backport manually](https://github.com/electron/trop/blob/main/docs/manual-backports.md#manual-backports).`,
+        }),
+      );
+      for (const label of pr.labels) {
+        if (!label.name.startsWith(PRStatus.TARGET)) continue;
+        const targetBranch = labelToTargetBranch(label, PRStatus.TARGET);
+        await removeLabel(context, pr.number, label.name);
+        await addLabels(context, pr.number, [
+          `${PRStatus.NEEDS_MANUAL}${targetBranch}`,
+        ]);
+      }
+      return null;
+    }
+  };
+
+  const backportMergedPR = async (
+    context: SimpleWebHookRepoContext,
+    pr: WebHookPR,
+  ) => {
+    if (isLowerStackMember(pr)) {
+      robot.log(
+        `#${pr.number} is not the top of its stack - the top PR drives the backport`,
+      );
+      return;
+    }
+
+    const prs = await getMergedBackportPRs(context, pr);
+    if (!prs) return;
+
+    if (prs.length === 1) {
+      robot.log(
+        `Backporting #${pr.number} to all branches specified by labels`,
+      );
+      backportAllLabels(context, pr);
+      return;
+    }
+
+    robot.log(
+      `Backporting stack ${prs
+        .map((p) => `#${p.number}`)
+        .join(', ')} to all branches specified by labels on #${pr.number}`,
+    );
+    for (const label of pr.labels) {
+      void backportStackToLabel(robot, context, prs, label);
+    }
+  };
+
+  /**
+   * Concludes the Backport Labels Added check of a lower member of a stack.
+   * Backport targets are read from the top PR, so a lower member passes as
+   * long as its own labels do not disagree with the top PR's.
+   */
+  const updateStackMemberBackportInformationCheck = async (
+    context: WebHookPRContext,
+    member: WebHookPR,
+    topPr: WebHookPR,
+  ) => {
+    let check = await getBackportInformationCheck(context, member.head.sha);
+    if (!check) {
+      await queueBackportInformationCheck(context, member.head.sha);
+      check = (await getBackportInformationCheck(context, member.head.sha))!;
+    }
+
+    const targetLabels = (pr: WebHookPR) =>
+      pr.labels
+        .filter((label) => label.name.startsWith(PRStatus.TARGET))
+        .map((label) => label.name);
+    const hasNoBackport = (pr: WebHookPR) =>
+      pr.labels.some((label) => label.name === NO_BACKPORT_LABEL);
+
+    const memberTargets = targetLabels(member);
+    const topTargets = targetLabels(topPr);
+    const conflicts: string[] = [];
+
+    const extraTargets = memberTargets.filter((t) => !topTargets.includes(t));
+    if (extraTargets.length > 0) {
+      conflicts.push(
+        `This PR has ${extraTargets.join(', ')} which #${topPr.number} does not.`,
+      );
+    }
+    if (hasNoBackport(member) && topTargets.length > 0) {
+      conflicts.push(
+        `This PR has "${NO_BACKPORT_LABEL}" while #${topPr.number} has ${topTargets.join(', ')}.`,
+      );
+    }
+    if (hasNoBackport(topPr) && memberTargets.length > 0) {
+      conflicts.push(
+        `This PR has ${memberTargets.join(', ')} while #${topPr.number} has "${NO_BACKPORT_LABEL}".`,
+      );
+    }
+
+    if (conflicts.length > 0) {
+      await updateBackportInformationCheck(context, check, {
+        title: 'Conflicting Backport Information',
+        summary: `Backport targets for a stack are read from the top pull request (#${topPr.number}). ${conflicts.join(' ')}`,
+        conclusion: CheckRunStatus.FAILURE,
+      });
+      return;
+    }
+
+    await updateBackportInformationCheck(context, check, {
+      title: 'Backport Information Provided',
+      summary: `This PR is part of a stack - backport labels for a stack are read from its top pull request (#${topPr.number}).`,
+      conclusion: CheckRunStatus.SUCCESS,
+    });
+  };
+
   const handleTropBackportClosed = async (
     context: WebHookPRContext,
     pr: WebHookPR,
@@ -110,6 +253,27 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   };
 
   const runCheck = async (context: WebHookPRContext, pr: WebHookPR) => {
+    if (isLowerStackMember(pr)) {
+      robot.log(
+        `#${pr.number} is not the top of its stack - skipping backportable checks`,
+      );
+      return;
+    }
+
+    // The top PR of a stack is checked together with the members below it,
+    // which are still open at this point.
+    let prs = [pr];
+    if (isTopOfStack(pr)) {
+      try {
+        prs = await getStackMemberPRs(context, pr, { requireMerged: false });
+      } catch (err) {
+        robot.log(
+          `Failed to resolve the stack topped by #${pr.number} - skipping backportable checks: ${String(err)}`,
+        );
+        return;
+      }
+    }
+
     const allChecks = await context.octokit.checks.listForRef(
       context.repo({
         ref: pr.head.sha,
@@ -124,10 +288,10 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       if (!label.name.startsWith(PRStatus.TARGET)) continue;
       const targetBranch = labelToTargetBranch(label, PRStatus.TARGET);
 
-      await backportImpl(
+      await backportStackImpl(
         robot,
         context,
-        pr,
+        prs,
         targetBranch,
         BackportPurpose.Check,
       );
@@ -335,10 +499,11 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             );
 
             // The current PR is only valid if the PR it is backporting
-            // was merged to main or to a supported release branch.
+            // was merged to main or to a supported release branch (a
+            // stacked PR lands on the base branch of its stack).
             if (
               ![pr.base.repo.default_branch, ...supported].includes(
-                oldPR.base.ref,
+                getEffectiveBaseRef(oldPR as StackablePR),
               )
             ) {
               const cause =
@@ -503,9 +668,9 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
   robot.on('pull_request.unlabeled', maybeRunCheck);
 
   /**
-   * Checks that a PR done to `main` contains the required
-   * backport information, i.e.: at least a `no-backport` or
-   * a `target/XYZ` labels.
+   * Checks that a PR done to `main` (directly or via a stack that lands on
+   * `main`) contains the required backport information, i.e.: at least a
+   * `no-backport` or a `target/XYZ` labels.
    */
   robot.on(
     [
@@ -514,11 +679,16 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       'pull_request.labeled',
       'pull_request.unlabeled',
       'pull_request.synchronize',
+      // Fired when a PR joins, moves within or leaves a stack; newer than the
+      // event names known to @octokit/webhooks-types, hence the cast.
+      'pull_request.stacked' as 'pull_request.edited',
     ],
     async (context) => {
       const pr = context.payload.pull_request;
 
-      if (pr.base.ref !== pr.base.repo.default_branch) {
+      // A stacked PR targets the PR below it; use the branch the whole stack
+      // lands on to decide whether backport information is required.
+      if (getEffectiveBaseRef(pr) !== pr.base.repo.default_branch) {
         return;
       }
 
@@ -527,6 +697,50 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       if (!backportCheck) {
         await queueBackportInformationCheck(context);
         backportCheck = (await getBackportInformationCheck(context))!;
+      }
+
+      if (isLowerStackMember(pr)) {
+        let topPr: WebHookPR;
+        try {
+          topPr = await getStackTopPR(context, pr);
+        } catch (err) {
+          robot.log(
+            `Failed to resolve the top of the stack #${pr.number} is in - leaving its backport information check queued: ${String(err)}`,
+          );
+          if (backportCheck.status !== 'queued') {
+            await queueBackportInformationCheck(context);
+          }
+          return;
+        }
+
+        await updateStackMemberBackportInformationCheck(context, pr, topPr);
+        return;
+      }
+
+      // The verdict of the lower members depends on the top PR's labels, so
+      // re-evaluate them whenever those change.
+      if (
+        isTopOfStack(pr) &&
+        'label' in context.payload &&
+        (context.payload.label.name.startsWith(PRStatus.TARGET) ||
+          context.payload.label.name === NO_BACKPORT_LABEL)
+      ) {
+        try {
+          const members = await getStackMemberPRs(context, pr, {
+            requireMerged: false,
+          });
+          for (const member of members.slice(0, -1)) {
+            await updateStackMemberBackportInformationCheck(
+              context,
+              member,
+              pr,
+            );
+          }
+        } catch (err) {
+          robot.log(
+            `Failed to re-evaluate the backport information of the stack topped by #${pr.number}: ${String(err)}`,
+          );
+        }
       }
 
       const isNoBackport = pr.labels.some(
@@ -586,10 +800,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
       if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
         await handleTropBackportClosed(context, pr, PRChange.MERGE);
       } else {
-        robot.log(
-          `Backporting #${pr.number} to all branches specified by labels`,
-        );
-        backportAllLabels(context, pr);
+        await backportMergedPR(context, pr);
       }
     } else {
       robot.log(
@@ -662,6 +873,15 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
             );
             return false;
           }
+          if (isLowerStackMember(pr as WebHookPR)) {
+            await context.octokit.issues.createComment(
+              context.repo({
+                issue_number: issue.number,
+                body: 'This PR is part of a stack - backports of a stack must be run from its top pull request.',
+              }),
+            );
+            return false;
+          }
           return true;
         },
       },
@@ -680,7 +900,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
               issue_number: issue.number,
             }),
           );
-          backportAllLabels(context, pr);
+          await backportMergedPR(context, pr);
           return true;
         },
       },
@@ -691,6 +911,13 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
           const branches = new Set(
             targetBranches.split(',').map((b) => b.trim()),
           );
+
+          const { data: pr } = await context.octokit.pulls.get(
+            context.repo({ pull_number: issue.number }),
+          );
+          const prs = await getMergedBackportPRs(context, pr as WebHookPR);
+          if (!prs) return false;
+
           for (const branch of branches) {
             robot.log(
               `Attempting backport to \`${branch}\` from 'backport-to' comment`,
@@ -737,11 +964,11 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
               }),
             );
 
-            const { data: pr } = await context.octokit.pulls.get(
-              context.repo({ pull_number: issue.number }),
-            );
-
-            void backportToBranch(robot, context, pr as WebHookPR, branch);
+            if (prs.length === 1) {
+              void backportToBranch(robot, context, prs[0], branch);
+            } else {
+              void backportStackToBranch(robot, context, prs, branch);
+            }
           }
           return true;
         },

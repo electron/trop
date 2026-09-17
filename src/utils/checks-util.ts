@@ -36,11 +36,13 @@ export async function updateBackportValidityCheck(
   );
 }
 
-export async function getBackportInformationCheck(context: WebHookPRContext) {
-  const pr = context.payload.pull_request;
+export async function getBackportInformationCheck(
+  context: WebHookPRContext,
+  headSha = context.payload.pull_request.head.sha,
+) {
   const allChecks = await context.octokit.checks.listForRef(
     context.repo({
-      ref: pr.head.sha,
+      ref: headSha,
       per_page: 100,
     }),
   );
@@ -80,13 +82,14 @@ export async function updateBackportInformationCheck(
   );
 }
 
-export async function queueBackportInformationCheck(context: WebHookPRContext) {
-  const pr = context.payload.pull_request;
-
+export async function queueBackportInformationCheck(
+  context: WebHookPRContext,
+  headSha = context.payload.pull_request.head.sha,
+) {
   await context.octokit.checks.create(
     context.repo({
       name: BACKPORT_INFORMATION_CHECK,
-      head_sha: pr.head.sha,
+      head_sha: headSha,
       status: 'queued',
       details_url: 'https://github.com/electron/trop',
       output: {

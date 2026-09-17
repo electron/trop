@@ -14,6 +14,7 @@ import {
 import { CheckRunStatus, PRChange } from '../src/enums';
 import { default as trop } from '../src/index';
 import {
+  backportStackToLabel,
   backportToBranch,
   backportToLabel,
 } from '../src/operations/backport-to-location';
@@ -25,6 +26,7 @@ import {
   updatePRBranch,
 } from '../src/utils';
 import * as checkUtils from '../src/utils/checks-util';
+import { getStackMemberPRs, getStackTopPR } from '../src/utils/stack-util';
 
 // event fixtures
 const prClosedEvent = require('./fixtures/pull_request.closed.json');
@@ -97,6 +99,7 @@ const backportRequestedLabel = {
 };
 
 vi.mock('../src/utils', () => ({
+  backportStackImpl: vi.fn(),
   labelClosedPR: vi.fn(),
   checkUserHasWriteAccess: vi.fn().mockResolvedValue(true),
   getPRNumbersFromPRBody: vi.fn().mockReturnValue([12345]),
@@ -110,6 +113,14 @@ vi.mock('../src/operations/update-manual-backport', () => ({
 vi.mock('../src/operations/backport-to-location', () => ({
   backportToBranch: vi.fn(),
   backportToLabel: vi.fn(),
+  backportStackToBranch: vi.fn(),
+  backportStackToLabel: vi.fn(),
+}));
+
+vi.mock('../src/utils/stack-util', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/utils/stack-util')>()),
+  getStackMemberPRs: vi.fn().mockResolvedValue([]),
+  getStackTopPR: vi.fn(),
 }));
 
 const getBackportApprovalCheck = vi.hoisted(() => {
@@ -171,9 +182,10 @@ describe('trop', () => {
   });
 
   afterEach(() => {
-    expect(nock.isDone(), 'Not all Nock interceptors used').toBe(true);
+    const pendingMocks = nock.pendingMocks();
     nock.cleanAll();
     nock.enableNetConnect();
+    expect(pendingMocks, 'Not all Nock interceptors used').toEqual([]);
   });
 
   describe('issue_comment.created event', () => {
@@ -496,6 +508,208 @@ describe('trop', () => {
 
       expect(checkUtils.queueBackportApprovalCheck).not.toHaveBeenCalled();
       expect(checkUtils.updateBackportApprovalCheck).not.toHaveBeenCalled();
+    });
+
+    it('passes the check for a stacked PR whose stack targets main', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
+      );
+      event.payload.action = 'stacked';
+      // The PR itself targets the PR below it in the stack.
+      event.payload.pull_request.base.ref = 'fix/some-parent';
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: 'main', sha: 'DEF' },
+      };
+      event.payload.pull_request.labels = [targetLabel];
+
+      await robot.receive(event);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportInformationCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Backport Information Provided',
+        summary: 'This PR contains the required  backport information.',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+
+    describe('for a lower member of a stack', () => {
+      const otherTargetLabel = { name: 'target/11-x-y', color: 'fff' };
+
+      const lowerMemberEvent = async (labels: object[]) => {
+        const event = JSON.parse(
+          await fs.readFile(newPROpenedEventPath, 'utf-8'),
+        );
+        event.payload.pull_request.base.ref = 'main';
+        event.payload.pull_request.stack = {
+          number: 8,
+          size: 2,
+          position: 1,
+          base: { ref: 'main', sha: 'DEF' },
+        };
+        event.payload.pull_request.labels = labels;
+        return event;
+      };
+
+      const topPr = (labels: object[]) =>
+        ({ number: 99, head: { sha: 'TOP' }, labels }) as any;
+
+      beforeEach(() => {
+        vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+      });
+
+      it('passes when it has no target labels', async () => {
+        vi.mocked(getStackTopPR).mockResolvedValueOnce(topPr([targetLabel]));
+
+        await robot.receive(await lowerMemberEvent([]));
+
+        expect(checkUtils.queueBackportInformationCheck).not.toHaveBeenCalled();
+        expect(
+          vi.mocked(checkUtils.updateBackportInformationCheck).mock.calls[0][2],
+        ).toMatchObject({
+          title: 'Backport Information Provided',
+          summary:
+            'This PR is part of a stack - backport labels for a stack are read from its top pull request (#99).',
+          conclusion: CheckRunStatus.SUCCESS,
+        });
+      });
+
+      it('passes when its target labels are a subset of the top PR labels', async () => {
+        vi.mocked(getStackTopPR).mockResolvedValueOnce(
+          topPr([targetLabel, otherTargetLabel]),
+        );
+
+        await robot.receive(await lowerMemberEvent([targetLabel]));
+
+        expect(
+          vi.mocked(checkUtils.updateBackportInformationCheck).mock.calls[0][2],
+        ).toMatchObject({
+          title: 'Backport Information Provided',
+          conclusion: CheckRunStatus.SUCCESS,
+        });
+      });
+
+      it('fails when it has a target label the top PR does not', async () => {
+        vi.mocked(getStackTopPR).mockResolvedValueOnce(topPr([targetLabel]));
+
+        await robot.receive(
+          await lowerMemberEvent([targetLabel, otherTargetLabel]),
+        );
+
+        expect(
+          vi.mocked(checkUtils.updateBackportInformationCheck).mock.calls[0][2],
+        ).toMatchObject({
+          title: 'Conflicting Backport Information',
+          summary:
+            'Backport targets for a stack are read from the top pull request (#99). This PR has target/11-x-y which #99 does not.',
+          conclusion: CheckRunStatus.FAILURE,
+        });
+      });
+
+      it('fails when it has no-backport while the top PR has targets', async () => {
+        vi.mocked(getStackTopPR).mockResolvedValueOnce(topPr([targetLabel]));
+
+        await robot.receive(await lowerMemberEvent([noBackportLabel]));
+
+        expect(
+          vi.mocked(checkUtils.updateBackportInformationCheck).mock.calls[0][2],
+        ).toMatchObject({
+          title: 'Conflicting Backport Information',
+          summary:
+            'Backport targets for a stack are read from the top pull request (#99). This PR has "no-backport" while #99 has target/12-x-y.',
+          conclusion: CheckRunStatus.FAILURE,
+        });
+      });
+
+      it('leaves the check queued when the top PR cannot be resolved', async () => {
+        vi.mocked(getStackTopPR).mockRejectedValueOnce(new Error('nope'));
+
+        await robot.receive(await lowerMemberEvent([targetLabel]));
+
+        expect(
+          checkUtils.updateBackportInformationCheck,
+        ).not.toHaveBeenCalled();
+        expect(checkUtils.queueBackportInformationCheck).toHaveBeenCalledTimes(
+          1,
+        );
+      });
+    });
+
+    it('re-evaluates the lower members when a target label is added to the top PR', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+
+      const event = JSON.parse(await fs.readFile(prLabeledEventPath, 'utf-8'));
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: 'main', sha: 'DEF' },
+      };
+      event.payload.label = targetLabel;
+      event.payload.pull_request.labels = [targetLabel];
+      const topPr = event.payload.pull_request;
+      const lowerMember = {
+        number: 5,
+        head: { sha: 'LOWER' },
+        labels: [targetLabel],
+      };
+      vi.mocked(getStackMemberPRs).mockResolvedValueOnce([
+        lowerMember,
+        topPr,
+      ] as any);
+
+      await robot.receive(event);
+
+      expect(getStackMemberPRs).toHaveBeenCalledWith(expect.anything(), topPr, {
+        requireMerged: false,
+      });
+      expect(checkUtils.getBackportInformationCheck).toHaveBeenCalledWith(
+        expect.anything(),
+        'LOWER',
+      );
+      const memberUpdate = vi
+        .mocked(checkUtils.updateBackportInformationCheck)
+        .mock.calls.find(([, , items]) => items.summary.includes('#'));
+      expect(memberUpdate?.[2]).toMatchObject({
+        title: 'Backport Information Provided',
+        summary: `This PR is part of a stack - backport labels for a stack are read from its top pull request (#${topPr.number}).`,
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+
+    it('skips the check for a stacked PR whose stack targets a release branch', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPROpenedEventPath, 'utf-8'),
+      );
+      event.payload.pull_request.base.ref = 'fix/some-parent';
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 2,
+        position: 2,
+        base: { ref: '30-x-y', sha: 'DEF' },
+      };
+      event.payload.pull_request.labels = [];
+
+      // Consumed by the Valid Backport handler, which also runs for this event.
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      await robot.receive(event);
+
+      expect(checkUtils.queueBackportInformationCheck).not.toHaveBeenCalled();
+      expect(checkUtils.updateBackportInformationCheck).not.toHaveBeenCalled();
     });
 
     it('keeps the backport approval check pending when a trop-created backport is opened before its labels have settled', async () => {
@@ -1037,7 +1251,7 @@ describe('trop', () => {
       });
     });
 
-    // oxlint-disable-next-line vitest/expect-expect -- asserted via nock.isDone() in afterEach
+    // oxlint-disable-next-line vitest/expect-expect -- asserted via nock.pendingMocks() in afterEach
     it('removes the "backport/requested" label if the "backport/approved" label is added', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
@@ -1081,7 +1295,7 @@ describe('trop', () => {
       await robot.receive(event);
     });
 
-    // oxlint-disable-next-line vitest/expect-expect -- asserted via nock.isDone() in afterEach
+    // oxlint-disable-next-line vitest/expect-expect -- asserted via nock.pendingMocks() in afterEach
     it('removes label if PR is trying to backport to its own base branch', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
@@ -1348,10 +1562,98 @@ describe('trop', () => {
   });
 
   describe('pull_request.closed event', () => {
+    const stackedClosedEvent = (position: number, labels: object[]) => {
+      const event = JSON.parse(JSON.stringify(prClosedEvent));
+      event.payload.pull_request.labels = labels;
+      event.payload.pull_request.stack = {
+        number: 8,
+        size: 3,
+        position,
+        base: { ref: 'main', sha: 'DEF' },
+      };
+      return event;
+    };
+
     it('begins the backporting process if the PR was merged', async () => {
       await robot.receive(prClosedEvent);
 
       expect(backportToLabel).toHaveBeenCalled();
+      expect(getStackMemberPRs).not.toHaveBeenCalled();
+      expect(backportStackToLabel).not.toHaveBeenCalled();
+    });
+
+    it('does not backport a merged PR that is not the top of its stack', async () => {
+      await robot.receive(stackedClosedEvent(1, [targetLabel]));
+
+      expect(getStackMemberPRs).not.toHaveBeenCalled();
+      expect(backportToLabel).not.toHaveBeenCalled();
+      expect(backportStackToLabel).not.toHaveBeenCalled();
+    });
+
+    it('backports the whole stack once per label of the merged top PR', async () => {
+      const otherTargetLabel = { name: 'target/11-x-y', color: 'fff' };
+      const event = stackedClosedEvent(3, [targetLabel, otherTargetLabel]);
+      const topPr = event.payload.pull_request;
+      const members = [{ number: 5 }, { number: 6 }, topPr];
+      vi.mocked(getStackMemberPRs).mockResolvedValueOnce(members as any);
+
+      await robot.receive(event);
+
+      expect(getStackMemberPRs).toHaveBeenCalledWith(expect.anything(), topPr);
+      expect(backportToLabel).not.toHaveBeenCalled();
+      expect(backportStackToLabel).toHaveBeenCalledTimes(2);
+      expect(backportStackToLabel).toHaveBeenNthCalledWith(
+        1,
+        expect.anything(),
+        expect.anything(),
+        members,
+        targetLabel,
+      );
+      expect(backportStackToLabel).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        expect.anything(),
+        members,
+        otherTargetLabel,
+      );
+    });
+
+    it('flags the top PR for manual backports when its stack cannot be resolved', async () => {
+      const event = stackedClosedEvent(3, [targetLabel]);
+      vi.mocked(getStackMemberPRs).mockRejectedValueOnce(
+        new Error('Stack #8 has unmerged member(s) #5 - cannot backport #7'),
+      );
+
+      nock(GH_API)
+        .post('/repos/codebytere/probot-test/issues/7/comments', ({ body }) => {
+          expect(body).toContain(
+            'I was unable to resolve the pull requests in this stack',
+          );
+          return true;
+        })
+        .reply(200);
+      nock(GH_API)
+        .get(
+          '/repos/codebytere/probot-test/issues/7/labels?per_page=100&page=1',
+        )
+        .reply(200, [targetLabel]);
+      nock(GH_API)
+        .delete(
+          `/repos/codebytere/probot-test/issues/7/labels/${encodeURIComponent(targetLabel.name)}`,
+        )
+        .reply(200);
+      nock(GH_API)
+        .post('/repos/codebytere/probot-test/issues/7/labels', ({ labels }) => {
+          expect(labels).toEqual(['needs-manual-bp/12-x-y']);
+          return true;
+        })
+        .reply(200);
+
+      await robot.receive(event);
+
+      expect(backportToLabel).not.toHaveBeenCalled();
+      expect(backportStackToLabel).not.toHaveBeenCalled();
+      expect(nock.isDone()).toBe(true);
     });
 
     it('updates labels on the original PR when a bot backport PR has been closed with unmerged commits', async () => {
@@ -1925,6 +2227,66 @@ Notes: <!-- One-line Change Summary Here-->`,
         title: 'Valid Backport',
         summary:
           'This PR is declared as backporting "#1234" which is a valid PR that has been merged into main',
+        conclusion: CheckRunStatus.SUCCESS,
+      });
+    });
+
+    it('succeeds the backport validity check when an original PR landed on main via a stack', async () => {
+      vi.mocked(getPRNumbersFromPRBody).mockReturnValueOnce([1234, 5678]);
+
+      const event = JSON.parse(
+        await fs.readFile(newPRBackportOpenedEventPath, 'utf-8'),
+      );
+      event.payload.pull_request.base.ref = '30-x-y';
+      event.payload.action = 'synchronize';
+
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/1234')
+        .reply(200, { merged: true, base: { ref: 'main' } });
+
+      // A stack member targets the PR below it, but the stack lands on main.
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/probot-test/pulls/5678')
+        .reply(200, {
+          merged: true,
+          base: { ref: 'perf/menu-1-plumbing' },
+          stack: {
+            number: 8,
+            size: 2,
+            position: 2,
+            base: { ref: 'main', sha: 'DEF' },
+          },
+        });
+
+      nock(GH_API)
+        .persist()
+        .get(
+          '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+        )
+        .reply(200, { check_runs: [{ name: BACKPORT_APPROVAL_CHECK }] });
+
+      nock(GH_API)
+        .get('/repos/codebytere/probot-test/branches?protected=true')
+        .reply(200, BRANCHES);
+
+      nock(GH_API)
+        .persist()
+        .get(
+          `/repos/codebytere/probot-test/issues/${event.payload.pull_request.number}/labels?per_page=100&page=1`,
+        )
+        .reply(200, event.payload.pull_request.labels);
+
+      await robot.receive(event);
+
+      const updatePayload = vi.mocked(checkUtils.updateBackportValidityCheck)
+        .mock.calls[0][2];
+
+      expect(updatePayload).toMatchObject({
+        title: 'Valid Backport',
+        summary:
+          'This PR is declared as backporting "#1234", "#5678" which is a valid PR that has been merged into main',
         conclusion: CheckRunStatus.SUCCESS,
       });
     });

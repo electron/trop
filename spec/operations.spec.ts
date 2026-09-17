@@ -213,6 +213,9 @@ describe('runner', () => {
       // Register build-tools' .patches merge driver in the work clone, as
       // initRepo does in production. Set to false to observe `merge=union`.
       registerMergeDriver?: boolean;
+      // Further commits on the source, each backported as its own patch after
+      // `changes`, in this order - as the members of a stack are.
+      stackedChanges?: Record<string, string>[];
     }): Promise<string> => {
       const remoteDir = await makeTempDir('trop-remote-');
       const targetDir = await makeTempDir('trop-target-');
@@ -250,12 +253,19 @@ describe('runner', () => {
       }
       runGit(sourceDir, ['add', ...Object.keys(opts.changes)]);
       runGit(sourceDir, ['commit', '-m', 'change']);
-      const patch = runGit(sourceDir, [
-        'format-patch',
-        '-1',
-        '--stdout',
-        'HEAD',
-      ]);
+      const patches = [
+        runGit(sourceDir, ['format-patch', '-1', '--stdout', 'HEAD']),
+      ];
+      for (const changes of opts.stackedChanges ?? []) {
+        for (const [file, content] of Object.entries(changes)) {
+          await writeRepoFile(sourceDir, file, content);
+        }
+        runGit(sourceDir, ['add', ...Object.keys(changes)]);
+        runGit(sourceDir, ['commit', '-m', 'stacked change']);
+        patches.push(
+          runGit(sourceDir, ['format-patch', '-1', '--stdout', 'HEAD']),
+        );
+      }
 
       runGit(targetDir, ['remote', 'add', 'origin', remoteDir]);
       runGit(targetDir, ['push', 'origin', 'main', '42-x-y']);
@@ -273,7 +283,7 @@ describe('runner', () => {
         context: {} as never,
         dir: workDir,
         github: {} as never,
-        patches: [patch],
+        patches,
         shouldPush: false,
         slug: 'electron/trop',
         targetBranch: '42-x-y',
@@ -335,6 +345,23 @@ describe('runner', () => {
       );
       expect(await readFile(workDir, `${chromium}/x.patch`)).toBe('x\n');
       expect(runGit(workDir, ['status', '--porcelain'])).toBe('');
+    });
+
+    it('applies the patches of a stack in order, each on top of the one below', async () => {
+      // Each commit rewrites the line the one below it introduced, so the
+      // patches only apply in bottom-to-top order.
+      const workDir = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: { 'feature.txt': 'bottom\n' },
+        stackedChanges: [
+          { 'feature.txt': 'middle\n' },
+          { 'feature.txt': 'top\n' },
+        ],
+      });
+      expect(await readFile(workDir, 'feature.txt')).toBe('top\n');
+      expect(
+        runGit(workDir, ['log', '--format=%s', 'target_repo/42-x-y..HEAD']),
+      ).toBe('stacked change\nstacked change\nchange');
     });
 
     it('would duplicate the entry with the committed union driver', async () => {
