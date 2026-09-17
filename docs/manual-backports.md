@@ -27,6 +27,15 @@ PRs that are part of a [stacked pull request](https://docs.github.com/en/pull-re
 branch the whole stack lands on rather than the branch of the PR below them: a stack landing on `main` is not a backport, while a stack
 landing on a release branch is validated like any other backport.
 
+A stack is backported as a unit, driven by the `target/*` labels of its top PR (see [usage](./usage.md)). When backporting a stack
+manually, apply the commits of every PR in the stack bottom to top and list each of them in the body of the backport PR, one per line:
+
+```markdown
+Backport of #53876
+Backport of #53877
+Backport of #53879
+```
+
 ## Build Tools Backport Command
 
 You can use the `e backport <PR>` command to backport PRs. [This command](https://github.com/electron/build-tools?tab=readme-ov-file#e-backport-pr) manually backports PRs by automating the steps above.

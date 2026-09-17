@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as logUtils from '../src/utils/log-util';
 import { LogLevel } from '../src/enums';
 import {
+  createBackportComment,
   shouldRequestBackportApproval,
   tagBackportReviewers,
   updatePRBranch,
@@ -147,6 +148,85 @@ describe('utils', () => {
         issue_number: 1234,
         body: 'I was unable to update this branch with the latest changes from `main`. Please update it manually.',
       });
+    });
+  });
+
+  describe('createBackportComment()', () => {
+    const context = {
+      octokit: { pulls: { get: vi.fn() } },
+      repo: vi.fn((obj) => obj),
+    } as any;
+
+    const buildPR = (number: number, body: string | null) =>
+      ({
+        number,
+        body,
+        base: { repo: { owner: { login: 'electron' }, name: 'electron' } },
+      }) as WebHookPR;
+
+    it('references a single PR with its one-line notes', async () => {
+      const body = await createBackportComment(context, [
+        buildPR(10, 'Fixes the thing.\n\nNotes: Fixed the thing.'),
+      ]);
+      expect(body).toBe(
+        'Backport of #10\n\nSee that PR for details.\n\n\nNotes: Fixed the thing.',
+      );
+    });
+
+    it('references a single PR with its multi-line notes', async () => {
+      const body = await createBackportComment(context, [
+        buildPR(10, 'Fixes the thing.\n\nNotes:\n* Fixed A.\n* Fixed B.\n'),
+      ]);
+      expect(body).toBe(
+        'Backport of #10\n\nSee that PR for details.\n\n\nNotes:\n* Fixed A.\n* Fixed B.\n',
+      );
+    });
+
+    it('falls back to no-notes for a single PR without notes', async () => {
+      const body = await createBackportComment(context, [
+        buildPR(10, 'Fixes the thing.'),
+      ]);
+      expect(body).toBe(
+        'Backport of #10\n\nSee that PR for details.\n\nNotes: no-notes',
+      );
+      expect(await createBackportComment(context, [buildPR(10, null)])).toBe(
+        'Backport of #10\n\nSee that PR for details.\n\nNotes: no-notes',
+      );
+    });
+
+    it('lists every PR of a stack bottom to top and combines their notes', async () => {
+      const body = await createBackportComment(context, [
+        buildPR(10, 'Plumbing.\n\nNotes: none'),
+        buildPR(20, 'Perf.\n\nNotes: Made menus faster.'),
+        buildPR(30, 'More perf.\n\nNotes:\n* Fixed A.\n* Fixed B.\n'),
+      ]);
+      expect(body).toBe(
+        'Backport of #10\nBackport of #20\nBackport of #30\n\n' +
+          'See those PRs for details.\n\n' +
+          'Notes:\n* Made menus faster.\n* Fixed A.\n* Fixed B.\n',
+      );
+    });
+
+    it('keeps the single set of notes found across a stack as-is', async () => {
+      const body = await createBackportComment(context, [
+        buildPR(10, 'Plumbing.\n\nNotes: none'),
+        buildPR(20, 'Perf.\n\nNotes: Made menus faster.'),
+        buildPR(30, 'No notes here.'),
+      ]);
+      expect(body).toBe(
+        'Backport of #10\nBackport of #20\nBackport of #30\n\n' +
+          'See those PRs for details.\n\n\nNotes: Made menus faster.',
+      );
+    });
+
+    it('falls back to no-notes when no PR of a stack has notes', async () => {
+      const body = await createBackportComment(context, [
+        buildPR(10, 'Plumbing.\n\nNotes: none'),
+        buildPR(20, 'Perf.\n\nNotes: no-notes'),
+      ]);
+      expect(body).toBe(
+        'Backport of #10\nBackport of #20\n\nSee those PRs for details.\n\nNotes: no-notes',
+      );
     });
   });
 

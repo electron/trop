@@ -28,6 +28,7 @@ export const getSemverLabel = (pr: Pick<WebHookPR, 'labels'>) => {
 
 export const getHighestSemverLabel = (...labels: string[]) => {
   const ranked = [
+    SEMVER_LABELS.NONE,
     SEMVER_LABELS.PATCH,
     SEMVER_LABELS.MINOR,
     SEMVER_LABELS.MAJOR,
