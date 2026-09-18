@@ -366,7 +366,7 @@ export async function markBackportCheckFailed(
   const updateOpts = context.repo({
     check_run_id: checkRun.id,
     name: checkRun.name,
-    conclusion: 'neutral' as 'neutral',
+    conclusion: 'neutral' as const,
     completed_at: new Date().toISOString(),
     output: {
       title: 'Backport Failed',
@@ -416,7 +416,7 @@ export async function markBackportCheckFailed(
     log(
       'markBackportCheckFailed',
       LogLevel.ERROR,
-      `GitHub rejected the update for check run '${checkRun.name}' (${checkRun.id}), retrying without ${fallback.what}: ${lastError}`,
+      `GitHub rejected the update for check run '${checkRun.name}' (${checkRun.id}), retrying without ${fallback.what}: ${String(lastError)}`,
     );
     fallback.drop();
     try {
@@ -430,7 +430,7 @@ export async function markBackportCheckFailed(
   log(
     'markBackportCheckFailed',
     LogLevel.ERROR,
-    `Failed to conclude check run '${checkRun.name}' (${checkRun.id}): ${lastError}`,
+    `Failed to conclude check run '${checkRun.name}' (${checkRun.id}): ${String(lastError)}`,
   );
   throw lastError;
 }
