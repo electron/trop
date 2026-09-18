@@ -33,13 +33,12 @@ import { TryBackportOptions } from './interfaces';
 import { client, register } from './utils/prom';
 import {
   SimpleWebHookRepoContext,
-  WebHookIssueContext,
   WebHookPR,
   WebHookRepoContext,
 } from './types';
 import { Probot } from 'probot';
 
-const { parse: parseDiff } = require('what-the-diff');
+import { parse as parseDiff } from 'what-the-diff';
 
 const backportViaAllHisto = new client.Histogram({
   name: 'backport_via_all',
@@ -57,7 +56,7 @@ register.registerMetric(backportViaSquashHisto);
 export const labelClosedPR = async (
   context: WebHookRepoContext,
   pr: WebHookPR,
-  targetBranch: String,
+  targetBranch: string,
   change: PRChange,
 ) => {
   log(
@@ -227,7 +226,7 @@ const fetchSquashPatch = async (opts: TryBackportOptions, pr: WebHookPR) => {
   });
 
   const rawPatch = await patchBody.text();
-  let patch: string = '';
+  let patch = '';
   let subjectLineFound = false;
   for (const patchLine of rawPatch.split('\n')) {
     if (patchLine.startsWith('Subject: ') && !subjectLineFound) {
@@ -685,7 +684,7 @@ export const backportStackImpl = async (
         context.repo({
           check_run_id: checkRun.id,
           name: checkRun.name,
-          status: 'in_progress' as 'in_progress',
+          status: 'in_progress' as const,
         }),
       );
 
@@ -890,7 +889,7 @@ export const backportStackImpl = async (
         context.repo({
           check_run_id: checkRun.id,
           name: checkRun.name,
-          conclusion: 'success' as 'success',
+          conclusion: 'success' as const,
           completed_at: new Date().toISOString(),
           output: {
             title: 'Clean Backport',

@@ -40,7 +40,7 @@ export class ExecutionQueue extends EventEmitter {
         if (!process.env.SPEC_RUNNING) {
           console.error(err);
         }
-        fns[2](err)
+        void fns[2](err)
           .catch((e) => {
             if (!process.env.SPEC_RUNNING) console.error(e);
           })
