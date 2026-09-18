@@ -1,0 +1,71 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "import", "node", "promise", "vitest"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "node": true,
+    "es2021": true
+  },
+  "rules": {
+    "no-var": "error",
+    "eqeqeq": [
+      "error",
+      "always",
+      {
+        "null": "ignore"
+      }
+    ],
+    "prefer-const": [
+      "error",
+      {
+        "destructuring": "all"
+      }
+    ],
+    "no-unused-vars": [
+      "error",
+      {
+        "vars": "all",
+        "args": "after-used",
+        "ignoreRestSiblings": true
+      }
+    ],
+    "typescript/no-floating-promises": "error",
+    "typescript/array-type": "error",
+    "typescript/consistent-type-assertions": "error",
+    "typescript/no-inferrable-types": "error",
+    "typescript/no-non-null-assertion": "warn",
+    "typescript/no-require-imports": "error",
+    "typescript/prefer-for-of": "warn",
+    "typescript/prefer-function-type": "warn",
+    "vitest/require-mock-type-parameters": "off",
+    "typescript/restrict-template-expressions": [
+      "error",
+      {
+        "allowArray": true
+      }
+    ],
+    "vitest/no-standalone-expect": [
+      "error",
+      {
+        "additionalTestBlockFunctions": ["afterEach"]
+      }
+    ]
+  },
+  "ignorePatterns": [
+    "lib/",
+    "coverage/",
+    "node_modules/",
+    "working/",
+    ".build-tools/"
+  ],
+  "overrides": [
+    {
+      "files": ["spec/**/*.ts", "scripts/**/*.js"],
+      "rules": {
+        "typescript/no-require-imports": "off"
+      }
+    }
+  ]
+}

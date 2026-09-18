@@ -12,7 +12,7 @@ export const log = (
   logLevel: LogLevel,
   ...message: unknown[]
 ) => {
-  const output = `${functionName}: ${message}`;
+  const output = `${functionName}: ${message.join(',')}`;
 
   if (logLevel === LogLevel.INFO) {
     console.info(output);

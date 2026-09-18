@@ -89,7 +89,7 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     pr: WebHookPR,
   ) => {
     for (const label of pr.labels) {
-      backportToLabel(robot, context, pr, label);
+      void backportToLabel(robot, context, pr, label);
     }
   };
 
@@ -113,7 +113,9 @@ const probotHandler: ApplicationFunction = async (robot, { getRouter }) => {
     try {
       return await getStackMemberPRs(context, pr);
     } catch (err) {
-      robot.log(`Failed to resolve the stack topped by #${pr.number}: ${err}`);
+      robot.log(
+        `Failed to resolve the stack topped by #${pr.number}: ${String(err)}`,
+      );
       await context.octokit.issues.createComment(
         context.repo({
           issue_number: pr.number,
@@ -161,7 +163,7 @@ you will need to perform this [backport manually](https://github.com/electron/tr
         .join(', ')} to all branches specified by labels on #${pr.number}`,
     );
     for (const label of pr.labels) {
-      backportStackToLabel(robot, context, prs, label);
+      void backportStackToLabel(robot, context, prs, label);
     }
   };
 
@@ -266,7 +268,7 @@ you will need to perform this [backport manually](https://github.com/electron/tr
         prs = await getStackMemberPRs(context, pr, { requireMerged: false });
       } catch (err) {
         robot.log(
-          `Failed to resolve the stack topped by #${pr.number} - skipping backportable checks: ${err}`,
+          `Failed to resolve the stack topped by #${pr.number} - skipping backportable checks: ${String(err)}`,
         );
         return;
       }
@@ -386,7 +388,7 @@ you will need to perform this [backport manually](https://github.com/electron/tr
           context.repo({
             name: VALID_BACKPORT_CHECK_NAME,
             head_sha: pr.head.sha,
-            status: 'queued' as 'queued',
+            status: 'queued' as const,
             details_url: 'https://github.com/electron/trop',
           }),
         );
@@ -656,7 +658,7 @@ you will need to perform this [backport manually](https://github.com/electron/tr
       // Only run the backportable checks on "opened" and "synchronize"
       // an "edited" change can not impact backportability.
       if (['edited', 'synchronize'].includes(action)) {
-        maybeRunCheck(context);
+        void maybeRunCheck(context);
       }
     },
   );
@@ -703,7 +705,7 @@ you will need to perform this [backport manually](https://github.com/electron/tr
           topPr = await getStackTopPR(context, pr);
         } catch (err) {
           robot.log(
-            `Failed to resolve the top of the stack #${pr.number} is in - leaving its backport information check queued: ${err}`,
+            `Failed to resolve the top of the stack #${pr.number} is in - leaving its backport information check queued: ${String(err)}`,
           );
           if (backportCheck.status !== 'queued') {
             await queueBackportInformationCheck(context);
@@ -736,7 +738,7 @@ you will need to perform this [backport manually](https://github.com/electron/tr
           }
         } catch (err) {
           robot.log(
-            `Failed to re-evaluate the backport information of the stack topped by #${pr.number}: ${err}`,
+            `Failed to re-evaluate the backport information of the stack topped by #${pr.number}: ${String(err)}`,
           );
         }
       }
@@ -938,7 +940,7 @@ you will need to perform this [backport manually](https://github.com/electron/tr
 
             try {
               await context.octokit.repos.getBranch(context.repo({ branch }));
-            } catch (err) {
+            } catch {
               robot.log(
                 `${branch} does not exist - no backport will be initiated`,
               );
@@ -963,9 +965,9 @@ you will need to perform this [backport manually](https://github.com/electron/tr
             );
 
             if (prs.length === 1) {
-              backportToBranch(robot, context, prs[0], branch);
+              void backportToBranch(robot, context, prs[0], branch);
             } else {
-              backportStackToBranch(robot, context, prs, branch);
+              void backportStackToBranch(robot, context, prs, branch);
             }
           }
           return true;

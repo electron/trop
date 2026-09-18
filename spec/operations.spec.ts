@@ -173,15 +173,11 @@ describe('runner', () => {
       for (const remote of parsedRemotes) {
         expect(remote.length).toBe(2);
         expect(['origin', 'secondary']).toContain(remote[0]);
-        if (remote[0] === 'origin') {
-          expect(
-            remote[1].endsWith('github.com/electron/clerk.git'),
-          ).toBeTruthy();
-        } else {
-          expect(
-            remote[1].endsWith('github.com/electron/trop.git'),
-          ).toBeTruthy();
-        }
+        const expectedRepo =
+          remote[0] === 'origin'
+            ? 'github.com/electron/clerk.git'
+            : 'github.com/electron/trop.git';
+        expect(remote[1].endsWith(expectedRepo)).toBeTruthy();
       }
     });
   });

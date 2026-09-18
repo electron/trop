@@ -164,7 +164,7 @@ export async function queueBackportApprovalCheck(
       context.repo({
         check_run_id: existingCheck.id,
         name: existingCheck.name,
-        status: 'queued' as 'queued',
+        status: 'queued' as const,
         details_url: 'https://github.com/electron/trop',
         output,
       }),
@@ -226,7 +226,7 @@ export async function getOrCreateCheckRun(
       context.repo({
         name: `${CHECK_PREFIX}${targetBranch}`,
         head_sha: pr.head.sha,
-        status: 'queued' as 'queued',
+        status: 'queued' as const,
         details_url: 'https://github.com/electron/trop',
       }),
     );

@@ -1,6 +1,5 @@
 import { promises as fs } from 'fs';
 import { posix as path } from 'path';
-import { execSync } from 'child_process';
 
 import nock from 'nock';
 import { Probot, ProbotOctokit } from 'probot';
@@ -15,7 +14,6 @@ import {
 import { CheckRunStatus, PRChange } from '../src/enums';
 import { default as trop } from '../src/index';
 import {
-  backportStackToBranch,
   backportStackToLabel,
   backportToBranch,
   backportToLabel,
@@ -169,7 +167,7 @@ describe('trop', () => {
   let robot: Probot;
   process.env = { ...process.env, BOT_USER_NAME };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     nock.disableNetConnect();
 
@@ -180,13 +178,14 @@ describe('trop', () => {
         throttle: { enabled: false },
       }),
     });
-    robot.load(trop);
+    await robot.load(trop);
   });
 
   afterEach(() => {
-    expect(nock.isDone(), 'Not all Nock interceptors used');
+    const pendingMocks = nock.pendingMocks();
     nock.cleanAll();
     nock.enableNetConnect();
+    expect(pendingMocks, 'Not all Nock interceptors used').toEqual([]);
   });
 
   describe('issue_comment.created event', () => {
@@ -664,13 +663,6 @@ describe('trop', () => {
         lowerMember,
         topPr,
       ] as any);
-
-      nock(GH_API)
-        .persist()
-        .get(
-          `/repos/codebytere/probot-test/issues/${topPr.number}/labels?per_page=100&page=1`,
-        )
-        .reply(200, topPr.labels);
 
       await robot.receive(event);
 
@@ -1259,6 +1251,7 @@ describe('trop', () => {
       });
     });
 
+    // oxlint-disable-next-line vitest/expect-expect -- asserted via nock.pendingMocks() in afterEach
     it('removes the "backport/requested" label if the "backport/approved" label is added', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),
@@ -1302,6 +1295,7 @@ describe('trop', () => {
       await robot.receive(event);
     });
 
+    // oxlint-disable-next-line vitest/expect-expect -- asserted via nock.pendingMocks() in afterEach
     it('removes label if PR is trying to backport to its own base branch', async () => {
       const event = JSON.parse(
         await fs.readFile(backportPRLabeledEventPath, 'utf-8'),

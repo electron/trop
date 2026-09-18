@@ -11,7 +11,8 @@
     "postinstall": "node scripts/ensure-build-tools.js",
     "start": "probot run ./lib/index.js",
     "prettier:write": "prettier --write \"{src,spec}/**/*.ts\"",
-    "lint": "prettier --check \"{src,spec}/**/*.ts\"",
+    "lint": "oxlint --type-aware && prettier --check \"{src,spec}/**/*.ts\"",
+    "lint:fix": "oxlint --type-aware --fix && prettier --write \"{src,spec}/**/*.ts\"",
     "test": "vitest run",
     "prepare": "husky"
   },
@@ -30,21 +31,20 @@
     "@types/node": "^22.9.0",
     "@types/node-fetch": "^2.6.11",
     "@types/pino-std-serializers": "^4.0.0",
-    "@typescript-eslint/eslint-plugin": "^5.50.0",
-    "eslint": "^8.0.1",
-    "eslint-config-standard-with-typescript": "^36.0.0",
-    "eslint-plugin-import": "^2.25.2",
-    "eslint-plugin-n": "^15.0.0",
-    "eslint-plugin-promise": "^6.0.0",
     "husky": "^9.1.6",
     "lint-staged": "^17.4.1",
     "nock": "^14.0.11",
+    "oxlint": "^1.81.0",
+    "oxlint-tsgolint": "^7.0.2001",
     "prettier": "^3.3.3",
     "typescript": "*",
     "vitest": "^4.1.11"
   },
   "lint-staged": {
-    "{src,spec}/**/*.ts": "prettier --write **/*.ts"
+    "{src,spec}/**/*.ts": [
+      "oxlint --type-aware",
+      "prettier --write"
+    ]
   },
   "engines": {
     "node": "24.x"
