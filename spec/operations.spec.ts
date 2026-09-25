@@ -13,6 +13,7 @@ import { setupRemotes } from '../src/operations/setup-remotes';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
 import { tagBackportReviewers } from '../src/utils';
 import { registerPatchesMergeDriver } from '../src/utils/build-tools';
+import { addLabels, removeLabel } from '../src/utils/label-utils';
 
 let dirObject: { dir?: string } | null = null;
 
@@ -495,6 +496,17 @@ describe('runner', () => {
       },
     };
 
+    const withBaseRef = (event: any, ref: string) => ({
+      ...event,
+      payload: {
+        ...event.payload,
+        pull_request: {
+          ...event.payload.pull_request,
+          base: { ...event.payload.pull_request.base, ref },
+        },
+      },
+    });
+
     it('tags reviewers and requests review from the original author on manual backport creation', async () => {
       const context = {
         ...backportPROpenedEvent,
@@ -551,6 +563,104 @@ describe('runner', () => {
       };
       await updateManualBackport(context, PRChange.CLOSE, 1234);
       expect(tagBackportReviewers).not.toHaveBeenCalled();
+    });
+
+    it('labels the backport and the original PR for a supported release branch', async () => {
+      const context = {
+        ...backportPROpenedEvent,
+        octokit,
+        repo: vi.fn(),
+      };
+      await updateManualBackport(context, PRChange.OPEN, 1234);
+      expect(addLabels).toHaveBeenCalledWith(
+        context,
+        7,
+        expect.arrayContaining(['36-x-y']),
+      );
+      expect(addLabels).toHaveBeenCalledWith(context, 1234, [
+        'in-flight/36-x-y',
+      ]);
+      expect(removeLabel).toHaveBeenCalledWith(
+        context,
+        1234,
+        'needs-manual-bp/36-x-y',
+      );
+    });
+
+    // electron/electron#54337: a manual backport stacked on another backport
+    // targets that backport's branch instead of a release branch.
+    it.each([
+      ['a stacked backport branch', 'bp/36-x-y/native-prototypes-53962'],
+      ['a feature branch', 'some-feature'],
+    ])(
+      'does not add branch labels when the backport targets %s',
+      async (_, ref) => {
+        const context = {
+          ...withBaseRef(backportPROpenedEvent, ref),
+          octokit,
+          repo: vi.fn(),
+        };
+        await updateManualBackport(context, PRChange.OPEN, 1234);
+
+        const labelsAdded = vi
+          .mocked(addLabels)
+          .mock.calls.flatMap(([, , labels]) => labels);
+        expect(labelsAdded.some((label) => label?.includes(ref))).toBe(false);
+        expect(addLabels).not.toHaveBeenCalledWith(
+          context,
+          1234,
+          expect.anything(),
+        );
+        expect(removeLabel).not.toHaveBeenCalledWith(
+          context,
+          1234,
+          expect.anything(),
+        );
+
+        // The original PR is still pointed at the backport.
+        expect(octokit.issues.createComment).toHaveBeenCalled();
+        expect(tagBackportReviewers).toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['a stacked backport branch', 'bp/36-x-y/native-prototypes-53962'],
+      ['a feature branch', 'some-feature'],
+    ])(
+      'does not add a merged label when a backport to %s merges',
+      async (_, ref) => {
+        const context = {
+          ...withBaseRef(backportPRMergedEvent, ref),
+          octokit,
+          repo: vi.fn(),
+        };
+        await updateManualBackport(context, PRChange.MERGE, 1234);
+
+        expect(addLabels).not.toHaveBeenCalled();
+        // A stale in-flight label is still cleaned up.
+        expect(removeLabel).toHaveBeenCalledWith(
+          context,
+          1234,
+          `in-flight/${ref}`,
+        );
+      },
+    );
+
+    it('adds a merged label when a backport to a supported release branch merges', async () => {
+      const context = {
+        ...backportPRMergedEvent,
+        octokit,
+        repo: vi.fn(),
+      };
+      await updateManualBackport(context, PRChange.MERGE, 1234);
+
+      expect(addLabels).toHaveBeenCalledWith(context, 15, ['36-x-y']);
+      expect(addLabels).toHaveBeenCalledWith(context, 1234, ['merged/36-x-y']);
+      expect(removeLabel).toHaveBeenCalledWith(
+        context,
+        1234,
+        'in-flight/36-x-y',
+      );
     });
   });
 });
