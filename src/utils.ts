@@ -20,7 +20,12 @@ import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
-import { getOrCreateCheckRun } from './utils/checks-util';
+import {
+  CHECK_RUN_MAX_ANNOTATIONS,
+  getOrCreateCheckRun,
+  markBackportCheckFailed,
+  truncateAnnotationDetails,
+} from './utils/checks-util';
 import { getEffectiveBaseRef } from './utils/stack-util';
 import { getEnvVar } from './utils/env-util';
 import { log } from './utils/log-util';
@@ -667,7 +672,9 @@ export const backportStackImpl = async (
     `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
-      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
+      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch, {
+        supersedeCompleted: purpose === BackportPurpose.Check,
+      });
       log(
         'backportImpl',
         LogLevel.INFO,
@@ -922,15 +929,21 @@ export const backportStackImpl = async (
               end_line: hunk.theirStartLine + Math.max(0, endOffset),
               annotation_level: 'failure',
               message: 'Patch Conflict',
-              raw_details: hunk.lines
-                .filter(
-                  (_: unknown, i: number) =>
-                    i >= startOffset && i <= finalOffset,
-                )
-                .join('\n'),
+              raw_details: truncateAnnotationDetails(
+                hunk.lines
+                  .filter(
+                    (_: unknown, i: number) =>
+                      i >= startOffset && i <= finalOffset,
+                  )
+                  .join('\n'),
+              ),
             });
           }
         }
+
+        // GitHub accepts at most 50 annotations per check run update; the
+        // full conflict is still available in the diff text.
+        annotations = annotations.slice(0, CHECK_RUN_MAX_ANNOTATIONS);
 
         await fs.promises.rm(createdDir, { force: true, recursive: true });
       }
@@ -959,34 +972,13 @@ export const backportStackImpl = async (
         }
       }
 
-      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch);
-      const mdSep = '``````````````````````````````';
-      const updateOpts = context.repo({
-        check_run_id: checkRun.id,
-        name: checkRun.name,
-        conclusion: 'neutral' as const,
-        completed_at: new Date().toISOString(),
-        output: {
-          title: 'Backport Failed',
-          summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
-          text: diff
-            ? `Failed Diff:\n\n${mdSep}diff\n${rawDiff}\n${mdSep}`
-            : undefined,
-          annotations: annotations ? annotations : undefined,
-        },
+      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch, {
+        supersedeCompleted: purpose === BackportPurpose.Check,
       });
-      log(
-        'backportImpl',
-        LogLevel.INFO,
-        `Updating check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with conclusion 'neutral'`,
-      );
-      try {
-        await context.octokit.checks.update(updateOpts);
-      } catch {
-        // A GitHub error occurred - try to mark it as a failure without annotations.
-        updateOpts.output!.annotations = undefined;
-        await context.octokit.checks.update(updateOpts);
-      }
+      await markBackportCheckFailed(context, checkRun, targetBranch, {
+        rawDiff: diff ? rawDiff : undefined,
+        annotations: annotations ? annotations : undefined,
+      });
     },
   );
 };
