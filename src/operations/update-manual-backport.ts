@@ -6,6 +6,7 @@ import {
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPRContext } from '../types';
 import { shouldRequestBackportApproval, tagBackportReviewers } from '../utils';
+import { isBranchSupported } from '../utils/branch-util';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
 
@@ -24,17 +25,31 @@ export const updateManualBackport = async (
 ) => {
   const pr = context.payload.pull_request;
 
-  const newPRLabelsToAdd = [pr.base.ref];
+  // Only add branch labels for release branches. A manual backport can
+  // target any branch - e.g. another backport's branch when it is stacked on
+  // top of it - and labeling for those creates bogus `<branch>`,
+  // `in-flight/<branch>` and `merged/<branch>` labels (electron/electron#54337).
+  const isSupportedBranch = isBranchSupported(pr.base.ref);
+
+  const newPRLabelsToAdd = isSupportedBranch ? [pr.base.ref] : [];
 
   // Changed labels on the original PR.
   let labelToAdd: string | undefined;
-  let labelToRemove: string;
+  let labelToRemove: string | undefined;
 
   log(
     'updateManualBackport',
     LogLevel.INFO,
     `Updating backport of ${oldPRNumber} to ${pr.base.ref}`,
   );
+
+  if (!isSupportedBranch) {
+    log(
+      'updateManualBackport',
+      LogLevel.INFO,
+      `${pr.base.ref} is not a supported release branch - not adding branch labels`,
+    );
+  }
 
   if (type === PRChange.OPEN) {
     log(
@@ -43,16 +58,18 @@ export const updateManualBackport = async (
       `New manual backport opened at #${pr.number}`,
     );
 
-    labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
-    labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
+    if (isSupportedBranch) {
+      labelToAdd = PRStatus.IN_FLIGHT + pr.base.ref;
+      labelToRemove = PRStatus.NEEDS_MANUAL + pr.base.ref;
 
-    const removeLabelExists = await labelUtils.labelExistsOnPR(
-      context,
-      oldPRNumber,
-      labelToRemove,
-    );
-    if (!removeLabelExists) {
-      labelToRemove = PRStatus.TARGET + pr.base.ref;
+      const removeLabelExists = await labelUtils.labelExistsOnPR(
+        context,
+        oldPRNumber,
+        labelToRemove,
+      );
+      if (!removeLabelExists) {
+        labelToRemove = PRStatus.TARGET + pr.base.ref;
+      }
     }
 
     const skipCheckLabelExists = await labelUtils.labelExistsOnPR(
@@ -161,7 +178,9 @@ please check out #${pr.number}`;
     labelToRemove = PRStatus.IN_FLIGHT + pr.base.ref;
 
     // The old PR should now show that the backport PR has been merged to this branch.
-    labelToAdd = PRStatus.MERGED + pr.base.ref;
+    if (isSupportedBranch) {
+      labelToAdd = PRStatus.MERGED + pr.base.ref;
+    }
   } else {
     log(
       'updateManualBackport',
@@ -175,10 +194,16 @@ please check out #${pr.number}`;
   }
 
   // Add labels to the new manual backport PR.
-  await labelUtils.addLabels(context, pr.number, newPRLabelsToAdd);
+  if (newPRLabelsToAdd.length > 0) {
+    await labelUtils.addLabels(context, pr.number, newPRLabelsToAdd);
+  }
 
-  // Update labels on the original PR.
-  await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
+  // Update labels on the original PR. Removing the in-flight label on merge or
+  // close is not gated on the branch, so one added before this check existed
+  // is still cleaned up (removeLabel is a no-op if the label is absent).
+  if (labelToRemove) {
+    await labelUtils.removeLabel(context, oldPRNumber, labelToRemove);
+  }
   if (labelToAdd) {
     await labelUtils.addLabels(context, oldPRNumber, [labelToAdd]);
   }
