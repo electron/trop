@@ -1,11 +1,16 @@
 import {
   BACKPORT_LABEL,
   BACKPORT_REQUESTED_LABEL,
+  CLAUDE_BOT_LOGIN,
   SKIP_CHECK_LABEL,
 } from '../constants';
 import { PRChange, PRStatus, LogLevel } from '../enums';
 import { WebHookPRContext } from '../types';
-import { shouldRequestBackportApproval, tagBackportReviewers } from '../utils';
+import {
+  getPRApprovers,
+  shouldRequestBackportApproval,
+  tagBackportReviewers,
+} from '../utils';
 import { isBranchSupported } from '../utils/branch-util';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
@@ -157,16 +162,21 @@ please check out #${pr.number}`;
     }
 
     // Tag default reviewers to manual backport, as well as the original
-    // PR author if they have write access. GitHub doesn't allow requesting
-    // a review from the PR author, so skip that if they backported it
-    // themselves.
+    // PR author if they have write access. If Claude authored the original
+    // PR, request the original PR's approvers instead. GitHub doesn't allow
+    // requesting a review from the PR author, so skip anyone who opened the
+    // backport themselves.
+    const originalAuthor = originalPR.user?.login;
+    const users =
+      originalAuthor === CLAUDE_BOT_LOGIN
+        ? await getPRApprovers(context, oldPRNumber)
+        : originalAuthor
+          ? [originalAuthor]
+          : [];
     await tagBackportReviewers({
       context,
       targetPrNumber: pr.number,
-      user:
-        originalPR.user?.login === pr.user.login
-          ? undefined
-          : originalPR.user?.login,
+      users: users.filter((user) => user !== pr.user.login),
     });
   } else if (type === PRChange.MERGE) {
     log(

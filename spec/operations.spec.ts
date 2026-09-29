@@ -11,7 +11,7 @@ import { backportCommitsToBranch } from '../src/operations/backport-commits';
 import { initRepo } from '../src/operations/init-repo';
 import { setupRemotes } from '../src/operations/setup-remotes';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
-import { tagBackportReviewers } from '../src/utils';
+import { getPRApprovers, tagBackportReviewers } from '../src/utils';
 import { registerPatchesMergeDriver } from '../src/utils/build-tools';
 import { addLabels, removeLabel } from '../src/utils/label-utils';
 
@@ -59,6 +59,7 @@ const writeRepoFile = async (
 const buildPatchList = (...entries: string[]) => entries.join('\n');
 
 vi.mock('../src/utils', () => ({
+  getPRApprovers: vi.fn().mockResolvedValue([]),
   tagBackportReviewers: vi.fn().mockResolvedValue(undefined),
   shouldRequestBackportApproval: vi.fn().mockReturnValue(false),
 }));
@@ -518,7 +519,36 @@ describe('runner', () => {
       expect(tagBackportReviewers).toHaveBeenCalledWith({
         context,
         targetPrNumber: 7,
-        user: 'original-author',
+        users: ['original-author'],
+      });
+      expect(getPRApprovers).not.toHaveBeenCalled();
+    });
+
+    it("requests review from the original PR's approvers if Claude opened it", async () => {
+      vi.mocked(getPRApprovers).mockResolvedValueOnce([
+        'alice',
+        // The author of the manual backport PR in the fixture.
+        'codebytere',
+        'bob',
+      ]);
+      const context = {
+        ...backportPROpenedEvent,
+        octokit: {
+          ...octokit,
+          pulls: {
+            get: vi.fn().mockResolvedValue({
+              data: { user: { login: 'claude[bot]' } },
+            }),
+          },
+        },
+        repo: vi.fn(),
+      };
+      await updateManualBackport(context, PRChange.OPEN, 1234);
+      expect(getPRApprovers).toHaveBeenCalledWith(context, 1234);
+      expect(tagBackportReviewers).toHaveBeenCalledWith({
+        context,
+        targetPrNumber: 7,
+        users: ['alice', 'bob'],
       });
     });
 
@@ -541,7 +571,7 @@ describe('runner', () => {
       expect(tagBackportReviewers).toHaveBeenCalledWith({
         context,
         targetPrNumber: 7,
-        user: undefined,
+        users: [],
       });
     });
 

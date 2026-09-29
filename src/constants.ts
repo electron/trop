@@ -34,5 +34,9 @@ export const BACKPORT_REQUESTED_LABEL =
 export const DEFAULT_BACKPORT_REVIEW_TEAM =
   process.env.DEFAULT_BACKPORT_REVIEW_TEAM;
 
+// Manual backports of PRs opened by this account request review from the
+// original PR's approvers, since the author is a bot and can't review.
+export const CLAUDE_BOT_LOGIN = 'claude[bot]';
+
 export const VALID_BACKPORT_CHECK_NAME =
   process.env.VALID_BACKPORT_CHECK_NAME || 'Valid Backport';
