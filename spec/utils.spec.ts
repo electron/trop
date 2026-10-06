@@ -4,6 +4,7 @@ import * as logUtils from '../src/utils/log-util';
 import { LogLevel } from '../src/enums';
 import {
   createBackportComment,
+  getPRApprovers,
   shouldRequestBackportApproval,
   tagBackportReviewers,
   updatePRBranch,
@@ -54,12 +55,39 @@ describe('utils', () => {
 
     it('correctly tags team reviewers and reviewers when user is defined', async () => {
       const user = 'abc';
-      await tagBackportReviewers({ context, targetPrNumber: 1234, user });
+      await tagBackportReviewers({
+        context,
+        targetPrNumber: 1234,
+        users: [user],
+      });
       expect(octokit.pulls.requestReviewers).toHaveBeenCalled();
       expect(octokit.pulls.requestReviewers).toHaveBeenCalledWith({
         pull_number: 1234,
         team_reviewers: ['wg-releases'],
         reviewers: [user],
+      });
+    });
+
+    it('requests each user once and only if they have write access', async () => {
+      octokit.repos.getCollaboratorPermissionLevel.mockImplementation(
+        async ({ username }) => ({
+          data: { permission: username === 'reader' ? 'read' : 'write' },
+        }),
+      );
+
+      await tagBackportReviewers({
+        context,
+        targetPrNumber: 1234,
+        users: ['alice', 'reader', 'bob', 'alice'],
+      });
+
+      expect(
+        octokit.repos.getCollaboratorPermissionLevel,
+      ).toHaveBeenCalledTimes(3);
+      expect(octokit.pulls.requestReviewers).toHaveBeenCalledWith({
+        pull_number: 1234,
+        team_reviewers: ['wg-releases'],
+        reviewers: ['alice', 'bob'],
       });
     });
 
@@ -78,6 +106,64 @@ describe('utils', () => {
         `Failed to request reviewers for PR #1234`,
         error,
       );
+    });
+  });
+
+  describe('getPRApprovers()', () => {
+    const review = (login: string, state: string, type = 'User') => ({
+      user: { login, type },
+      state,
+    });
+
+    const contextWithReviews = (reviews: ReturnType<typeof review>[]) => ({
+      octokit: {
+        paginate: vi.fn().mockResolvedValue(reviews),
+        pulls: { listReviews: vi.fn() },
+      },
+      repo: vi.fn((obj) => obj),
+      ...backportPROpenedEvent,
+    });
+
+    it('returns users who approved the PR', async () => {
+      const context = contextWithReviews([
+        review('alice', 'APPROVED'),
+        review('bob', 'APPROVED'),
+      ]);
+      expect(await getPRApprovers(context, 1234)).toEqual(['alice', 'bob']);
+      expect(context.octokit.paginate).toHaveBeenCalledWith(
+        context.octokit.pulls.listReviews,
+        { pull_number: 1234, per_page: 100 },
+      );
+    });
+
+    it('excludes bot approvers', async () => {
+      const context = contextWithReviews([
+        review('alice', 'APPROVED'),
+        review('some-app[bot]', 'APPROVED'),
+        review('some-app', 'APPROVED', 'Bot'),
+      ]);
+      expect(await getPRApprovers(context, 1234)).toEqual(['alice']);
+    });
+
+    it('excludes approvals superseded by requested changes or dismissed', async () => {
+      const context = contextWithReviews([
+        review('alice', 'APPROVED'),
+        review('bob', 'APPROVED'),
+        review('carol', 'DISMISSED'),
+        review('bob', 'CHANGES_REQUESTED'),
+      ]);
+      expect(await getPRApprovers(context, 1234)).toEqual(['alice']);
+    });
+
+    it('keeps approvals followed by comments or a later re-approval', async () => {
+      const context = contextWithReviews([
+        review('alice', 'APPROVED'),
+        review('alice', 'COMMENTED'),
+        review('bob', 'CHANGES_REQUESTED'),
+        review('bob', 'APPROVED'),
+        review('carol', 'COMMENTED'),
+      ]);
+      expect(await getPRApprovers(context, 1234)).toEqual(['alice', 'bob']);
     });
   });
 

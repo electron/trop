@@ -478,14 +478,45 @@ const getStackSemverLabel = (prs: WebHookPR[]) => {
   return labels.find((label) => label.name === highest);
 };
 
+/**
+ * The human users whose latest review on PR `prNumber` is an approval. A
+ * later CHANGES_REQUESTED review supersedes an approval, a dismissed approval
+ * shows up with state DISMISSED, and COMMENTED reviews leave it standing.
+ */
+export const getPRApprovers = async (
+  context: SimpleWebHookRepoContext,
+  prNumber: number,
+) => {
+  const reviews = await context.octokit.paginate(
+    context.octokit.pulls.listReviews,
+    context.repo({ pull_number: prNumber, per_page: 100 }),
+  );
+
+  // Reviews are returned in chronological order.
+  const approved = new Map<string, boolean>();
+  for (const review of reviews) {
+    const login = review.user?.login;
+    if (!login || review.user?.type === 'Bot' || login.endsWith('[bot]')) {
+      continue;
+    }
+    if (review.state === 'APPROVED') {
+      approved.set(login, true);
+    } else if (['CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)) {
+      approved.set(login, false);
+    }
+  }
+
+  return [...approved].filter(([, isApproved]) => isApproved).map(([l]) => l);
+};
+
 export const tagBackportReviewers = async ({
   context,
   targetPrNumber,
-  user,
+  users = [],
 }: {
   context: SimpleWebHookRepoContext;
   targetPrNumber: number;
-  user?: string;
+  users?: string[];
 }) => {
   const reviewers = [];
   const teamReviewers = [];
@@ -499,10 +530,9 @@ export const tagBackportReviewers = async ({
     teamReviewers.push(slug);
   }
 
-  if (user) {
-    const hasWrite = await checkUserHasWriteAccess(context, user);
-    // If the PR author has write access, also request their review.
-    if (hasWrite) reviewers.push(user);
+  for (const user of new Set(users)) {
+    // Only request review from users with write access, whose reviews count.
+    if (await checkUserHasWriteAccess(context, user)) reviewers.push(user);
   }
 
   if (Math.max(reviewers.length, teamReviewers.length) > 0) {
@@ -781,7 +811,7 @@ export const backportStackImpl = async (
         await tagBackportReviewers({
           context,
           targetPrNumber: newPr.number,
-          user: pr.user.login,
+          users: [pr.user.login],
         });
 
         log(
