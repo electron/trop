@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BACKPORT_APPROVAL_CHECK } from '../src/constants';
-import { queueBackportApprovalCheck } from '../src/utils/checks-util';
+import { BACKPORT_APPROVAL_CHECK, CHECK_PREFIX } from '../src/constants';
+import {
+  CHECK_RUN_ANNOTATION_RAW_DETAILS_LIMIT,
+  CHECK_RUN_OUTPUT_TEXT_LIMIT,
+  buildFailedDiffText,
+  getOrCreateCheckRun,
+  markBackportCheckFailed,
+  queueBackportApprovalCheck,
+  truncateAnnotationDetails,
+} from '../src/utils/checks-util';
 
 const backportPROpenedEvent = require('./fixtures/backport_pull_request.opened.json');
 
@@ -157,6 +165,350 @@ describe('checks-util', () => {
       expect(octokit.checks.update).toHaveBeenCalledWith(
         expect.objectContaining({ check_run_id: 12345, status: 'queued' }),
       );
+    });
+  });
+
+  describe('getOrCreateCheckRun', () => {
+    const octokit = {
+      checks: {
+        listForRef: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn().mockResolvedValue({ data: {} }),
+      },
+    };
+
+    const context = {
+      ...backportPROpenedEvent,
+      octokit,
+      repo: vi.fn((obj) => obj),
+    };
+    const pr = backportPROpenedEvent.payload.pull_request;
+    const checkName = `${CHECK_PREFIX}30-x-y`;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      octokit.checks.create.mockResolvedValue({
+        data: { id: 999, name: checkName, status: 'queued' },
+      });
+    });
+
+    it('creates a new queued check run when none exists', async () => {
+      octokit.checks.listForRef.mockResolvedValue({
+        data: { check_runs: [] },
+      });
+
+      const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y');
+
+      expect(octokit.checks.create).toHaveBeenCalledTimes(1);
+      expect(octokit.checks.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: checkName,
+          head_sha: pr.head.sha,
+          status: 'queued',
+        }),
+      );
+      expect(checkRun).toEqual({ id: 999, name: checkName, status: 'queued' });
+    });
+
+    it.each(['queued', 'in_progress'])(
+      'reuses an existing %s check run',
+      async (status) => {
+        const existing = {
+          id: 12345,
+          name: checkName,
+          status,
+          conclusion: null,
+        };
+        octokit.checks.listForRef.mockResolvedValue({
+          data: {
+            check_runs: [
+              { id: 1, name: `${CHECK_PREFIX}29-x-y`, status: 'in_progress' },
+              existing,
+            ],
+          },
+        });
+
+        const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y');
+
+        expect(octokit.checks.create).not.toHaveBeenCalled();
+        expect(checkRun).toBe(existing);
+      },
+    );
+
+    it('reuses a completed check run by default', async () => {
+      // Executing a backport on merge rewrites the dry run's check instead
+      // of adding a second run for the same head SHA.
+      const completed = {
+        id: 12345,
+        name: checkName,
+        status: 'completed',
+        conclusion: 'neutral',
+      };
+      octokit.checks.listForRef.mockResolvedValue({
+        data: { check_runs: [completed] },
+      });
+
+      const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y');
+
+      expect(octokit.checks.create).not.toHaveBeenCalled();
+      expect(checkRun).toBe(completed);
+    });
+
+    it('creates a fresh check run instead of reusing a completed one when superseding is permitted', async () => {
+      // Regression test for electron/electron#53925: after a target label is
+      // removed the check run is concluded as 'Cancelled', and the Checks API
+      // silently ignores a PATCH back to 'in_progress' on a completed run.
+      // Re-adding the label must therefore create a fresh run rather than
+      // leave the stale 'Cancelled' run in place.
+      octokit.checks.listForRef.mockResolvedValue({
+        data: {
+          check_runs: [
+            {
+              id: 12345,
+              name: checkName,
+              status: 'completed',
+              conclusion: 'neutral',
+            },
+          ],
+        },
+      });
+
+      const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y', {
+        supersedeCompleted: true,
+      });
+
+      expect(octokit.checks.update).not.toHaveBeenCalled();
+      expect(octokit.checks.create).toHaveBeenCalledTimes(1);
+      expect(octokit.checks.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: checkName,
+          head_sha: pr.head.sha,
+          status: 'queued',
+        }),
+      );
+      expect(checkRun.id).toBe(999);
+    });
+
+    it.each([false, true])(
+      'prefers a pending check run over a completed one with the same name (supersedeCompleted: %s)',
+      async (supersedeCompleted) => {
+        const pending = {
+          id: 67890,
+          name: checkName,
+          status: 'in_progress',
+          conclusion: null,
+        };
+        octokit.checks.listForRef.mockResolvedValue({
+          data: {
+            check_runs: [
+              {
+                id: 12345,
+                name: checkName,
+                status: 'completed',
+                conclusion: 'neutral',
+              },
+              pending,
+            ],
+          },
+        });
+
+        const checkRun = await getOrCreateCheckRun(context, pr, '30-x-y', {
+          supersedeCompleted,
+        });
+
+        expect(octokit.checks.create).not.toHaveBeenCalled();
+        expect(checkRun).toBe(pending);
+      },
+    );
+  });
+
+  describe('buildFailedDiffText', () => {
+    const fence = '``````````````````````````````';
+
+    it('returns a short diff untouched', () => {
+      const rawDiff = 'diff --git a/foo b/foo\n-a\n+b\n';
+
+      expect(buildFailedDiffText(rawDiff)).toBe(
+        `Failed Diff:\n\n${fence}diff\n${rawDiff}\n${fence}`,
+      );
+    });
+
+    it('truncates an oversized diff to fit the check run output limit', () => {
+      // electron/electron#53925: a 120,926 character conflict diff made
+      // checks.update fail with "Only 65535 characters are allowed".
+      const line = `+${'x'.repeat(78)}\n`;
+      const rawDiff = line.repeat(Math.ceil(120926 / line.length));
+      expect(rawDiff.length).toBeGreaterThan(CHECK_RUN_OUTPUT_TEXT_LIMIT);
+
+      const text = buildFailedDiffText(rawDiff);
+
+      expect(text.length).toBeLessThanOrEqual(CHECK_RUN_OUTPUT_TEXT_LIMIT);
+      expect(text.startsWith(`Failed Diff:\n\n${fence}diff\n`)).toBe(true);
+      expect(text.endsWith(`\n${fence}`)).toBe(true);
+
+      const match = text.match(
+        /\n\.\.\. \((\d+) characters omitted, diff truncated to fit GitHub's 65535 character check run output limit\)\n/,
+      );
+      expect(match).not.toBeNull();
+      const omitted = Number(match![1]);
+      const kept =
+        text.indexOf(match![0]) - `Failed Diff:\n\n${fence}diff\n`.length;
+      expect(kept + omitted).toBe(rawDiff.length);
+      expect(text).toContain(rawDiff.slice(0, kept));
+      // Truncated at a line boundary.
+      expect(rawDiff[kept]).toBe('\n');
+    });
+  });
+
+  describe('truncateAnnotationDetails', () => {
+    it('returns short details untouched', () => {
+      const rawDetails = '<<<<<<< HEAD\n=======\n+foo\n>>>>>>> theirs';
+
+      expect(truncateAnnotationDetails(rawDetails)).toBe(rawDetails);
+    });
+
+    it('truncates oversized details to fit the annotation limit', () => {
+      // electron/electron#53925: a single 1,580-line conflicted region in
+      // spec/asar-spec.ts produced ~85 KB of raw_details for one annotation.
+      const line = `+${'x'.repeat(53)}\n`;
+      const rawDetails = line.repeat(Math.ceil(85000 / line.length));
+      expect(rawDetails.length).toBeGreaterThan(
+        CHECK_RUN_ANNOTATION_RAW_DETAILS_LIMIT,
+      );
+
+      const details = truncateAnnotationDetails(rawDetails);
+
+      expect(details.length).toBeLessThanOrEqual(
+        CHECK_RUN_ANNOTATION_RAW_DETAILS_LIMIT,
+      );
+      const match = details.match(/\n\.\.\. \((\d+) characters omitted\)$/);
+      expect(match).not.toBeNull();
+      const omitted = Number(match![1]);
+      const kept = details.length - match![0].length;
+      expect(kept + omitted).toBe(rawDetails.length);
+      expect(details.startsWith(rawDetails.slice(0, kept))).toBe(true);
+      // Truncated at a line boundary.
+      expect(rawDetails[kept]).toBe('\n');
+    });
+  });
+
+  describe('markBackportCheckFailed', () => {
+    const octokit = {
+      checks: {
+        update: vi.fn(),
+      },
+    };
+
+    const context = {
+      ...backportPROpenedEvent,
+      octokit,
+      repo: vi.fn((obj) => obj),
+    };
+    const checkRun = { id: 12345, name: `${CHECK_PREFIX}30-x-y` };
+    const annotations = [{ path: 'foo', start_line: 1, end_line: 1 }];
+
+    beforeEach(() => vi.clearAllMocks());
+
+    it('concludes the check run with the diff and annotations', async () => {
+      octokit.checks.update.mockResolvedValue({ data: {} });
+
+      await markBackportCheckFailed(context, checkRun, '30-x-y', {
+        rawDiff: '-a\n+b\n',
+        annotations,
+      });
+
+      expect(octokit.checks.update).toHaveBeenCalledTimes(1);
+      expect(octokit.checks.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          check_run_id: 12345,
+          name: checkRun.name,
+          conclusion: 'neutral',
+          output: expect.objectContaining({
+            title: 'Backport Failed',
+            summary: expect.stringContaining('"30-x-y"'),
+            text: buildFailedDiffText('-a\n+b\n'),
+            annotations,
+          }),
+        }),
+      );
+    });
+
+    const rejection = () =>
+      Object.assign(
+        new Error(
+          'Invalid request.\n\nOnly 65535 characters are allowed; 120926 were supplied.',
+        ),
+        { status: 422 },
+      );
+
+    it('retries without the annotations but keeps the diff text when GitHub rejects the update', async () => {
+      octokit.checks.update
+        .mockRejectedValueOnce(rejection())
+        .mockResolvedValueOnce({ data: {} });
+
+      await markBackportCheckFailed(context, checkRun, '30-x-y', {
+        rawDiff: '-a\n+b\n',
+        annotations,
+      });
+
+      expect(octokit.checks.update).toHaveBeenCalledTimes(2);
+      const retryOpts = octokit.checks.update.mock.calls[1][0];
+      expect(retryOpts).toEqual(
+        expect.objectContaining({
+          check_run_id: 12345,
+          conclusion: 'neutral',
+        }),
+      );
+      expect(retryOpts.output.title).toBe('Backport Failed');
+      expect(retryOpts.output.text).toBe(buildFailedDiffText('-a\n+b\n'));
+      expect(retryOpts.output.annotations).toBeUndefined();
+    });
+
+    it('retries without the diff text as well when the second update is also rejected', async () => {
+      octokit.checks.update
+        .mockRejectedValueOnce(rejection())
+        .mockRejectedValueOnce(rejection())
+        .mockResolvedValueOnce({ data: {} });
+
+      await markBackportCheckFailed(context, checkRun, '30-x-y', {
+        rawDiff: '-a\n+b\n',
+        annotations,
+      });
+
+      expect(octokit.checks.update).toHaveBeenCalledTimes(3);
+      const retryOpts = octokit.checks.update.mock.calls[2][0];
+      expect(retryOpts).toEqual(
+        expect.objectContaining({
+          check_run_id: 12345,
+          conclusion: 'neutral',
+        }),
+      );
+      expect(retryOpts.output.title).toBe('Backport Failed');
+      expect(retryOpts.output.text).toBeUndefined();
+      expect(retryOpts.output.annotations).toBeUndefined();
+    });
+
+    it('skips fallback stages that have nothing left to drop', async () => {
+      octokit.checks.update.mockRejectedValue(new Error('boom'));
+
+      await expect(
+        markBackportCheckFailed(context, checkRun, '30-x-y', {}),
+      ).rejects.toThrow('boom');
+
+      expect(octokit.checks.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows when every retry fails', async () => {
+      octokit.checks.update.mockRejectedValue(new Error('boom'));
+
+      await expect(
+        markBackportCheckFailed(context, checkRun, '30-x-y', {
+          rawDiff: '-a\n+b\n',
+          annotations,
+        }),
+      ).rejects.toThrow('boom');
+
+      expect(octokit.checks.update).toHaveBeenCalledTimes(3);
     });
   });
 });

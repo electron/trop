@@ -209,7 +209,9 @@ export async function getOrCreateCheckRun(
   context: SimpleWebHookRepoContext,
   pr: WebHookPR,
   targetBranch: string,
+  { supersedeCompleted = false }: { supersedeCompleted?: boolean } = {},
 ) {
+  const checkName = `${CHECK_PREFIX}${targetBranch}`;
   const allChecks = await context.octokit.checks.listForRef(
     context.repo({
       ref: pr.head.sha,
@@ -217,14 +219,38 @@ export async function getOrCreateCheckRun(
     }),
   );
 
-  let checkRun = allChecks.data.check_runs.find((run) => {
-    return run.name === `${CHECK_PREFIX}${targetBranch}`;
-  });
+  const matchingRuns = allChecks.data.check_runs.filter(
+    (run) => run.name === checkName,
+  );
+
+  // Prefer a run that is still pending over a completed one with the same
+  // name, whatever order GitHub lists them in.
+  let checkRun = matchingRuns.find((run) => run.status !== 'completed');
+
+  // A completed check run is terminal in the Checks API: a PATCH moving it
+  // back to 'in_progress' is silently ignored, so a run that was concluded
+  // (e.g. marked 'Cancelled' after its target label was removed) can never
+  // show as pending again. Dry-run checks pass supersedeCompleted so a fresh
+  // run is created instead, which supersedes the completed run as the
+  // latest run for that name (electron/electron#53925). By default the
+  // completed run is reused, so executing a backport on merge rewrites the
+  // dry run's check rather than adding a second run.
+  if (!checkRun && !supersedeCompleted) {
+    checkRun = matchingRuns[0];
+  }
 
   if (!checkRun) {
+    const completedRun = matchingRuns[0];
+    if (completedRun) {
+      log(
+        'getOrCreateCheckRun',
+        LogLevel.INFO,
+        `Check run '${checkName}' (${completedRun.id}) already concluded '${completedRun.conclusion}' - creating a fresh run to supersede it`,
+      );
+    }
     const response = await context.octokit.checks.create(
       context.repo({
-        name: `${CHECK_PREFIX}${targetBranch}`,
+        name: checkName,
         head_sha: pr.head.sha,
         status: 'queued' as const,
         details_url: 'https://github.com/electron/trop',
@@ -232,11 +258,179 @@ export async function getOrCreateCheckRun(
     );
     checkRun = response.data;
     log(
-      'backportImpl',
+      'getOrCreateCheckRun',
       LogLevel.INFO,
-      `Created check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with status 'queued'`,
+      `Created check run '${checkName}' (${checkRun.id}) with status 'queued'`,
     );
   }
 
   return checkRun;
+}
+
+/**
+ * GitHub rejects check run `output.text` longer than this with a 422
+ * ("Only 65535 characters are allowed").
+ */
+export const CHECK_RUN_OUTPUT_TEXT_LIMIT = 65535;
+
+// Leave headroom under the hard limit for the surrounding markdown, the
+// truncation note and any difference between GitHub's and JavaScript's
+// notion of a "character".
+const FAILED_DIFF_TEXT_BUDGET = 60000;
+
+const FAILED_DIFF_FENCE = '``````````````````````````````';
+
+/**
+ * Renders the conflict diff shown in the "Backport Failed" check run output,
+ * truncating it so the whole text stays under GitHub's check run limit.
+ */
+export function buildFailedDiffText(rawDiff: string): string {
+  const header = `Failed Diff:\n\n${FAILED_DIFF_FENCE}diff\n`;
+  const footer = `\n${FAILED_DIFF_FENCE}`;
+
+  const fullText = `${header}${rawDiff}${footer}`;
+  if (fullText.length <= FAILED_DIFF_TEXT_BUDGET) {
+    return fullText;
+  }
+
+  const truncationNote = (omitted: number) =>
+    `\n... (${omitted} characters omitted, diff truncated to fit GitHub's ${CHECK_RUN_OUTPUT_TEXT_LIMIT} character check run output limit)`;
+
+  // Size the note for the largest possible omitted count so the final text
+  // is guaranteed to fit the budget.
+  const overhead =
+    header.length + truncationNote(rawDiff.length).length + footer.length;
+  let keep = FAILED_DIFF_TEXT_BUDGET - overhead;
+
+  // Prefer cutting at a line boundary so the tail of the diff stays readable.
+  const lastNewline = rawDiff.lastIndexOf('\n', keep);
+  if (lastNewline > keep - 500) {
+    keep = lastNewline;
+  }
+
+  const omitted = rawDiff.length - keep;
+  return `${header}${rawDiff.slice(0, keep)}${truncationNote(omitted)}${footer}`;
+}
+
+/**
+ * GitHub caps each annotation's `raw_details` (and `message`) at 64 KB and
+ * accepts at most 50 annotations per check run update request. See
+ * https://docs.github.com/en/rest/checks/runs#update-a-check-run
+ */
+export const CHECK_RUN_ANNOTATION_RAW_DETAILS_LIMIT = 64 * 1024;
+export const CHECK_RUN_MAX_ANNOTATIONS = 50;
+
+// Same headroom rationale as FAILED_DIFF_TEXT_BUDGET above.
+const ANNOTATION_RAW_DETAILS_BUDGET = 60000;
+
+/**
+ * Caps an annotation's `raw_details` under GitHub's limit, cutting at a line
+ * boundary where possible and noting how many characters were omitted.
+ */
+export function truncateAnnotationDetails(rawDetails: string): string {
+  if (rawDetails.length <= ANNOTATION_RAW_DETAILS_BUDGET) {
+    return rawDetails;
+  }
+
+  const truncationNote = (omitted: number) =>
+    `\n... (${omitted} characters omitted)`;
+
+  let keep =
+    ANNOTATION_RAW_DETAILS_BUDGET - truncationNote(rawDetails.length).length;
+  const lastNewline = rawDetails.lastIndexOf('\n', keep);
+  if (lastNewline > keep - 500) {
+    keep = lastNewline;
+  }
+
+  return `${rawDetails.slice(0, keep)}${truncationNote(rawDetails.length - keep)}`;
+}
+
+/**
+ * Concludes a "Backportable?" check run as 'neutral' with a "Backport Failed"
+ * output. If GitHub rejects the rich output the update is retried first
+ * without the annotations (whose `raw_details` may be oversized) and then
+ * without the diff text as well, so the run never stays pending.
+ */
+export async function markBackportCheckFailed(
+  context: SimpleWebHookRepoContext,
+  checkRun: Pick<BackportCheck, 'id' | 'name'>,
+  targetBranch: string,
+  {
+    rawDiff,
+    annotations,
+  }: {
+    rawDiff?: string;
+    annotations?: unknown[];
+  },
+) {
+  const updateOpts = context.repo({
+    check_run_id: checkRun.id,
+    name: checkRun.name,
+    conclusion: 'neutral' as const,
+    completed_at: new Date().toISOString(),
+    output: {
+      title: 'Backport Failed',
+      summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
+      text: rawDiff !== undefined ? buildFailedDiffText(rawDiff) : undefined,
+      annotations,
+    },
+  });
+
+  log(
+    'markBackportCheckFailed',
+    LogLevel.INFO,
+    `Updating check run '${checkRun.name}' (${checkRun.id}) with conclusion 'neutral'`,
+  );
+
+  const update = () => context.octokit.checks.update(updateOpts);
+  const output = updateOpts.output!;
+  // Progressively drop the parts of the output GitHub is most likely to
+  // reject, so the run is concluded with as much detail as GitHub accepts.
+  const fallbacks = [
+    {
+      what: 'annotations',
+      present: () => output.annotations !== undefined,
+      drop: () => {
+        output.annotations = undefined;
+      },
+    },
+    {
+      what: 'diff text',
+      present: () => output.text !== undefined,
+      drop: () => {
+        output.text = undefined;
+      },
+    },
+  ];
+
+  let lastError: unknown;
+  try {
+    await update();
+    return;
+  } catch (err) {
+    lastError = err;
+  }
+
+  for (const fallback of fallbacks) {
+    if (!fallback.present()) continue;
+    log(
+      'markBackportCheckFailed',
+      LogLevel.ERROR,
+      `GitHub rejected the update for check run '${checkRun.name}' (${checkRun.id}), retrying without ${fallback.what}: ${String(lastError)}`,
+    );
+    fallback.drop();
+    try {
+      await update();
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  log(
+    'markBackportCheckFailed',
+    LogLevel.ERROR,
+    `Failed to conclude check run '${checkRun.name}' (${checkRun.id}): ${String(lastError)}`,
+  );
+  throw lastError;
 }
