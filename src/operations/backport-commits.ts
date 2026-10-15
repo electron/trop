@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
