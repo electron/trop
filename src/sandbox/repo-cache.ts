@@ -85,6 +85,10 @@ export class RepoCache {
     } catch {}
 
     if (!isBare) {
+      // Never pull the cache out from under a job that is reading it.
+      if (this.activeJobs > 0) {
+        throw new Error(`${this.dir} is not usable while jobs read it`);
+      }
       // Missing or somehow corrupt: start over.
       log(
         'RepoCache',

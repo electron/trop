@@ -29,9 +29,11 @@ data:
         app.kubernetes.io/component: sandbox
     spec:
       backoffLimit: 0
-      # The server gives up after 15 minutes (TROP_SANDBOX_TIMEOUT_MS) and
-      # deletes the Job; these are the backstops if it can't.
-      activeDeadlineSeconds: 1200
+      # The server gives up after 20 minutes (TROP_SANDBOX_TIMEOUT_MS, which
+      # includes up to 10 for a sandbox node to come up) and deletes the Job;
+      # these, and garbage collection once the owning server pod is gone,
+      # are the backstops if it can't.
+      activeDeadlineSeconds: 1500
       ttlSecondsAfterFinished: 600
       template:
         metadata:

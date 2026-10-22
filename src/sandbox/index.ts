@@ -7,7 +7,7 @@ import { LogLevel } from '../enums';
 import { log } from '../utils/log-util';
 import { SandboxJobServer } from './job-server';
 import { KubernetesJobRunner } from './kubernetes';
-import { SandboxAttempt, SandboxCommit } from './protocol';
+import { LIMITS, SandboxAttempt, SandboxCommit } from './protocol';
 import { RepoCache } from './repo-cache';
 import {
   DEFAULT_SANDBOX_TIMEOUT_MS,
@@ -55,7 +55,11 @@ export const loadSandboxRunner = (): SandboxRunner => {
       image: required('TROP_SANDBOX_IMAGE'),
       templatePath: required('TROP_SANDBOX_JOB_TEMPLATE'),
       podIp,
+      podName: required('POD_NAME'),
+      podUid: required('POD_UID'),
       timeoutMs,
+      schedulingTimeoutMs:
+        Number(process.env.TROP_SANDBOX_SCHEDULING_TIMEOUT_MS) || undefined,
     });
   }
   if (kind === 'local') return new LocalProcessRunner(timeoutMs);
@@ -150,6 +154,7 @@ export const runSandboxedBackport = async (
         preimageBlobs,
         includeChanges: opts.includeChanges,
         committer: getCommitter(),
+        limits: { diffChars: LIMITS.diffChars, errorChars: LIMITS.errorChars },
       },
       expectation: {
         patchCounts: opts.attempts.map((a) => a.patches.length),

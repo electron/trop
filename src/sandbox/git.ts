@@ -78,18 +78,25 @@ export const runGit = (args: string[], opts: RunGitOptions = {}) =>
 
 export const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
-// A branch name trop is willing to hand to git: what release and feature
-// branches look like, never starting with `-` (so it can't be read as an
-// option) and further checked with `git check-ref-format`.
-const BRANCH_NAME = /^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$/;
-
+/**
+ * Throws unless `branch` is a valid git branch name that cannot be mistaken
+ * for a command-line option. Branch names come from labels and comments.
+ */
 export const assertValidBranchName = async (branch: string) => {
-  if (!BRANCH_NAME.test(branch)) {
-    throw new Error(`Refusing to use "${branch}" as a branch name`);
+  const refuse = () =>
+    new Error(`Refusing to use "${branch}" as a branch name`);
+  if (
+    branch.length === 0 ||
+    branch.length > 255 ||
+    branch.startsWith('-') ||
+    // eslint-disable-next-line no-control-regex
+    /[\s\u0000-\u001f\u007f]/.test(branch)
+  ) {
+    throw refuse();
   }
   try {
     await runGit(['check-ref-format', `refs/heads/${branch}`]);
   } catch {
-    throw new Error(`Refusing to use "${branch}" as a branch name`);
+    throw refuse();
   }
 };

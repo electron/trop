@@ -30,7 +30,8 @@ export interface SandboxRunner {
   run(spec: SandboxJobSpec): Promise<SandboxResult>;
 }
 
-export const DEFAULT_SANDBOX_TIMEOUT_MS = 15 * 60 * 1000;
+/** From starting a job to its result, including waiting for a node. */
+export const DEFAULT_SANDBOX_TIMEOUT_MS = 20 * 60 * 1000;
 
 /**
  * Settles with the job's result, or rejects when `ended` (the workload

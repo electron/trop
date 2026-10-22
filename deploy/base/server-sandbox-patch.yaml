@@ -22,6 +22,16 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            # Every sandbox Job is owned by this pod, so Kubernetes deletes
+            # the Jobs of a pod that is gone.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
             - name: TROP_SANDBOX_NAMESPACE
               valueFrom:
                 fieldRef:

@@ -695,10 +695,12 @@ export const backportStackImpl = async (
         slug,
         targetBranch,
       };
-      const attempts = [
-        await getAllCommitsAttempt(tryOpts),
-        await getSquashAttempt(tryOpts),
-      ].filter((attempt): attempt is SandboxAttempt => attempt !== null);
+      const attempts = (
+        await Promise.all([
+          getAllCommitsAttempt(tryOpts),
+          getSquashAttempt(tryOpts),
+        ])
+      ).filter((attempt): attempt is SandboxAttempt => attempt !== null);
       if (attempts.length === 0) {
         throw new Error(`Found nothing to backport to ${targetBranch}`);
       }

@@ -129,6 +129,7 @@ describe('SandboxJobServer', { timeout: 30_000 }, () => {
     preimageBlobs: [],
     includeChanges: true,
     committer: { name: 'trop', email: 'trop@example.com' },
+    limits: { diffChars: 1000, errorChars: 1000 },
   });
 
   const newJob = (l = lease) => {

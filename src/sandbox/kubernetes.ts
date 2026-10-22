@@ -13,7 +13,8 @@ import {
 } from './runner';
 
 // Spawns sandbox jobs as Kubernetes Jobs. This talks to the API server with a
-// few plain HTTPS calls (create, read, list and delete Jobs) instead of
+// few plain HTTPS calls (create, read, list and delete Jobs; list pods)
+// instead of
 // @kubernetes/client-node, which is ESM-only and would bring a large
 // dependency tree into the process that holds the GitHub App key.
 
@@ -26,6 +27,8 @@ export const SANDBOX_LABELS = {
   'app.kubernetes.io/component': 'sandbox',
 } as const;
 const JOB_ID_LABEL = 'trop.electronjs.org/sandbox-job';
+const SERVER_POD_LABEL = 'trop.electronjs.org/server-pod-uid';
+const SANDBOX_SERVICE_ACCOUNT = 'sandbox';
 
 type Json = Record<string, any>;
 
@@ -99,7 +102,7 @@ const fail = (message: string): never => {
 /**
  * Refuses a Job template that would weaken the sandbox, so that a mistaken
  * edit of the ConfigMap fails closed instead of running untrusted patches
- * with credentials or network access.
+ * with credentials, host access or network access.
  */
 export const assertSafeJobTemplate = (job: Json) => {
   if (job?.apiVersion !== 'batch/v1' || job?.kind !== 'Job') fail('not a Job');
@@ -116,14 +119,19 @@ export const assertSafeJobTemplate = (job: Json) => {
   if (labels['azure.workload.identity/use'] !== undefined) {
     fail('pod must not use workload identity');
   }
+  if (pod.serviceAccountName !== SANDBOX_SERVICE_ACCOUNT) {
+    fail(`serviceAccountName must be ${SANDBOX_SERVICE_ACCOUNT}`);
+  }
   if (pod.automountServiceAccountToken !== false) {
     fail('automountServiceAccountToken must be false');
   }
-  if (pod.enableServiceLinks !== false)
+  if (pod.enableServiceLinks !== false) {
     fail('enableServiceLinks must be false');
-  if (pod.hostNetwork || pod.hostPID || pod.hostIPC) {
+  }
+  if (pod.hostNetwork || pod.hostPID || pod.hostIPC || pod.hostUsers === true) {
     fail('host namespaces are not allowed');
   }
+  if (pod.shareProcessNamespace) fail('shareProcessNamespace is not allowed');
   if (pod.restartPolicy !== 'Never') fail('restartPolicy must be Never');
   if (pod.dnsPolicy !== 'None') fail('dnsPolicy must be None');
   if (pod.securityContext?.runAsNonRoot !== true) {
@@ -135,16 +143,27 @@ export const assertSafeJobTemplate = (job: Json) => {
   if (!Array.isArray(pod.containers) || pod.containers.length !== 1) {
     fail('exactly one container is required');
   }
+  const volumes = new Set<string>();
   for (const volume of pod.volumes ?? []) {
     if (Object.keys(volume).some((k) => k !== 'name' && k !== 'emptyDir')) {
       fail(`volume ${volume.name} is not an emptyDir`);
     }
+    volumes.add(volume.name);
   }
   const container = pod.containers[0];
   if (container.envFrom?.length) fail('envFrom is not allowed');
   for (const env of container.env ?? []) {
     if (env.valueFrom) fail(`env ${env.name} must not use valueFrom`);
   }
+  for (const port of container.ports ?? []) {
+    if (port.hostPort !== undefined || port.hostIP !== undefined) {
+      fail('host ports are not allowed');
+    }
+  }
+  for (const mount of container.volumeMounts ?? []) {
+    if (!volumes.has(mount.name)) fail(`volume ${mount.name} is not defined`);
+  }
+  if (container.volumeDevices?.length) fail('volumeDevices are not allowed');
   const sc = container.securityContext ?? fail('no container securityContext');
   if (sc.allowPrivilegeEscalation !== false) {
     fail('allowPrivilegeEscalation must be false');
@@ -153,9 +172,24 @@ export const assertSafeJobTemplate = (job: Json) => {
   if (sc.readOnlyRootFilesystem !== true) {
     fail('readOnlyRootFilesystem must be true');
   }
-  if (!sc.capabilities?.drop?.includes('ALL'))
+  if (!sc.capabilities?.drop?.includes('ALL')) {
     fail('capabilities must drop ALL');
+  }
+  if (sc.capabilities?.add?.length) fail('capabilities must not be added');
+  if (sc.procMount !== undefined && sc.procMount !== 'Default') {
+    fail('procMount must be Default');
+  }
 };
+
+// Why a pod can never start, from its container's waiting reason.
+const FATAL_WAITING_REASONS = new Set([
+  'ImagePullBackOff',
+  'ErrImageNeverPull',
+  'InvalidImageName',
+  'CreateContainerConfigError',
+  'CreateContainerError',
+  'RunContainerError',
+]);
 
 export interface KubernetesRunnerConfig {
   namespace: string;
@@ -163,8 +197,19 @@ export interface KubernetesRunnerConfig {
   templatePath: string;
   /** This pod's IP: the address jobs reach the job server at. */
   podIp: string;
+  /** This pod's name and UID: every Job is owned by (and labelled with) it. */
+  podName: string;
+  podUid: string;
+  /** How long the whole job may take, from creating it. */
   timeoutMs?: number;
+  /**
+   * How long its pod may take to start (the sandbox node pool scales up from
+   * zero). A pod that can never start (bad image, bad config) fails at once.
+   */
+  schedulingTimeoutMs?: number;
 }
+
+export const DEFAULT_SCHEDULING_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Runs each sandbox job as a Kubernetes Job built from a template. */
 export class KubernetesJobRunner implements SandboxRunner {
@@ -172,32 +217,57 @@ export class KubernetesJobRunner implements SandboxRunner {
   readonly listenHost: string;
   private readonly template: Json;
   private readonly timeoutMs: number;
+  private readonly schedulingTimeoutMs: number;
 
   constructor(
     private readonly config: KubernetesRunnerConfig,
     private readonly kube = new KubeClient(),
   ) {
+    if (!/^[0-9a-f-]{36}$/.test(config.podUid)) {
+      throw new Error('POD_UID is not a pod UID');
+    }
     this.listenHost = config.podIp;
     this.timeoutMs = config.timeoutMs ?? DEFAULT_SANDBOX_TIMEOUT_MS;
+    this.schedulingTimeoutMs =
+      config.schedulingTimeoutMs ?? DEFAULT_SCHEDULING_TIMEOUT_MS;
     this.template = parseYaml(
       fs.readFileSync(config.templatePath, 'utf8'),
     ) as Json;
     assertSafeJobTemplate(this.template);
   }
 
+  private get namespacePath() {
+    return `/namespaces/${encodeURIComponent(this.config.namespace)}`;
+  }
+
   private get jobsPath() {
-    return `/apis/batch/v1/namespaces/${encodeURIComponent(this.config.namespace)}/jobs`;
+    return `/apis/batch/v1${this.namespacePath}/jobs`;
   }
 
   buildJob(spec: SandboxJobSpec): Json {
     const job = structuredClone(this.template);
     const name = `trop-sandbox-${spec.id.slice(0, 16)}`;
-    const labels = { ...SANDBOX_LABELS, [JOB_ID_LABEL]: spec.id };
+    const labels = {
+      ...SANDBOX_LABELS,
+      [JOB_ID_LABEL]: spec.id,
+      [SERVER_POD_LABEL]: this.config.podUid,
+    };
     job.metadata = {
       ...job.metadata,
       name,
       namespace: this.config.namespace,
       labels: { ...job.metadata?.labels, ...labels },
+      // Owned by this server pod: when the pod goes away (a deploy, a
+      // crash), Kubernetes garbage-collects its Jobs, whose results nobody
+      // could receive any more.
+      ownerReferences: [
+        {
+          apiVersion: 'v1',
+          kind: 'Pod',
+          name: this.config.podName,
+          uid: this.config.podUid,
+        },
+      ],
     };
     job.spec.template.metadata.labels = {
       ...job.spec.template.metadata.labels,
@@ -221,25 +291,37 @@ export class KubernetesJobRunner implements SandboxRunner {
   async run(spec: SandboxJobSpec) {
     const job = this.buildJob(spec);
     const name: string = job.metadata.name;
-    const created = await this.kube.request('POST', this.jobsPath, job);
-    if (created.status !== 201) {
-      throw new Error(
-        `Creating sandbox Job ${name} failed: ${created.status} ${created.body.message ?? ''}`,
-      );
+    try {
+      const created = await this.kube.request('POST', this.jobsPath, job);
+      if (created.status !== 201) {
+        throw new Error(
+          `Creating sandbox Job ${name} failed: ${created.status} ${created.body.message ?? ''}`,
+        );
+      }
+    } catch (error) {
+      // The API server may have created it even though the call failed.
+      await this.delete(name);
+      throw error;
     }
     log('KubernetesJobRunner', LogLevel.INFO, `Created sandbox Job ${name}`);
 
     const stop = { stopped: false };
     try {
-      return await raceResult(spec, this.watch(name, stop), this.timeoutMs);
+      return await raceResult(
+        spec,
+        this.watch(name, spec.id, stop),
+        this.timeoutMs,
+      );
     } finally {
       stop.stopped = true;
       await this.delete(name);
     }
   }
 
-  /** Resolves with a reason once the Job has finished (or disappeared). */
-  private async watch(name: string, stop: { stopped: boolean }) {
+  /** Resolves with a reason once the Job has finished or cannot run. */
+  private async watch(name: string, id: string, stop: { stopped: boolean }) {
+    const created = Date.now();
+    let started = false;
     while (!stop.stopped) {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       if (stop.stopped) break;
@@ -261,6 +343,22 @@ export class KubernetesJobRunner implements SandboxRunner {
           await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
           return 'the Job completed';
         }
+
+        if (!started) {
+          const pod = await this.readPod(id);
+          const waiting = pod?.status?.containerStatuses?.[0]?.state?.waiting;
+          if (waiting && FATAL_WAITING_REASONS.has(waiting.reason)) {
+            return `its pod cannot start: ${waiting.reason} ${waiting.message ?? ''}`;
+          }
+          if (pod?.status?.phase && pod.status.phase !== 'Pending') {
+            started = true;
+          } else if (Date.now() - created > this.schedulingTimeoutMs) {
+            const scheduled = (pod?.status?.conditions ?? []).find(
+              (c: Json) => c.type === 'PodScheduled',
+            );
+            return `its pod did not start within ${this.schedulingTimeoutMs / 1000}s: ${scheduled?.reason ?? 'pending'} ${scheduled?.message ?? ''}`;
+          }
+        }
       } catch (error) {
         log(
           'KubernetesJobRunner',
@@ -273,6 +371,16 @@ export class KubernetesJobRunner implements SandboxRunner {
     return 'stopped';
   }
 
+  private async readPod(id: string): Promise<Json | undefined> {
+    const selector = `${JOB_ID_LABEL}=${id}`;
+    const { status, body } = await this.kube.request(
+      'GET',
+      `/api/v1${this.namespacePath}/pods?labelSelector=${encodeURIComponent(selector)}`,
+    );
+    if (status !== 200) throw new Error(`Listing pods failed: ${status}`);
+    return body.items?.[0];
+  }
+
   private async delete(name: string) {
     try {
       const { status } = await this.kube.request(
@@ -283,6 +391,7 @@ export class KubernetesJobRunner implements SandboxRunner {
         throw new Error(`status ${status}`);
       }
     } catch (error) {
+      // Garbage collection (the Job is owned by this pod),
       // ttlSecondsAfterFinished and activeDeadlineSeconds clean up regardless.
       log(
         'KubernetesJobRunner',
@@ -293,19 +402,29 @@ export class KubernetesJobRunner implements SandboxRunner {
     }
   }
 
-  /** Deletes sandbox Jobs left behind by a previous server process. */
+  /**
+   * Deletes sandbox Jobs an earlier process in this same pod left behind (the
+   * container restarted). Jobs of other server pods are never touched: during
+   * a rolling deploy the old pod is still waiting on its own, and once it is
+   * gone Kubernetes garbage-collects them through their owner reference.
+   */
   async deleteOrphanedJobs() {
-    const selector = Object.entries(SANDBOX_LABELS)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(',');
+    const selector = [
+      ...Object.entries(SANDBOX_LABELS).map(([k, v]) => `${k}=${v}`),
+      `${SERVER_POD_LABEL}=${this.config.podUid}`,
+    ].join(',');
     const { status, body } = await this.kube.request(
       'GET',
       `${this.jobsPath}?labelSelector=${encodeURIComponent(selector)}`,
     );
-    if (status !== 200)
+    if (status !== 200) {
       throw new Error(`Listing sandbox Jobs failed: ${status}`);
+    }
     for (const item of body.items ?? []) {
-      if (typeof item?.metadata?.name === 'string') {
+      if (
+        typeof item?.metadata?.name === 'string' &&
+        item.metadata.labels?.[SERVER_POD_LABEL] === this.config.podUid
+      ) {
         await this.delete(item.metadata.name);
       }
     }

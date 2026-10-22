@@ -21,7 +21,8 @@ import type {
 
 const GIT_TIMEOUT_MS = 10 * 60 * 1000;
 
-const MAX_DIFF_CHARS = 8 * 1024 * 1024;
+// Used only until the inputs (which carry the server's limits) are read.
+const FALLBACK_ERROR_CHARS = 1000;
 const PREFETCH_BATCH = 1000;
 
 /** git's NUL-separated output as strings; paths must be UTF-8 for GitHub. */
@@ -76,6 +77,7 @@ const main = async () => {
     }
   };
 
+  let errorChars = FALLBACK_ERROR_CHARS;
   try {
     const inputsResponse = await fetch(`${serverUrl}/inputs`, {
       headers: { authorization },
@@ -86,6 +88,7 @@ const main = async () => {
     }
     const inputs = (await inputsResponse.json()) as SandboxInputs;
     if (inputs.version !== 1) throw new Error('unsupported inputs version');
+    errorChars = inputs.limits.errorChars;
 
     // Hardened configuration for every git process, passed through the
     // environment: nothing from system or global config, no hooks, no
@@ -258,7 +261,7 @@ const main = async () => {
 
       if (!applied) {
         const diff = (await git(['diff'])).toString('utf8');
-        lastDiff = diff.slice(0, MAX_DIFF_CHARS);
+        lastDiff = diff.slice(0, inputs.limits.diffChars);
         continue;
       }
 
@@ -275,7 +278,7 @@ const main = async () => {
     await post({ outcome: 'conflict', diff: lastDiff });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await post({ outcome: 'error', message: message.slice(0, 4000) });
+    await post({ outcome: 'error', message: message.slice(0, errorChars) });
   }
 };
 
@@ -287,15 +290,14 @@ const describeCommit = async (
   hash: string,
   includeChanges: boolean,
 ): Promise<SandboxCommit> => {
-  const show = async (format: string) =>
-    (await git(['show', '-s', `--format=${format}`, hash])).toString('utf8');
+  const [name, email, date, message] = (
+    await git(['show', '-s', '--format=%an%x00%ae%x00%aI%x00%B', hash])
+  )
+    .toString('utf8')
+    .split('\0');
   const commit: SandboxCommit = {
-    message: await show('%B'),
-    author: {
-      name: (await show('%an')).trim(),
-      email: (await show('%ae')).trim(),
-      date: (await show('%aI')).trim(),
-    },
+    message: message ?? '',
+    author: { name: name.trim(), email: email.trim(), date: date.trim() },
   };
   if (includeChanges) commit.changes = await collectChanges(git, hash);
   return commit;
@@ -309,51 +311,78 @@ const collectChanges = async (
   git: Git,
   hash: string,
 ): Promise<SandboxFileChange[]> => {
-  const changed = nulSeparated(
+  // `:oldmode newmode oldoid newoid status` NUL path NUL, for each file.
+  const raw = nulSeparated(
     await git([
       'diff-tree',
       '--no-commit-id',
       '--no-renames',
+      '--no-abbrev',
       '-r',
       '-z',
-      '--name-only',
+      '--raw',
       hash,
     ]),
   );
-
-  // mode SP type SP oid TAB path NUL
-  const tree = new Map<string, { mode: string; oid: string }>();
-  for (const entry of nulSeparated(
-    await git(['ls-tree', '-r', '-z', '--full-tree', hash]),
-  )) {
-    const match = /^(\d{6}) \w+ ([0-9a-f]+)\t(.*)$/s.exec(entry);
-    if (match) tree.set(match[3], { mode: match[1], oid: match[2] });
+  const entries: { path: string; mode: string; oid: string }[] = [];
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    const match = /^:\d{6} (\d{6}) [0-9a-f]+ ([0-9a-f]+) [A-Z]\d*$/.exec(
+      raw[i],
+    );
+    if (!match) throw new Error(`unexpected diff-tree output: ${raw[i]}`);
+    entries.push({ path: raw[i + 1], mode: match[1], oid: match[2] });
   }
 
-  const changes: SandboxFileChange[] = [];
-  for (const changedPath of changed) {
-    const entry = tree.get(changedPath);
-    // Deleted - or a submodule (gitlink), which trop has always backported
-    // as a deletion: its checkout is an empty directory, not a file.
-    if (!entry || entry.mode === '160000') {
-      changes.push({ path: changedPath, deleted: true });
-      continue;
+  const files = entries.filter(
+    (e) => e.mode === '100644' || e.mode === '100755' || e.mode === '120000',
+  );
+  const blobs = await readBlobs(
+    git,
+    files.map((f) => f.oid),
+  );
+
+  return entries.map((entry): SandboxFileChange => {
+    // Deleted (mode 000000) - or a submodule (gitlink), which trop has
+    // always backported as a deletion: its checkout is an empty directory,
+    // not a file.
+    if (entry.mode === '000000' || entry.mode === '160000') {
+      return { path: entry.path, deleted: true };
     }
     if (
       entry.mode !== '100644' &&
       entry.mode !== '100755' &&
       entry.mode !== '120000'
     ) {
-      throw new Error(`unexpected mode ${entry.mode} for ${changedPath}`);
+      throw new Error(`unexpected mode ${entry.mode} for ${entry.path}`);
     }
-    const content = await git(['cat-file', 'blob', entry.oid]);
-    changes.push({
-      path: changedPath,
+    return {
+      path: entry.path,
       mode: entry.mode,
-      content: content.toString('base64'),
-    });
+      content: blobs.get(entry.oid)!.toString('base64'),
+    };
+  });
+};
+
+/** The contents of `oids`, read with a single `git cat-file --batch`. */
+const readBlobs = async (git: Git, oids: string[]) => {
+  const blobs = new Map<string, Buffer>();
+  if (oids.length === 0) return blobs;
+  const out = await git(['cat-file', '--batch'], oids.join('\n') + '\n');
+  let offset = 0;
+  for (const oid of oids) {
+    const newline = out.indexOf(0x0a, offset);
+    const match = /^([0-9a-f]+) blob (\d+)$/.exec(
+      out.subarray(offset, newline).toString('utf8'),
+    );
+    if (newline < 0 || !match || match[1] !== oid) {
+      throw new Error(`could not read blob ${oid}`);
+    }
+    const start = newline + 1;
+    const end = start + Number(match[2]);
+    blobs.set(oid, out.subarray(start, end));
+    offset = end + 1;
   }
-  return changes;
+  return blobs;
 };
 
 main().then(

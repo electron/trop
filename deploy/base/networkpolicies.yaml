@@ -33,14 +33,17 @@ spec:
                 values: [envoy-gateway-system]
       ports:
         - { protocol: TCP, port: 8080 }
-    # The Datadog node agent scraping /metrics (prometheus.io annotations).
+    # The Datadog agents scraping /metrics (the prometheus.io annotations in
+    # the prod overlay). electron/infra deploys them from the DatadogAgent in
+    # namespace `default` (argo/ionic-platform/datadog/agent.yaml). Selected
+    # by namespace only: this is the same port the Gateway exposes to the
+    # internet, so naming the agent pods' labels would add nothing. trop
+    # sends Datadog nothing itself (stdout logs are read from the node), so
+    # it needs no egress to the agents.
     - from:
         - namespaceSelector:
             matchExpressions:
               - { key: kubernetes.io/metadata.name, operator: In, values: [default] }
-          podSelector:
-            matchExpressions:
-              - { key: agent.datadoghq.com/component, operator: In, values: [agent] }
       ports:
         - { protocol: TCP, port: 8080 }
     # Sandbox jobs: their inputs, read-only git fetches and their result.

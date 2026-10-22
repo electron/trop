@@ -1,5 +1,6 @@
-# The server spawns, watches and deletes sandbox Jobs. Nothing else: no pods,
-# no secrets, no exec. Its token is the projected one mounted in
+# The server spawns, watches and deletes sandbox Jobs, and reads their pods'
+# status (to fail fast on a pod that cannot start). Nothing else: no secrets,
+# no exec, no logs, no pod creation. Its token is the projected one mounted in
 # server-sandbox-patch.yaml.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -9,6 +10,9 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

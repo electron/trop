@@ -120,6 +120,51 @@ describe('assertSafeJobTemplate()', () => {
           'true'),
     ],
     [
+      'another service account',
+      (j) => (j.spec.template.spec.serviceAccountName = 'server'),
+    ],
+    [
+      'a host port',
+      (j) =>
+        (j.spec.template.spec.containers[0].ports = [
+          { containerPort: 1, hostPort: 1 },
+        ]),
+    ],
+    [
+      'added capabilities',
+      (j) =>
+        (j.spec.template.spec.containers[0].securityContext.capabilities.add = [
+          'NET_RAW',
+        ]),
+    ],
+    [
+      'privileged',
+      (j) =>
+        (j.spec.template.spec.containers[0].securityContext.privileged = true),
+    ],
+    ['host PID', (j) => (j.spec.template.spec.hostPID = true)],
+    ['host IPC', (j) => (j.spec.template.spec.hostIPC = true)],
+    [
+      'a shared process namespace',
+      (j) => (j.spec.template.spec.shareProcessNamespace = true),
+    ],
+    [
+      'a projected volume',
+      (j) =>
+        j.spec.template.spec.volumes.push({
+          name: 'p',
+          projected: { sources: [] },
+        }),
+    ],
+    [
+      'a mount of an undefined volume',
+      (j) =>
+        j.spec.template.spec.containers[0].volumeMounts.push({
+          name: 'nope',
+          mountPath: '/x',
+        }),
+    ],
+    [
       'missing policy labels',
       (j) =>
         delete j.spec.template.metadata.labels['app.kubernetes.io/component'],
@@ -139,15 +184,31 @@ describe('KubernetesJobRunner', () => {
   let requests: { method: string; path: string; body?: any }[];
   let jobStatus: object;
   let createStatus: number;
+  let pod: any;
 
   const kube = {
     request: vi.fn(async (method: string, p: string, body?: any) => {
       requests.push({ method, path: p, body });
       if (method === 'POST') return { status: createStatus, body: {} };
+      if (method === 'GET' && p.startsWith('/api/v1/')) {
+        return { status: 200, body: { items: pod ? [pod] : [] } };
+      }
       if (method === 'GET' && p.includes('labelSelector')) {
         return {
           status: 200,
-          body: { items: [{ metadata: { name: 'old' } }] },
+          body: {
+            items: [
+              {
+                metadata: {
+                  name: 'old',
+                  labels: {
+                    'trop.electronjs.org/server-pod-uid':
+                      '11111111-2222-3333-4444-555555555555',
+                  },
+                },
+              },
+            ],
+          },
         };
       }
       if (method === 'GET') return { status: 200, body: { status: jobStatus } };
@@ -163,6 +224,7 @@ describe('KubernetesJobRunner', () => {
     requests = [];
     jobStatus = { active: 1 };
     createStatus = 201;
+    pod = { status: { phase: 'Pending' } };
   });
 
   afterEach(async () => {
@@ -177,7 +239,10 @@ describe('KubernetesJobRunner', () => {
         image: 'electronionicplatform.azurecr.io/trop-sandbox:abc123',
         templatePath,
         podIp: '10.244.0.7',
+        podName: 'server-abc-123',
+        podUid: '11111111-2222-3333-4444-555555555555',
         timeoutMs,
+        schedulingTimeoutMs: 20_000,
       },
       kube,
     );
@@ -223,17 +288,75 @@ describe('KubernetesJobRunner', () => {
         { name: 'TROP_SANDBOX_TOKEN', value: 't'.repeat(43) },
       ]),
     );
+    expect(job.metadata.ownerReferences).toEqual([
+      {
+        apiVersion: 'v1',
+        kind: 'Pod',
+        name: 'server-abc-123',
+        uid: '11111111-2222-3333-4444-555555555555',
+      },
+    ]);
+    expect(job.metadata.labels['trop.electronjs.org/server-pod-uid']).toBe(
+      '11111111-2222-3333-4444-555555555555',
+    );
     expect(requests.at(-1)).toMatchObject({
       method: 'DELETE',
       path: '/apis/batch/v1/namespaces/trop/jobs/trop-sandbox-0123456789abcdef?propagationPolicy=Background',
     });
   });
 
-  it('fails when the Job cannot be created', async () => {
-    createStatus = 403;
+  it('fails when the Job cannot be created, and deletes it anyway', async () => {
+    createStatus = 500;
     await expect(
       runner().run(spec(deferred<SandboxResult>().promise)),
     ).rejects.toThrow('Creating sandbox Job');
+    expect(requests.at(-1)?.method).toBe('DELETE');
+  });
+
+  it('fails at once when the pod cannot pull its image', async () => {
+    pod = {
+      status: {
+        phase: 'Pending',
+        containerStatuses: [
+          { state: { waiting: { reason: 'ImagePullBackOff', message: 'no' } } },
+        ],
+      },
+    };
+    const run = runner().run(spec(deferred<SandboxResult>().promise));
+    const failed = run.then(
+      () => new Error('resolved'),
+      (e: Error) => e,
+    );
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect((await failed).message).toContain('ImagePullBackOff');
+    expect(requests.at(-1)?.method).toBe('DELETE');
+  });
+
+  it('fails when the pod is not scheduled in time', async () => {
+    pod = {
+      status: {
+        phase: 'Pending',
+        conditions: [
+          { type: 'PodScheduled', status: 'False', reason: 'Unschedulable' },
+        ],
+      },
+    };
+    const run = runner().run(spec(deferred<SandboxResult>().promise));
+    const failed = run.then(
+      () => new Error('resolved'),
+      (e: Error) => e,
+    );
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect((await failed).message).toContain('Unschedulable');
+  });
+
+  it('keeps waiting for a running pod past the scheduling deadline', async () => {
+    pod = { status: { phase: 'Running' } };
+    const result = deferred<SandboxResult>();
+    const run = runner().run(spec(result.promise));
+    await vi.advanceTimersByTimeAsync(25_000);
+    result.resolve({ outcome: 'conflict', diff: '' });
+    await expect(run).resolves.toEqual({ outcome: 'conflict', diff: '' });
   });
 
   it('fails when the Job fails without a result', async () => {
@@ -249,6 +372,7 @@ describe('KubernetesJobRunner', () => {
   });
 
   it('fails and deletes the Job when it runs out of time', async () => {
+    pod = { status: { phase: 'Running' } };
     const run = runner(30_000).run(spec(deferred<SandboxResult>().promise));
     const timedOut = run.then(
       () => new Error('resolved'),
@@ -267,10 +391,10 @@ describe('KubernetesJobRunner', () => {
     expect(requests.at(-1)?.method).toBe('DELETE');
   });
 
-  it('deletes Jobs a previous process left behind', async () => {
+  it("deletes only the Jobs this pod's previous process left behind", async () => {
     await runner().deleteOrphanedJobs();
     expect(requests[0].path).toContain(
-      `labelSelector=${encodeURIComponent('app.kubernetes.io/part-of=trop,app.kubernetes.io/component=sandbox')}`,
+      `labelSelector=${encodeURIComponent('app.kubernetes.io/part-of=trop,app.kubernetes.io/component=sandbox,trop.electronjs.org/server-pod-uid=11111111-2222-3333-4444-555555555555')}`,
     );
     expect(requests[1]).toMatchObject({ method: 'DELETE' });
     expect(requests[1].path).toContain('/jobs/old?');
@@ -310,6 +434,17 @@ describe('sandbox runner selection', () => {
     process.env.NODE_ENV = 'test';
     process.env.TROP_SANDBOX_RUNNER = 'docker';
     expect(() => loadSandboxRunner()).toThrow('Unknown TROP_SANDBOX_RUNNER');
+  });
+
+  it('requires the pod identity for the Kubernetes runner', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.TROP_SANDBOX_RUNNER = 'kubernetes';
+    process.env.POD_IP = '10.244.0.7';
+    process.env.TROP_SANDBOX_IMAGE = 'x';
+    process.env.TROP_SANDBOX_JOB_TEMPLATE = '/nonexistent';
+    process.env.TROP_SANDBOX_NAMESPACE = 'trop';
+    delete process.env.POD_NAME;
+    expect(() => loadSandboxRunner()).toThrow('POD_NAME');
   });
 
   it('refuses a pod IP that is not an IP', () => {

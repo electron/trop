@@ -545,6 +545,24 @@ describe('runner', () => {
       ]);
     });
 
+    it('carries large and binary files through intact', async () => {
+      const big = Buffer.alloc(3 * 1024 * 1024);
+      for (let i = 0; i < big.length; i++) big[i] = (i * 7919) % 251;
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: { 'big.bin': big, 'small.txt': 'small\n' },
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const change = changeFor(outcome.commits[0], 'big.bin');
+      expect(change && 'content' in change).toBe(true);
+      if (!change || !('content' in change)) return;
+      expect(Buffer.from(change.content, 'base64').equals(big)).toBe(true);
+      expect(contentOf(changeFor(outcome.commits[0], 'small.txt'))).toBe(
+        'small\n',
+      );
+    });
+
     it('fails when the target branch does not exist', async () => {
       const remoteDir = await makeTempDir('trop-remote-');
       runGit(remoteDir, ['init', '--bare']);

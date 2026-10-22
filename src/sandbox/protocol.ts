@@ -39,6 +39,8 @@ export interface SandboxInputs {
   includeChanges: boolean;
   /** Committer identity for `git am`; the pushed commits are rebuilt anyway. */
   committer: { name: string; email: string };
+  /** The server's limits the job has to stay within (see LIMITS). */
+  limits: { diffChars: number; errorChars: number };
 }
 
 export type SandboxFileChange =
