@@ -7,14 +7,11 @@ import { InitRepoOptions } from '../interfaces';
 import { LogLevel } from '../enums';
 import { log } from '../utils/log-util';
 import { registerPatchesMergeDriver } from '../utils/build-tools';
+import { authenticatedGit, githubRemoteUrl } from '../utils/git-auth';
 import { Mutex } from 'async-mutex';
 
 const baseDir =
   process.env.WORKING_DIR ?? path.resolve(os.tmpdir(), 'trop-working');
-
-function githubUrl({ slug, accessToken }: InitRepoOptions): string {
-  return `https://x-access-token:${accessToken}@github.com/${slug}.git`;
-}
 
 const repoMutex = new Map<string, Mutex>();
 function mutexForRepoCache(slug: string) {
@@ -26,7 +23,9 @@ async function updateRepoCache({ slug, accessToken }: InitRepoOptions) {
   const cacheDir = path.resolve(baseDir, slug, 'git-cache');
 
   await fs.promises.mkdir(cacheDir, { recursive: true });
-  const git = simpleGit(cacheDir);
+  // The token is supplied per command through the environment and never
+  // written to the cache's config.
+  const git = authenticatedGit(cacheDir, accessToken);
   if (!(await git.checkIsRepo(CheckRepoActions.BARE))) {
     // The repo might be missing, or otherwise somehow corrupt. Re-clone it.
     log(
@@ -36,7 +35,12 @@ async function updateRepoCache({ slug, accessToken }: InitRepoOptions) {
     );
     await fs.promises.rm(cacheDir, { recursive: true, force: true });
     await fs.promises.mkdir(cacheDir, { recursive: true });
-    await git.clone(githubUrl({ slug, accessToken }), '.', ['--bare']);
+    await git.clone(githubRemoteUrl(slug), '.', ['--bare']);
+  } else {
+    // Caches cloned before the token moved out of the URL still carry an
+    // `https://x-access-token:<token>@github.com/...` origin. Reset it on
+    // every use so that no token is left on disk.
+    await git.remote(['set-url', 'origin', githubRemoteUrl(slug)]);
   }
   await git.fetch();
 

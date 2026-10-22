@@ -19,6 +19,7 @@ import { initRepo } from './operations/init-repo';
 import { setupRemotes } from './operations/setup-remotes';
 import { backportCommitsToBranch } from './operations/backport-commits';
 import { getRepoToken } from './utils/token-util';
+import { githubRemoteUrl } from './utils/git-auth';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import {
   CHECK_RUN_MAX_ANNOTATIONS,
@@ -195,6 +196,7 @@ and must be performed manually.',
 
   const success = await backportCommitsToBranch({
     dir: opts.dir,
+    accessToken: opts.repoAccessToken,
     slug: opts.slug,
     targetBranch: opts.targetBranch,
     tempBranch: opts.tempBranch,
@@ -269,6 +271,7 @@ const tryBackportSquashCommit = async (opts: TryBackportOptions) => {
 
   const success = await backportCommitsToBranch({
     dir: opts.dir,
+    accessToken: opts.repoAccessToken,
     slug: opts.slug,
     targetBranch: opts.targetBranch,
     tempBranch: opts.tempBranch,
@@ -728,13 +731,13 @@ export const backportStackImpl = async (
       createdDir = dir;
       log('backportImpl', LogLevel.INFO, `Working directory cleaned: ${dir}`);
 
-      const targetRepoRemote = `https://x-access-token:${repoAccessToken}@github.com/${slug}.git`;
       await setupRemotes({
         dir,
+        accessToken: repoAccessToken,
         remotes: [
           {
             name: 'target_repo',
-            value: targetRepoRemote,
+            value: githubRemoteUrl(slug),
           },
         ],
       });
