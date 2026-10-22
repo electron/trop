@@ -21,8 +21,8 @@ WORKDIR /app
 # Keep corepack's yarn download in the image so `yarn probot run` doesn't
 # fetch it again into $HOME on every pod start.
 ENV COREPACK_HOME=/opt/corepack
-# git: trop shells out to git for every backport.
-RUN apk add --no-cache git \
+# git: trop shells out to git for every backport. tini: see ENTRYPOINT.
+RUN apk add --no-cache git tini \
  && corepack enable
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn/ ./.yarn/
@@ -47,4 +47,8 @@ ENV NODE_ENV=production \
     HOME=/tmp
 EXPOSE 8080
 # No HEALTHCHECK: Kubernetes probes probot's /ping (set in the overlay).
+# tini runs as PID 1 and forwards SIGTERM to yarn/probot; probot installs no
+# SIGTERM handler, so without it the kernel ignores the signal and every pod
+# waits out the 30s grace period before being SIGKILLed.
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["yarn", "probot", "run", "./lib/index.js"]
