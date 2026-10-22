@@ -15,7 +15,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: electron/ionic-kit/.github/workflows/deploy.yml@07503edb4d3ad6d77ffcee366840bbe91f7d4319 # main @ 2026-10-22
+    uses: electron/ionic-kit/.github/workflows/deploy.yml@5fe23c0391cb22be6fea400cd0e2ad56bd54f55d # main @ 2026-10-22
     with:
       app: trop # ArgoCD Application name; must match the app's ionic-platform-apps entry in infra
       argocd_server: ${{ vars.ARGOCD_SERVER }}
