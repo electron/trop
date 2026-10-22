@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { assertChangesMatchPatches } from '../src/sandbox';
+import { patchPaths, unquoteGitPath } from '../src/sandbox/patch-paths';
 import {
   LIMITS,
   validateRepoPath,
@@ -231,5 +233,87 @@ describe('validateRepoPath()', () => {
     null,
   ])('rejects %j', (p) => {
     expect(() => validateRepoPath('path', p)).toThrow('Invalid sandbox result');
+  });
+});
+
+describe('patchPaths()', () => {
+  const patch = [
+    'From 0123 Mon Sep 17 00:00:00 2001',
+    'Subject: [PATCH] fix: things',
+    '',
+    '---',
+    'diff --git a/src/file.ts b/src/file.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/file.ts',
+    '+++ b/src/file.ts',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+    'diff --git a/dir with space/x.txt b/dir with space/x.txt',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/dir with space/x.txt',
+    'diff --git a/old.txt b/new.txt',
+    'similarity index 100%',
+    'rename from old.txt',
+    'rename to new.txt',
+    'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"',
+    'deleted file mode 100644',
+    'diff --git a/img.png b/img.png',
+    'GIT binary patch',
+  ].join('\n');
+
+  it('names every path the diff headers touch', () => {
+    expect([...patchPaths(patch)].sort()).toEqual(
+      [
+        'café.txt',
+        'dir with space/x.txt',
+        'img.png',
+        'new.txt',
+        'old.txt',
+        'src/file.ts',
+      ].sort(),
+    );
+  });
+
+  it('unquotes git C-style paths', () => {
+    expect(unquoteGitPath('"a\\tb\\"c\\\\"')).toBe('a\tb"c\\');
+    expect(unquoteGitPath('plain')).toBe('plain');
+    expect(unquoteGitPath('"broken')).toBeNull();
+    expect(unquoteGitPath('"bad\\q"')).toBeNull();
+  });
+});
+
+describe('assertChangesMatchPatches()', () => {
+  const patch =
+    'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n';
+
+  it('allows changes to the files a patch touches', () => {
+    expect(() =>
+      assertChangesMatchPatches([patch], [
+        commit([{ path: 'src/a.ts', mode: '100644', content: '' }]),
+      ] as never),
+    ).not.toThrow();
+  });
+
+  it('refuses a change to any other file', () => {
+    expect(() =>
+      assertChangesMatchPatches([patch], [
+        commit([
+          { path: 'src/a.ts', mode: '100644', content: '' },
+          { path: '.github/workflows/evil.yml', mode: '100644', content: '' },
+        ]),
+      ] as never),
+    ).toThrow('.github/workflows/evil.yml');
+  });
+
+  it('checks each commit against its own patch', () => {
+    const other = 'diff --git a/b.txt b/b.txt\n';
+    expect(() =>
+      assertChangesMatchPatches([patch, other], [
+        null,
+        commit([{ path: 'src/a.ts', deleted: true }]),
+      ] as never),
+    ).toThrow('patch 2');
   });
 });

@@ -8,6 +8,7 @@ import { log } from '../utils/log-util';
 import { SandboxJobServer } from './job-server';
 import { KubernetesJobRunner } from './kubernetes';
 import { LIMITS, SandboxAttempt, SandboxCommit } from './protocol';
+import { patchPaths } from './patch-paths';
 import { RepoCache } from './repo-cache';
 import {
   DEFAULT_SANDBOX_TIMEOUT_MS,
@@ -103,6 +104,30 @@ const getCommitter = () => {
   return committer;
 };
 
+/**
+ * Each commit may only change files its own patch names: whatever happened
+ * inside the sandbox, the server never pushes a change to a file (say, a
+ * workflow) that the backported commits did not touch. This rules out the
+ * rare backport where `git am -3` follows a rename on the target branch;
+ * that one fails and is left to a manual backport.
+ */
+export const assertChangesMatchPatches = (
+  patches: string[],
+  commits: (SandboxCommit | null)[],
+) => {
+  for (const [i, commit] of commits.entries()) {
+    if (!commit?.changes) continue;
+    const allowed = patchPaths(patches[i]);
+    for (const change of commit.changes) {
+      if (!allowed.has(change.path)) {
+        throw new Error(
+          `Sandbox job changed ${change.path}, which patch ${i + 1} does not touch`,
+        );
+      }
+    }
+  }
+};
+
 export interface SandboxedBackportOptions {
   slug: string;
   /** Installation token; only used by the server to fetch from GitHub. */
@@ -176,6 +201,10 @@ export const runSandboxedBackport = async (
       });
       switch (result.outcome) {
         case 'success':
+          assertChangesMatchPatches(
+            opts.attempts[result.attempt].patches,
+            result.commits,
+          );
           return {
             kind: 'success',
             attempt: opts.attempts[result.attempt].kind,

@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import * as http from 'http';
 import { AddressInfo } from 'net';
@@ -27,7 +27,10 @@ import {
 //   POST /jobs/<id>/result                                 its result, once.
 // Nothing else is served; in particular there is no receive-pack.
 
-const MAX_CONCURRENT_UPLOAD_PACKS = 4;
+// Per job, and over all jobs: pack generation is the server's most expensive
+// work a job can ask for.
+const MAX_CONCURRENT_UPLOAD_PACKS = 2;
+const MAX_TOTAL_UPLOAD_PACKS = 8;
 const MAX_REQUESTS_PER_JOB = 2000;
 const UPLOAD_PACK_INACTIVITY_TIMEOUT_S = 120;
 
@@ -57,7 +60,7 @@ interface JobState extends JobRegistration {
   inputsJson: Buffer;
   resultReceived: boolean;
   requests: number;
-  uploadPacks: number;
+  uploadPacks: Set<ChildProcess>;
   resolve: (r: SandboxResult) => void;
   reject: (e: Error) => void;
 }
@@ -109,6 +112,7 @@ const ROUTE =
 
 export class SandboxJobServer {
   private readonly jobs = new Map<string, JobState>();
+  private totalUploadPacks = 0;
   private readonly server: http.Server;
   private address: AddressInfo | null = null;
 
@@ -161,6 +165,7 @@ export class SandboxJobServer {
 
   async stop() {
     for (const job of this.jobs.values()) {
+      for (const child of job.uploadPacks) child.kill('SIGKILL');
       job.reject(new Error('Sandbox job server stopped'));
     }
     this.jobs.clear();
@@ -195,7 +200,7 @@ export class SandboxJobServer {
       inputsJson: Buffer.from(JSON.stringify(registration.inputs)),
       resultReceived: false,
       requests: 0,
-      uploadPacks: 0,
+      uploadPacks: new Set(),
       resolve,
       reject,
     });
@@ -209,6 +214,8 @@ export class SandboxJobServer {
         const job = this.jobs.get(id);
         if (!job) return;
         this.jobs.delete(id);
+        // Its fetches end with it.
+        for (const child of job.uploadPacks) child.kill('SIGKILL');
         job.reject(new Error('Sandbox job ended without a result'));
       },
     };
@@ -316,13 +323,17 @@ export class SandboxJobServer {
         throw new HttpError(415, 'unexpected content encoding');
       }
     }
-    if (job.uploadPacks >= MAX_CONCURRENT_UPLOAD_PACKS) {
+    if (
+      job.uploadPacks.size >= MAX_CONCURRENT_UPLOAD_PACKS ||
+      this.totalUploadPacks >= MAX_TOTAL_UPLOAD_PACKS
+    ) {
       throw new HttpError(429, 'too many concurrent fetches');
     }
 
-    job.uploadPacks += 1;
+    this.totalUploadPacks += 1;
+    let child: ChildProcess | undefined;
     try {
-      const child = spawn(
+      const proc = spawn(
         'git',
         [
           // Advertise only the job's ref, not HEAD or any branch.
@@ -335,6 +346,11 @@ export class SandboxJobServer {
           // Lets the job do a blob-less clone and fetch blobs on demand.
           '-c',
           'uploadpack.allowFilter=true',
+          // Bound what packing for a job can take from the server.
+          '-c',
+          'pack.threads=1',
+          '-c',
+          'pack.windowMemory=256m',
           'upload-pack',
           '--strict',
           '--stateless-rpc',
@@ -347,16 +363,18 @@ export class SandboxJobServer {
           stdio: ['pipe', 'pipe', 'pipe'],
         },
       );
+      child = proc;
+      job.uploadPacks.add(proc);
       let stderr = '';
-      child.stderr.on('data', (d: Buffer) => {
+      proc.stderr.on('data', (d: Buffer) => {
         if (stderr.length < 4096) stderr += d.toString();
       });
       const exited = new Promise<number | null>((resolve, reject) => {
-        child.on('error', reject);
-        child.on('close', resolve);
+        proc.on('error', reject);
+        proc.on('close', resolve);
       });
       res.on('close', () => {
-        if (child.exitCode === null) child.kill('SIGKILL');
+        if (proc.exitCode === null) proc.kill('SIGKILL');
       });
 
       res.writeHead(200, {
@@ -366,11 +384,11 @@ export class SandboxJobServer {
 
       const limit = new ByteLimit(LIMITS.uploadPackRequestBytes);
       const input = advertise
-        ? (async () => child.stdin.end())()
+        ? (async () => proc.stdin.end())()
         : req.headers['content-encoding'] === 'gzip'
-          ? pipeline(req, zlib.createGunzip(), limit, child.stdin)
-          : pipeline(req, limit, child.stdin);
-      const output = pipeline(child.stdout, res);
+          ? pipeline(req, zlib.createGunzip(), limit, proc.stdin)
+          : pipeline(req, limit, proc.stdin);
+      const output = pipeline(proc.stdout, res);
 
       const [inputResult, outputResult, code] = await Promise.allSettled([
         input,
@@ -391,7 +409,8 @@ export class SandboxJobServer {
         res.destroy();
       }
     } finally {
-      job.uploadPacks -= 1;
+      if (child) job.uploadPacks.delete(child);
+      this.totalUploadPacks -= 1;
     }
   }
 }
