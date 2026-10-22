@@ -28,6 +28,20 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value: { name: BOT_USER_NAME, value: "trop[bot]" }
+      # Carried over from Heroku; no code reads it since #398.
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: { name: COMMITTER_USER_NAME, value: electron-bot }
+      # Datadog: the cluster's DatadogAgent (electron/infra
+      # argo/ionic-platform/datadog) already ships stdout logs, and its
+      # prometheusScrape feature picks up these annotations to scrape trop's
+      # prom-client /metrics. No DD_API_KEY or in-pod agent needed.
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8080"
+          prometheus.io/path: /metrics
       - op: replace
         path: /spec/template/spec/containers/0/resources
         value:
