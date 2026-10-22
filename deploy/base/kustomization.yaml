@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: trop
+resources:
+  # Pin to a commit of electron/ionic-kit. ArgoCD's repo-server fetches it
+  # anonymously because the kit is public. Only bump it on purpose.
+  - https://github.com/electron/ionic-kit//kustomize/node-web-app?ref=07503edb4d3ad6d77ffcee366840bbe91f7d4319
+  # Heroku Scheduler replacements, one directory per schedule. See
+  # kustomize/cronjob/README.md in electron/ionic-kit.
+  # - cron-nightly
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: trop
+    includeTemplates: true
+images:
+  # The base uses PLACEHOLDER_APP as the image name. CI sets the tag on each
+  # deploy (`argocd app set --kustomize-image <image>=<image>:<sha>`).
+  - name: electronionicplatform.azurecr.io/PLACEHOLDER_APP
+    newName: electronionicplatform.azurecr.io/trop
+    newTag: main

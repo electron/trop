@@ -1,0 +1,27 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    permissions:
+      contents: read
+      id-token: write
+    uses: electron/ionic-kit/.github/workflows/deploy.yml@07503edb4d3ad6d77ffcee366840bbe91f7d4319 # main @ 2026-10-22
+    with:
+      app: trop # ArgoCD Application name; must match the app's ionic-platform-apps entry in infra
+      argocd_server: ${{ vars.ARGOCD_SERVER }}
+      shared_vault: ${{ vars.IONIC_SHARED_VAULT }}
+    secrets:
+      AZURE_ACR_PUSH_CLIENT_ID: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}
+      IONIC_PLATFORM_AZURE_TENANT_ID: ${{ secrets.IONIC_PLATFORM_AZURE_TENANT_ID }}
+      IONIC_PLATFORM_AZURE_SUBSCRIPTION_ID: ${{ secrets.IONIC_PLATFORM_AZURE_SUBSCRIPTION_ID }}
+      ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}

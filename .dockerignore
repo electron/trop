@@ -1,0 +1,9 @@
+.git
+node_modules
+lib
+.build-tools
+spec
+.husky
+working
+.env
+*.pem
