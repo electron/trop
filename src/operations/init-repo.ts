@@ -2,7 +2,7 @@ import { parse } from 'yaml';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import simpleGit, { CheckRepoActions } from 'simple-git';
+import { CheckRepoActions, simpleGit } from 'simple-git';
 import { InitRepoOptions } from '../interfaces';
 import { LogLevel } from '../enums';
 import { log } from '../utils/log-util';
