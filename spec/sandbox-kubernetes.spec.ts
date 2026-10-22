@@ -1,0 +1,321 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+import { parse } from 'yaml';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { loadSandboxRunner } from '../src/sandbox';
+import {
+  assertSafeJobTemplate,
+  KubeClient,
+  KubernetesJobRunner,
+} from '../src/sandbox/kubernetes';
+import { SandboxResult } from '../src/sandbox/protocol';
+import { LocalProcessRunner, SandboxJobSpec } from '../src/sandbox/runner';
+
+// The Job template exactly as deploy/base ships it.
+const templateYaml: string = parse(
+  fs
+    .readFileSync(
+      path.join(__dirname, '..', 'deploy', 'base', 'sandbox.yaml'),
+      'utf8',
+    )
+    .split('\n---\n')[1],
+).data['sandbox-job.yaml'];
+
+const deferred = <T>() => {
+  let resolve!: (v: T) => void;
+  let reject!: (e: Error) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  promise.catch(() => {});
+  return { promise, resolve, reject };
+};
+
+describe('assertSafeJobTemplate()', () => {
+  const template = () => parse(templateYaml);
+
+  it('accepts the shipped template', () => {
+    expect(() => assertSafeJobTemplate(template())).not.toThrow();
+  });
+
+  it.each<[string, (job: any) => void]>([
+    [
+      'a mounted SA token',
+      (j) => (j.spec.template.spec.automountServiceAccountToken = true),
+    ],
+    ['service links', (j) => delete j.spec.template.spec.enableServiceLinks],
+    ['host networking', (j) => (j.spec.template.spec.hostNetwork = true)],
+    ['cluster DNS', (j) => (j.spec.template.spec.dnsPolicy = 'ClusterFirst')],
+    ['retries', (j) => (j.spec.backoffLimit = 3)],
+    ['no deadline', (j) => delete j.spec.activeDeadlineSeconds],
+    [
+      'root',
+      (j) => (j.spec.template.spec.securityContext.runAsNonRoot = false),
+    ],
+    [
+      'a writable root filesystem',
+      (j) =>
+        (j.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem =
+          false),
+    ],
+    [
+      'privilege escalation',
+      (j) =>
+        (j.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation =
+          true),
+    ],
+    [
+      'kept capabilities',
+      (j) =>
+        (j.spec.template.spec.containers[0].securityContext.capabilities.drop =
+          []),
+    ],
+    [
+      'envFrom a secret',
+      (j) =>
+        (j.spec.template.spec.containers[0].envFrom = [
+          { secretRef: { name: 'server-secrets' } },
+        ]),
+    ],
+    [
+      'env from a secret',
+      (j) =>
+        j.spec.template.spec.containers[0].env.push({
+          name: 'X',
+          valueFrom: { secretKeyRef: { name: 's', key: 'k' } },
+        }),
+    ],
+    [
+      'a secret volume',
+      (j) =>
+        j.spec.template.spec.volumes.push({
+          name: 's',
+          secret: { secretName: 'server-secrets' },
+        }),
+    ],
+    [
+      'a hostPath volume',
+      (j) =>
+        j.spec.template.spec.volumes.push({
+          name: 'h',
+          hostPath: { path: '/' },
+        }),
+    ],
+    [
+      'a second container',
+      (j) => j.spec.template.spec.containers.push({ name: 'x' }),
+    ],
+    [
+      'an init container',
+      (j) => (j.spec.template.spec.initContainers = [{ name: 'x' }]),
+    ],
+    [
+      'workload identity',
+      (j) =>
+        (j.spec.template.metadata.labels['azure.workload.identity/use'] =
+          'true'),
+    ],
+    [
+      'missing policy labels',
+      (j) =>
+        delete j.spec.template.metadata.labels['app.kubernetes.io/component'],
+    ],
+  ])('refuses a template with %s', (_, mutate) => {
+    const job = template();
+    mutate(job);
+    expect(() => assertSafeJobTemplate(job)).toThrow(
+      'Unsafe sandbox Job template',
+    );
+  });
+});
+
+describe('KubernetesJobRunner', () => {
+  let tmp: string;
+  let templatePath: string;
+  let requests: { method: string; path: string; body?: any }[];
+  let jobStatus: object;
+  let createStatus: number;
+
+  const kube = {
+    request: vi.fn(async (method: string, p: string, body?: any) => {
+      requests.push({ method, path: p, body });
+      if (method === 'POST') return { status: createStatus, body: {} };
+      if (method === 'GET' && p.includes('labelSelector')) {
+        return {
+          status: 200,
+          body: { items: [{ metadata: { name: 'old' } }] },
+        };
+      }
+      if (method === 'GET') return { status: 200, body: { status: jobStatus } };
+      return { status: 200, body: {} };
+    }),
+  } as unknown as KubeClient;
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'trop-kube-'));
+    templatePath = path.join(tmp, 'sandbox-job.yaml');
+    await fs.promises.writeFile(templatePath, templateYaml);
+    requests = [];
+    jobStatus = { active: 1 };
+    createStatus = 201;
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  });
+
+  const runner = (timeoutMs = 60_000) =>
+    new KubernetesJobRunner(
+      {
+        namespace: 'trop',
+        image: 'electronionicplatform.azurecr.io/trop-sandbox:abc123',
+        templatePath,
+        podIp: '10.244.0.7',
+        timeoutMs,
+      },
+      kube,
+    );
+
+  const spec = (result: Promise<SandboxResult>): SandboxJobSpec => ({
+    id: '0123456789abcdef0123456789abcdef',
+    url: 'http://10.244.0.7:8081/jobs/0123456789abcdef0123456789abcdef',
+    token: 't'.repeat(43),
+    result,
+  });
+
+  it('refuses an unsafe template at startup', async () => {
+    const job = parse(templateYaml);
+    job.spec.template.spec.automountServiceAccountToken = true;
+    await fs.promises.writeFile(templatePath, JSON.stringify(job));
+    expect(() => runner()).toThrow('Unsafe sandbox Job template');
+  });
+
+  it('creates the Job, returns the result and deletes the Job', async () => {
+    const result = deferred<SandboxResult>();
+    const run = runner().run(spec(result.promise));
+    await vi.advanceTimersByTimeAsync(10);
+    result.resolve({ outcome: 'conflict', diff: '' });
+    await expect(run).resolves.toEqual({ outcome: 'conflict', diff: '' });
+
+    const create = requests.find((r) => r.method === 'POST')!;
+    expect(create.path).toBe('/apis/batch/v1/namespaces/trop/jobs');
+    const job = create.body;
+    expect(job.metadata.name).toBe('trop-sandbox-0123456789abcdef');
+    expect(job.metadata.namespace).toBe('trop');
+    const pod = job.spec.template;
+    expect(pod.metadata.labels).toMatchObject({
+      'app.kubernetes.io/part-of': 'trop',
+      'app.kubernetes.io/component': 'sandbox',
+      'trop.electronjs.org/sandbox-job': '0123456789abcdef0123456789abcdef',
+    });
+    expect(pod.spec.containers[0].image).toBe(
+      'electronionicplatform.azurecr.io/trop-sandbox:abc123',
+    );
+    expect(pod.spec.containers[0].env).toEqual(
+      expect.arrayContaining([
+        { name: 'TROP_SANDBOX_URL', value: spec(result.promise).url },
+        { name: 'TROP_SANDBOX_TOKEN', value: 't'.repeat(43) },
+      ]),
+    );
+    expect(requests.at(-1)).toMatchObject({
+      method: 'DELETE',
+      path: '/apis/batch/v1/namespaces/trop/jobs/trop-sandbox-0123456789abcdef?propagationPolicy=Background',
+    });
+  });
+
+  it('fails when the Job cannot be created', async () => {
+    createStatus = 403;
+    await expect(
+      runner().run(spec(deferred<SandboxResult>().promise)),
+    ).rejects.toThrow('Creating sandbox Job');
+  });
+
+  it('fails when the Job fails without a result', async () => {
+    jobStatus = { failed: 1 };
+    const run = runner().run(spec(deferred<SandboxResult>().promise));
+    const failed = run.then(
+      () => new Error('resolved'),
+      (e: Error) => e,
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await failed).message).toContain('ended without a result');
+    expect(requests.at(-1)?.method).toBe('DELETE');
+  });
+
+  it('fails and deletes the Job when it runs out of time', async () => {
+    const run = runner(30_000).run(spec(deferred<SandboxResult>().promise));
+    const timedOut = run.then(
+      () => new Error('resolved'),
+      (e: Error) => e,
+    );
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect((await timedOut).message).toContain('timed out');
+    expect(requests.at(-1)?.method).toBe('DELETE');
+  });
+
+  it('fails when the result is invalid', async () => {
+    const result = deferred<SandboxResult>();
+    const run = runner().run(spec(result.promise));
+    result.reject(new Error('Invalid sandbox result: nope'));
+    await expect(run).rejects.toThrow('Invalid sandbox result');
+    expect(requests.at(-1)?.method).toBe('DELETE');
+  });
+
+  it('deletes Jobs a previous process left behind', async () => {
+    await runner().deleteOrphanedJobs();
+    expect(requests[0].path).toContain(
+      `labelSelector=${encodeURIComponent('app.kubernetes.io/part-of=trop,app.kubernetes.io/component=sandbox')}`,
+    );
+    expect(requests[1]).toMatchObject({ method: 'DELETE' });
+    expect(requests[1].path).toContain('/jobs/old?');
+  });
+});
+
+describe('sandbox runner selection', () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it('uses the local runner outside production', () => {
+    delete process.env.TROP_SANDBOX_RUNNER;
+    process.env.NODE_ENV = 'test';
+    expect(loadSandboxRunner().kind).toBe('local');
+  });
+
+  it('never falls back to the local runner in production', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.TROP_SANDBOX_RUNNER;
+    expect(() => loadSandboxRunner()).toThrow('must be set');
+
+    process.env.TROP_SANDBOX_RUNNER = 'local';
+    expect(() => loadSandboxRunner()).toThrow('not allowed in production');
+    expect(() => new LocalProcessRunner()).toThrow('not allowed in production');
+  });
+
+  it('refuses the local runner where the Kubernetes runner is configured', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.TROP_SANDBOX_RUNNER = 'kubernetes';
+    expect(() => new LocalProcessRunner()).toThrow('not allowed');
+    expect(() => LocalProcessRunner.assertAllowed()).toThrow('not allowed');
+  });
+
+  it('refuses an unknown runner', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.TROP_SANDBOX_RUNNER = 'docker';
+    expect(() => loadSandboxRunner()).toThrow('Unknown TROP_SANDBOX_RUNNER');
+  });
+
+  it('refuses a pod IP that is not an IP', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.TROP_SANDBOX_RUNNER = 'kubernetes';
+    process.env.POD_IP = 'evil.example.com';
+    expect(() => loadSandboxRunner()).toThrow('POD_IP');
+  });
+});

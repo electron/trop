@@ -1,0 +1,25 @@
+# The server spawns, watches and deletes sandbox Jobs. Nothing else: no pods,
+# no secrets, no exec. Its token is the projected one mounted in
+# server-sandbox-patch.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-job-runner
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-job-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sandbox-job-runner
+subjects:
+  # Provisioned by infra's ionic-app module (components.server).
+  - kind: ServiceAccount
+    name: server
+    namespace: trop

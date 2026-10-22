@@ -15,6 +15,22 @@ it to register build-tools' list-aware merge driver for `patches/**/.patches`
 files in every backport clone, so `git` and network access to GitHub are needed
 at install time. To move the pin, change the SHA and run the install again.
 
+### Sandboxed backports
+
+trop applies a backport's patches, which are untrusted input, in a separate
+sandbox job (`src/sandbox/`) rather than in the server process. The server
+fetches the target branch from GitHub into its cache, serves the job its
+inputs and a read-only git endpoint on an internal port (`TROP_SANDBOX_PORT`,
+8081 by default), validates the result the job posts back and creates the
+backport commits itself through the GitHub API.
+
+In production (`NODE_ENV=production`) every job runs as a Kubernetes Job with
+no credentials and no network access other than the server's internal port
+(see `deploy/base/sandbox.yaml`), and trop refuses to start without that
+configuration. In development and tests, jobs run as local child processes
+(`TROP_SANDBOX_RUNNER=local`, the default outside production). That runner is
+not a sandbox and is never used in production.
+
 ### Configuring the GitHub App
 
 To run your app in development, you will need to configure a GitHub App to deliver webhooks to your local machine.

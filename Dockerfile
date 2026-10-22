@@ -16,6 +16,29 @@ COPY typings/ ./typings/
 COPY src/ ./src/
 RUN yarn build
 
+# The sandbox image (target `sandbox`, pushed as trop-sandbox): what a sandbox
+# Job needs to apply a backport's patches - node, git, the compiled
+# entrypoint and build-tools' .patches merge driver - and nothing else. No
+# trop server code or dependencies, no credentials. Kept ahead of the server
+# stage so a plain `docker build` still builds the server.
+FROM node:24-alpine AS sandbox
+WORKDIR /app
+# git: applies the patches. tini: see the server stage's ENTRYPOINT.
+RUN apk add --no-cache git tini
+COPY --from=build /app/.build-tools ./.build-tools
+# The entrypoint only imports Node built-ins (src/sandbox/entrypoint.ts).
+COPY --from=build /app/lib/sandbox/entrypoint.js ./sandbox/entrypoint.js
+USER 1000:1000
+# The Job mounts emptyDirs at /work and /tmp; the root filesystem is
+# read-only.
+ENV NODE_ENV=production \
+    HOME=/tmp \
+    TROP_BUILD_TOOLS_DIR=/app/.build-tools \
+    TROP_SANDBOX_WORKDIR=/work
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "/app/sandbox/entrypoint.js"]
+
+# The server image (the default target).
 FROM node:24-alpine
 WORKDIR /app
 # Keep corepack's yarn download in the image so `yarn probot run` doesn't

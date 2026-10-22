@@ -3,24 +3,30 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { simpleGit } from 'simple-git';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import { PRChange } from '../src/enums';
-import { backportCommitsToBranch } from '../src/operations/backport-commits';
-import { initRepo } from '../src/operations/init-repo';
-import { setupRemotes } from '../src/operations/setup-remotes';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
+import { runSandboxedBackport, Sandbox } from '../src/sandbox';
+import { createBackportCommits } from '../src/sandbox/commits';
+import { SandboxJobServer } from '../src/sandbox/job-server';
+import {
+  SandboxAttempt,
+  SandboxCommit,
+  SandboxFileChange,
+} from '../src/sandbox/protocol';
+import { RepoCache } from '../src/sandbox/repo-cache';
+import { LocalProcessRunner } from '../src/sandbox/runner';
 import { getPRApprovers, tagBackportReviewers } from '../src/utils';
-import { registerPatchesMergeDriver } from '../src/utils/build-tools';
 import { addLabels, removeLabel } from '../src/utils/label-utils';
-
-let dirObject: { dir?: string } | null = null;
-
-const saveDir = (o: { dir: string }) => {
-  dirObject = o;
-  return o.dir;
-};
 
 const backportPRClosedEvent = require('./fixtures/backport_pull_request.closed.json');
 const backportPRMergedEvent = require('./fixtures/backport_pull_request.merged.json');
@@ -74,148 +80,22 @@ vi.mock('../src/utils/label-utils', () => ({
 describe('runner', () => {
   console.error = vi.fn();
 
-  afterEach(async () => {
-    if (dirObject && dirObject.dir) {
-      await fs.promises.rm(dirObject.dir, { force: true, recursive: true });
-    }
-  });
-
-  describe('initRepo()', () => {
-    it('should clone a github repository', async () => {
-      const dir = saveDir(
-        await initRepo({
-          slug: 'electron/trop',
-          accessToken: '',
-        }),
-      );
-      expect(fs.existsSync(dir)).toBe(true);
-      expect(fs.existsSync(path.resolve(dir, '.git'))).toBe(true);
-    });
-
-    it('registers the build-tools .patches merge driver in the clone', async () => {
-      const dir = saveDir(
-        await initRepo({
-          slug: 'electron/trop',
-          accessToken: '',
-        }),
-      );
-      expect(
-        runGit(dir, ['config', '--get', 'merge.patches-list.driver']),
-      ).toContain('e-patch-merge-driver.js');
-      expect(
-        runGit(dir, ['check-attr', 'merge', 'patches/chromium/.patches']),
-      ).toBe('patches/chromium/.patches: merge: patches-list');
-    });
-
-    it('keeps the token out of the cache and the clone', async () => {
-      const cacheDir = path.resolve(
-        process.env.WORKING_DIR ?? path.resolve(os.tmpdir(), 'trop-working'),
-        'electron/trop',
-        'git-cache',
-      );
-      // Make sure the cache exists, then plant the token-bearing origin URL
-      // that caches cloned by earlier trop versions carry.
-      saveDir(await initRepo({ slug: 'electron/trop', accessToken: '' }));
-      runGit(cacheDir, [
-        'remote',
-        'set-url',
-        'origin',
-        'https://x-access-token:stale-token@github.com/electron/trop.git',
-      ]);
-
-      const dir = saveDir(
-        await initRepo({ slug: 'electron/trop', accessToken: '' }),
-      );
-      expect(runGit(cacheDir, ['remote', 'get-url', 'origin'])).toBe(
-        'https://github.com/electron/trop.git',
-      );
-      for (const repo of [cacheDir, dir]) {
-        expect(runGit(repo, ['config', '--list'])).not.toContain(
-          'x-access-token',
-        );
-      }
-    });
-
-    it('should fail if the github repository does not exist', async () => {
-      await expect(
-        initRepo({
-          slug: 'electron/this-is-not-trop',
-          accessToken: '',
-        }),
-      ).rejects.toBeTruthy();
-    });
-  });
-
-  describe('registerPatchesMergeDriver()', () => {
-    it('fails loudly when the directory is not a git checkout', async () => {
-      const dir = await fs.promises.mkdtemp(
-        path.resolve(os.tmpdir(), 'trop-not-a-repo-'),
-      );
-      saveDir({ dir });
-      await expect(registerPatchesMergeDriver(dir)).rejects.toThrow(
-        `Failed to register build-tools' .patches merge driver in ${dir}`,
-      );
-    });
-  });
-
-  describe('setUpRemotes()', () => {
-    let dir: string;
-
-    beforeEach(async () => {
-      dir = await fs.promises.mkdtemp(path.resolve(os.tmpdir(), 'trop-spec-'));
-      await fs.promises.mkdir(dir, { recursive: true });
-      runGit(dir, ['init']);
-      runGit(dir, ['config', 'gc.autoDetach', 'false']);
-      runGit(dir, ['config', 'maintenance.autoDetach', 'false']);
-    });
-
-    afterEach(async () => {
-      if (fs.existsSync(dir)) {
-        await fs.promises.rm(dir, { force: true, recursive: true });
-      }
-    });
-
-    it('should set new remotes correctly', async () => {
-      await setupRemotes({
-        dir,
-        accessToken: '',
-        remotes: [
-          {
-            name: 'origin',
-            value: 'https://github.com/electron/clerk.git',
-          },
-          {
-            name: 'secondary',
-            value: 'https://github.com/electron/trop.git',
-          },
-        ],
-      });
-      const git = simpleGit(dir);
-      const remotes = await git.raw(['remote', '-v']);
-      const parsedRemotes = remotes
-        .trim()
-        .replace(/ +/g, ' ')
-        .replace(/\t/g, ' ')
-        .replace(/ \(fetch\)/g, '')
-        .replace(/ \(push\)/g, '')
-        .split(/\r?\n/g)
-        .map((line) => line.trim().split(' '));
-
-      expect(parsedRemotes.length).toBe(4);
-      for (const remote of parsedRemotes) {
-        expect(remote.length).toBe(2);
-        expect(['origin', 'secondary']).toContain(remote[0]);
-        const expectedRepo =
-          remote[0] === 'origin'
-            ? 'github.com/electron/clerk.git'
-            : 'github.com/electron/trop.git';
-        expect(remote[1].endsWith(expectedRepo)).toBeTruthy();
-      }
-    });
-  });
-
-  describe('backportCommitsToBranch()', { timeout: 30_000 }, () => {
+  // The backport flow end to end: a local repository stands in for GitHub,
+  // the server-side cache fetches from it, and the sandbox entrypoint runs
+  // as a child process (LocalProcessRunner) against the job server.
+  describe('runSandboxedBackport()', { timeout: 60_000 }, () => {
+    let sandbox: Sandbox;
     let createdDirs: string[] = [];
+
+    beforeAll(async () => {
+      const server = new SandboxJobServer('127.0.0.1', 0);
+      await server.start();
+      sandbox = { runner: new LocalProcessRunner(50_000), server };
+    });
+
+    afterAll(async () => {
+      await sandbox.server.stop();
+    });
 
     const makeTempDir = async (prefix: string) => {
       const dir = await fs.promises.mkdtemp(path.resolve(os.tmpdir(), prefix));
@@ -232,68 +112,87 @@ describe('runner', () => {
       createdDirs = [];
     });
 
-    // Build two repos with identical initial files, apply changes to the
-    // source, format-patch, publish, clone, and run the backport.
-    // Returns the work directory for assertions.
+    const commitAll = (dir: string, message: string, files: string[]) => {
+      runGit(dir, ['add', '-A', '--', ...files]);
+      runGit(dir, [
+        'commit',
+        '--author=Trop Test <trop@example.com>',
+        '-m',
+        message,
+      ]);
+    };
+
+    const applyChanges = async (
+      dir: string,
+      changes: Record<string, string | Buffer | null>,
+    ) => {
+      for (const [file, content] of Object.entries(changes)) {
+        if (content === null) {
+          await fs.promises.rm(path.join(dir, file));
+        } else if (Buffer.isBuffer(content)) {
+          await fs.promises.writeFile(path.join(dir, file), content);
+        } else if (content.startsWith('symlink:')) {
+          await fs.promises.mkdir(path.dirname(path.join(dir, file)), {
+            recursive: true,
+          });
+          await fs.promises.symlink(
+            content.slice('symlink:'.length),
+            path.join(dir, file),
+          );
+        } else {
+          await writeRepoFile(dir, file, content);
+        }
+      }
+    };
+
+    // Build two repos with identical initial files, commit `changes` (and
+    // then each of `stackedChanges`) on the source and format-patch them,
+    // publish the target as the stand-in for GitHub, and run the backport.
     const setupAndBackport = async (opts: {
       initial: Record<string, string>;
-      changes: Record<string, string>;
+      // A null value deletes the file; "symlink:<target>" makes a symlink.
+      changes: Record<string, string | Buffer | null>;
       // Changes committed on the target branch (42-x-y) before the backport,
       // so that the source and target diverge and `git am -3` has to fall
-      // back to a three-way merge. A `null` value deletes the file.
+      // back to a three-way merge.
       targetChanges?: Record<string, string | null>;
-      // Register build-tools' .patches merge driver in the work clone, as
-      // initRepo does in production. Set to false to observe `merge=union`.
-      registerMergeDriver?: boolean;
-      // Further commits on the source, each backported as its own patch after
-      // `changes`, in this order - as the members of a stack are.
-      stackedChanges?: Record<string, string>[];
-    }): Promise<string> => {
+      stackedChanges?: Record<string, string | Buffer | null>[];
+      // Further attempts after the patches above, e.g. a squash commit.
+      extraAttempts?: SandboxAttempt[];
+      includeChanges?: boolean;
+    }) => {
       const remoteDir = await makeTempDir('trop-remote-');
       const targetDir = await makeTempDir('trop-target-');
       const sourceDir = await makeTempDir('trop-source-');
-      const workDir = await makeTempDir('trop-work-');
+      const cacheDir = path.join(await makeTempDir('trop-cache-'), 'git-cache');
 
       runGit(remoteDir, ['init', '--bare']);
 
       for (const dir of [targetDir, sourceDir]) {
         initTestGitRepo(dir);
-        for (const [file, content] of Object.entries(opts.initial)) {
-          await writeRepoFile(dir, file, content);
-        }
-        runGit(dir, ['add', '.']);
-        runGit(dir, ['commit', '-m', 'initial']);
+        await applyChanges(dir, opts.initial);
+        commitAll(dir, 'initial', ['.']);
       }
       runGit(targetDir, ['branch', '42-x-y']);
 
       if (opts.targetChanges) {
         runGit(targetDir, ['checkout', '42-x-y']);
-        for (const [file, content] of Object.entries(opts.targetChanges)) {
-          if (content === null) {
-            await fs.promises.rm(path.join(targetDir, file));
-          } else {
-            await writeRepoFile(targetDir, file, content);
-          }
-        }
-        runGit(targetDir, ['add', '-A', ...Object.keys(opts.targetChanges)]);
-        runGit(targetDir, ['commit', '-m', 'target change']);
+        await applyChanges(targetDir, opts.targetChanges);
+        commitAll(targetDir, 'target change', Object.keys(opts.targetChanges));
         runGit(targetDir, ['checkout', 'main']);
       }
 
-      for (const [file, content] of Object.entries(opts.changes)) {
-        await writeRepoFile(sourceDir, file, content);
-      }
-      runGit(sourceDir, ['add', ...Object.keys(opts.changes)]);
-      runGit(sourceDir, ['commit', '-m', 'change']);
-      const patches = [
-        runGit(sourceDir, ['format-patch', '-1', '--stdout', 'HEAD']),
-      ];
-      for (const changes of opts.stackedChanges ?? []) {
-        for (const [file, content] of Object.entries(changes)) {
-          await writeRepoFile(sourceDir, file, content);
-        }
-        runGit(sourceDir, ['add', ...Object.keys(changes)]);
-        runGit(sourceDir, ['commit', '-m', 'stacked change']);
+      const patches: string[] = [];
+      for (const [i, changes] of [
+        opts.changes,
+        ...(opts.stackedChanges ?? []),
+      ].entries()) {
+        await applyChanges(sourceDir, changes);
+        commitAll(
+          sourceDir,
+          i === 0 ? 'change' : 'stacked change',
+          Object.keys(changes),
+        );
         patches.push(
           runGit(sourceDir, ['format-patch', '-1', '--stdout', 'HEAD']),
         );
@@ -302,30 +201,31 @@ describe('runner', () => {
       runGit(targetDir, ['remote', 'add', 'origin', remoteDir]);
       runGit(targetDir, ['push', 'origin', 'main', '42-x-y']);
       runGit(remoteDir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
-      runGit(workDir, ['clone', remoteDir, '.']);
-      runGit(workDir, ['config', 'user.name', 'Trop Test']);
-      runGit(workDir, ['config', 'user.email', 'trop@example.com']);
-      runGit(workDir, ['remote', 'add', 'target_repo', remoteDir]);
-      runGit(workDir, ['fetch', 'target_repo']);
-      if (opts.registerMergeDriver ?? true) {
-        await registerPatchesMergeDriver(workDir);
-      }
 
-      const result = await backportCommitsToBranch({
-        accessToken: '',
-        context: {} as never,
-        dir: workDir,
-        github: {} as never,
-        patches,
-        shouldPush: false,
-        slug: 'electron/trop',
-        targetBranch: '42-x-y',
-        targetRemote: 'target_repo',
-        tempBranch: 'backport-to-42-x-y',
+      const cache = new RepoCache('electron/trop', {
+        dir: cacheDir,
+        remoteUrl: remoteDir,
       });
-      expect(result).toEqual({ dir: workDir });
+      const outcome = await runSandboxedBackport(
+        {
+          slug: 'electron/trop',
+          token: '',
+          targetBranch: '42-x-y',
+          attempts: [{ kind: 'all', patches }, ...(opts.extraAttempts ?? [])],
+          includeChanges: opts.includeChanges ?? true,
+        },
+        { sandbox, cache },
+      );
+      const targetTip = runGit(remoteDir, ['rev-parse', '42-x-y']);
+      return { outcome, targetTip, cacheDir, patches };
+    };
 
-      return workDir;
+    const changeFor = (commit: SandboxCommit, file: string) =>
+      commit.changes?.find((c) => c.path === file);
+
+    const contentOf = (change: SandboxFileChange | undefined) => {
+      if (!change || 'deleted' in change) return undefined;
+      return Buffer.from(change.content, 'base64').toString('utf8');
     };
 
     const patchFiles = (
@@ -336,9 +236,6 @@ describe('runner', () => {
         entries.map((e) => [dir ? `${dir}/${e}` : e, `${e}\n`]),
       );
 
-    const readFile = (workDir: string, file: string) =>
-      fs.promises.readFile(path.join(workDir, file), 'utf8');
-
     // electron/electron commits `merge=union` for its .patches lists; the
     // build-tools driver registered on every backport clone overrides it.
     const unionAttributes = 'patches/**/.patches merge=union\n';
@@ -347,6 +244,98 @@ describe('runner', () => {
     const listWithNewline = (...entries: string[]) =>
       `${buildPatchList(...entries)}\n`;
     const baseEntries = ['a.patch', 'b.patch', 'c.patch'];
+
+    it('backports cleanly onto the tip the server resolved', async () => {
+      const { outcome, targetTip, cacheDir } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n', 'other.txt': 'other\n' },
+        changes: {
+          'feature.txt': 'changed\n',
+          'other.txt': null,
+          'bin/run.sh': '#!/bin/sh\n',
+        },
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      expect(outcome.attempt).toBe('all');
+      expect(outcome.baseSha).toBe(targetTip);
+      expect(outcome.commits).toHaveLength(1);
+      const [commit] = outcome.commits;
+      expect(commit.message.trim()).toBe('change');
+      expect(commit.author).toMatchObject({
+        name: 'Trop Test',
+        email: 'trop@example.com',
+      });
+      expect(contentOf(changeFor(commit, 'feature.txt'))).toBe('changed\n');
+      expect(changeFor(commit, 'other.txt')).toEqual({
+        path: 'other.txt',
+        deleted: true,
+      });
+      expect(changeFor(commit, 'bin/run.sh')).toMatchObject({
+        mode: '100644',
+      });
+      // The job ref is gone again and the cache holds no sandbox objects.
+      expect(runGit(cacheDir, ['for-each-ref', 'refs/trop/'])).toBe('');
+      expect(() =>
+        runGit(cacheDir, ['cat-file', '-e', `${outcome.baseSha}^{commit}`]),
+      ).not.toThrow();
+    });
+
+    it('reports a conflict with the conflicting diff', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        targetChanges: { 'feature.txt': 'target\n' },
+        changes: { 'feature.txt': 'source\n' },
+      });
+      expect(outcome.kind).toBe('conflict');
+      if (outcome.kind !== 'conflict') return;
+      expect(outcome.diff).toContain('<<<<<<<');
+      expect(outcome.diff).toContain('feature.txt');
+    });
+
+    it('falls back to the next attempt when the first conflicts', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        targetChanges: { 'feature.txt': 'target\n' },
+        changes: { 'feature.txt': 'source\n' },
+        extraAttempts: [{ kind: 'squash', patches: [] }],
+      });
+      // An attempt with no patches trivially applies.
+      expect(outcome).toMatchObject({ kind: 'success', attempt: 'squash' });
+    });
+
+    it('applies the patches of a stack in order, each on top of the one below', async () => {
+      // Each commit rewrites the line the one below it introduced, so the
+      // patches only apply in bottom-to-top order.
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: { 'feature.txt': 'bottom\n' },
+        stackedChanges: [
+          { 'feature.txt': 'middle\n' },
+          { 'feature.txt': 'top\n' },
+        ],
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      expect(outcome.commits.map((c) => c.message.trim())).toEqual([
+        'change',
+        'stacked change',
+        'stacked change',
+      ]);
+      expect(
+        outcome.commits.map((c) => contentOf(changeFor(c, 'feature.txt'))),
+      ).toEqual(['bottom\n', 'middle\n', 'top\n']);
+    });
+
+    it('sends no file contents for a check', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: { 'feature.txt': 'changed\n' },
+        includeChanges: false,
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      expect(outcome.commits[0].changes).toBeUndefined();
+    });
 
     // The target branch already carries x.patch (e.g. from a manual backport)
     // earlier in the list, and the backported commit appends the same patch.
@@ -371,46 +360,39 @@ describe('runner', () => {
       },
     };
 
-    it('merges a diverged .patches list as a list instead of with union', async () => {
-      const workDir = await setupAndBackport(duplicateAddition);
-      expect(await readFile(workDir, chromiumPatches)).toBe(
-        listWithNewline('a.patch', 'b.patch', 'x.patch', 'c.patch'),
-      );
-      expect(await readFile(workDir, `${chromium}/x.patch`)).toBe('x\n');
-      expect(runGit(workDir, ['status', '--porcelain'])).toBe('');
-    });
-
-    it('applies the patches of a stack in order, each on top of the one below', async () => {
-      // Each commit rewrites the line the one below it introduced, so the
-      // patches only apply in bottom-to-top order.
-      const workDir = await setupAndBackport({
-        initial: { 'feature.txt': 'initial\n' },
-        changes: { 'feature.txt': 'bottom\n' },
-        stackedChanges: [
-          { 'feature.txt': 'middle\n' },
-          { 'feature.txt': 'top\n' },
-        ],
-      });
-      expect(await readFile(workDir, 'feature.txt')).toBe('top\n');
-      expect(
-        runGit(workDir, ['log', '--format=%s', 'target_repo/42-x-y..HEAD']),
-      ).toBe('stacked change\nstacked change\nchange');
-    });
-
-    it('would duplicate the entry with the committed union driver', async () => {
-      // Control: the same fixture without build-tools' driver reproduces the
-      // `merge=union` behaviour the driver exists to replace.
-      const workDir = await setupAndBackport({
+    it('merges a diverged .patches list with the build-tools merge driver', async () => {
+      // `git am -3` has to fall back to a three-way merge here, which needs
+      // the pre-image blob the server resolved for the job.
+      const { outcome } = await setupAndBackport({
         ...duplicateAddition,
-        registerMergeDriver: false,
+        changes: {
+          [chromiumPatches]: listWithNewline(
+            ...baseEntries,
+            'x.patch',
+            'y.patch',
+          ),
+          [`${chromium}/x.patch`]: 'x\n',
+          [`${chromium}/y.patch`]: 'y\n',
+        },
       });
-      expect(await readFile(workDir, chromiumPatches)).toBe(
-        listWithNewline('a.patch', 'b.patch', 'x.patch', 'c.patch', 'x.patch'),
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const [commit] = outcome.commits;
+      // Not a,b,x,c,x,y as the committed merge=union would make it.
+      expect(contentOf(changeFor(commit, chromiumPatches))).toBe(
+        listWithNewline('a.patch', 'b.patch', 'x.patch', 'y.patch', 'c.patch'),
       );
+      expect(contentOf(changeFor(commit, `${chromium}/y.patch`))).toBe('y\n');
+    });
+
+    it('treats a patch whose changes are on the target already as applied', async () => {
+      // With the list merged as a list, the backported commit is a no-op.
+      const { outcome } = await setupAndBackport(duplicateAddition);
+      expect(outcome).toMatchObject({ kind: 'success', commits: [] });
     });
 
     it('keeps an entry removed on the target branch out of the merged .patches list', async () => {
-      const workDir = await setupAndBackport({
+      const { outcome } = await setupAndBackport({
         initial: {
           '.gitattributes': unionAttributes,
           [chromiumPatches]: listWithNewline(...baseEntries),
@@ -425,94 +407,173 @@ describe('runner', () => {
           [`${chromium}/d.patch`]: 'd\n',
         },
       });
-      expect(await readFile(workDir, chromiumPatches)).toBe(
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const [commit] = outcome.commits;
+      expect(contentOf(changeFor(commit, chromiumPatches))).toBe(
         listWithNewline('a.patch', 'b.patch', 'd.patch'),
       );
-      expect(fs.existsSync(path.join(workDir, chromium, 'c.patch'))).toBe(
-        false,
-      );
-      expect(await readFile(workDir, `${chromium}/d.patch`)).toBe('d\n');
+      expect(contentOf(changeFor(commit, `${chromium}/d.patch`))).toBe('d\n');
     });
 
-    it('applies only non-merge-commit patches when merge commits are filtered', async () => {
-      const remoteDir = await makeTempDir('trop-remote-');
-      const sourceDir = await makeTempDir('trop-source-');
-      const targetDir = await makeTempDir('trop-target-');
-      const workDir = await makeTempDir('trop-work-');
-
-      runGit(remoteDir, ['init', '--bare']);
-
-      // Shared initial state: a file that both the target branch and the
-      // feature branch start from.
-      for (const dir of [sourceDir, targetDir]) {
-        initTestGitRepo(dir);
-        await writeRepoFile(dir, 'feature.txt', 'initial\n');
-        runGit(dir, ['add', '.']);
-        runGit(dir, ['commit', '-m', 'initial']);
-      }
-      runGit(targetDir, ['branch', '42-x-y']);
-
-      // Feature branch: one real commit (single parent).
-      runGit(sourceDir, ['checkout', '-b', 'feature']);
-      await writeRepoFile(sourceDir, 'feature.txt', 'feature-change\n');
-      runGit(sourceDir, ['add', 'feature.txt']);
-      runGit(sourceDir, ['commit', '-m', 'feat: change feature file']);
-      const featurePatch = runGit(sourceDir, [
-        'format-patch',
-        '-1',
-        '--stdout',
-        'HEAD',
-      ]);
-
-      // Main branch advances with an unrelated commit.
-      runGit(sourceDir, ['checkout', 'main']);
-      await writeRepoFile(
-        sourceDir,
-        'unrelated.txt',
-        'unrelated-main-change\n',
-      );
-      runGit(sourceDir, ['add', 'unrelated.txt']);
-      runGit(sourceDir, ['commit', '-m', 'chore: unrelated main change']);
-
-      // Merge main back into feature — this is the merge commit (two parents)
-      // that tryBackportAllCommits now filters out.
-      runGit(sourceDir, ['checkout', 'feature']);
-      runGit(sourceDir, ['merge', 'main', '--no-edit', '--no-ff']);
-
-      // Set up remote / work / target for the backport operation.
-      runGit(targetDir, ['remote', 'add', 'origin', remoteDir]);
-      runGit(targetDir, ['push', 'origin', 'main', '42-x-y']);
-      runGit(remoteDir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
-      runGit(workDir, ['clone', remoteDir, '.']);
-      runGit(workDir, ['config', 'user.name', 'Trop Test']);
-      runGit(workDir, ['config', 'user.email', 'trop@example.com']);
-      runGit(workDir, ['remote', 'add', 'target_repo', remoteDir]);
-      runGit(workDir, ['fetch', 'target_repo']);
-
-      // Pass only the single-parent (non-merge) patch — mirroring what
-      // tryBackportAllCommits does after filtering out merge commits.
-      const result = await backportCommitsToBranch({
-        accessToken: '',
-        context: {} as never,
-        dir: workDir,
-        github: {} as never,
-        patches: [featurePatch],
-        shouldPush: false,
-        slug: 'electron/trop',
-        targetBranch: '42-x-y',
-        targetRemote: 'target_repo',
-        tempBranch: 'backport-to-42-x-y',
+    it('reports symlinks as links and never follows them', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: {
+          'leak-env': 'symlink:/proc/self/environ',
+          'docs/link.md': 'symlink:../feature.txt',
+        },
       });
-      expect(result).toEqual({ dir: workDir });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const [commit] = outcome.commits;
+      expect(changeFor(commit, 'leak-env')).toMatchObject({ mode: '120000' });
+      expect(contentOf(changeFor(commit, 'leak-env'))).toBe(
+        '/proc/self/environ',
+      );
+      expect(contentOf(changeFor(commit, 'docs/link.md'))).toBe(
+        '../feature.txt',
+      );
 
-      // The feature commit's change must be present.
-      expect(
-        await fs.promises.readFile(path.join(workDir, 'feature.txt'), 'utf8'),
-      ).toBe('feature-change\n');
+      // ...and are pushed as links, too.
+      const github = mockGitHub();
+      await createBackportCommits({
+        github: github.octokit as never,
+        context: { repo: (o: object) => o } as never,
+        baseSha: outcome.baseSha,
+        commits: outcome.commits,
+        tempBranch: 'trop/42-x-y-bp-test',
+      });
+      expect(github.trees[0]).toEqual(
+        expect.arrayContaining([
+          {
+            path: 'leak-env',
+            mode: '120000',
+            type: 'blob',
+            content: '/proc/self/environ',
+          },
+        ]),
+      );
+    });
 
-      // The unrelated change introduced by the main-branch commit (which was
-      // only reachable via the merge commit) must NOT be present.
-      expect(fs.existsSync(path.join(workDir, 'unrelated.txt'))).toBe(false);
+    const mockGitHub = () => {
+      const trees: unknown[][] = [];
+      const commits: { parents: string[]; tree: string; message: string }[] =
+        [];
+      const refs: { ref: string; sha: string }[] = [];
+      const blobs: string[] = [];
+      const octokit = {
+        git: {
+          getCommit: vi.fn(async ({ commit_sha }: { commit_sha: string }) => ({
+            data: { sha: commit_sha },
+          })),
+          createTree: vi.fn(async ({ tree }: { tree: unknown[] }) => {
+            trees.push(tree);
+            return { data: { sha: `tree-${trees.length}` } };
+          }),
+          createBlob: vi.fn(async ({ content }: { content: string }) => {
+            blobs.push(content);
+            return { data: { sha: `blob-${blobs.length}` } };
+          }),
+          createCommit: vi.fn(
+            async (c: { parents: string[]; tree: string; message: string }) => {
+              commits.push(c);
+              return { data: { sha: `commit-${commits.length}` } };
+            },
+          ),
+          createRef: vi.fn(async (r: { ref: string; sha: string }) => {
+            refs.push(r);
+            return { data: {} };
+          }),
+        },
+      };
+      return { octokit, trees, commits, refs, blobs };
+    };
+
+    it('recreates the commits through the REST API on the resolved base', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n', 'gone.txt': 'gone\n' },
+        changes: {
+          'feature.txt': 'bottom\n',
+          'gone.txt': null,
+          'image.bin': Buffer.from([0x00, 0xff, 0xfe, 0x80]),
+        },
+        stackedChanges: [{ 'feature.txt': 'top\n' }],
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+
+      const github = mockGitHub();
+      await createBackportCommits({
+        github: github.octokit as never,
+        context: { repo: (o: object) => o } as never,
+        baseSha: outcome.baseSha,
+        commits: outcome.commits,
+        tempBranch: 'trop/42-x-y-bp-test',
+      });
+
+      expect(github.octokit.git.getCommit).toHaveBeenCalledWith({
+        commit_sha: outcome.baseSha,
+      });
+      expect(github.trees[0]).toEqual(
+        expect.arrayContaining([
+          {
+            path: 'feature.txt',
+            mode: '100644',
+            type: 'blob',
+            content: 'bottom\n',
+          },
+          { path: 'gone.txt', mode: '100644', type: 'blob', sha: null },
+          { path: 'image.bin', mode: '100644', type: 'blob', sha: 'blob-1' },
+        ]),
+      );
+      expect(github.commits).toEqual([
+        {
+          parents: [outcome.baseSha],
+          tree: 'tree-1',
+          message: 'change\n\nCo-authored-by: Trop Test <trop@example.com>',
+        },
+        {
+          parents: ['commit-1'],
+          tree: 'tree-2',
+          message:
+            'stacked change\n\nCo-authored-by: Trop Test <trop@example.com>',
+        },
+      ]);
+      expect(github.refs).toEqual([
+        { ref: 'refs/heads/trop/42-x-y-bp-test', sha: 'commit-2' },
+      ]);
+    });
+
+    it('fails when the target branch does not exist', async () => {
+      const remoteDir = await makeTempDir('trop-remote-');
+      runGit(remoteDir, ['init', '--bare']);
+      const cache = new RepoCache('electron/trop', {
+        dir: path.join(await makeTempDir('trop-cache-'), 'git-cache'),
+        remoteUrl: remoteDir,
+      });
+      await expect(
+        runSandboxedBackport(
+          {
+            slug: 'electron/trop',
+            token: '',
+            targetBranch: '42-x-y',
+            attempts: [{ kind: 'all', patches: [] }],
+            includeChanges: true,
+          },
+          { sandbox, cache },
+        ),
+      ).rejects.toThrow('42-x-y');
+    });
+
+    it('refuses a branch name git could read as an option', async () => {
+      const cache = new RepoCache('electron/trop', {
+        dir: path.join(await makeTempDir('trop-cache-'), 'git-cache'),
+        remoteUrl: '/nonexistent',
+      });
+      await expect(
+        cache.acquire('', '--upload-pack=touch /tmp/x'),
+      ).rejects.toThrow('Refusing');
     });
   });
 
