@@ -384,23 +384,22 @@ export class RepoCache {
     }
   }
 
-  /** The object ids at `paths` in `commit` (null where there is none). */
-  async idsAt(commit: string, paths: string[]) {
-    const ids = new Map<string, string | null>();
+  /** The files (mode and object id) at `paths` in `commit`, where any. */
+  async filesAt(commit: string, paths: string[]) {
+    const files = new Map<string, { mode: string; id: string }>();
     if (!OBJECT_ID.test(commit)) throw new Error(`not a commit id: ${commit}`);
-    const valid = paths.filter(batchable);
-    if (valid.length === 0) return ids;
-    const output = (
-      await this.git(
-        ['cat-file', '--batch-check=%(objectname)'],
-        undefined,
-        valid.map((p) => `${commit}:${p}`).join('\n') + '\n',
-      )
-    ).split('\n');
-    for (const [i, p] of valid.entries()) {
-      const id = output[i]?.trim() ?? '';
-      ids.set(p, OBJECT_ID.test(id) ? id : null);
+    const wanted = new Set(paths);
+    if (wanted.size === 0) return files;
+    // The whole tree, rather than pathspecs: no quoting or length limits.
+    const entries = (
+      await this.git(['ls-tree', '-r', '-z', '--full-tree', commit])
+    ).split('\0');
+    for (const entry of entries) {
+      const m = /^(\d{6}) (?:blob|commit) ([0-9a-f]+)\t([^]*)$/.exec(entry);
+      if (m && wanted.has(m[3]) && OBJECT_ID.test(m[2])) {
+        files.set(m[3], { mode: m[1], id: m[2] });
+      }
     }
-    return ids;
+    return files;
   }
 }

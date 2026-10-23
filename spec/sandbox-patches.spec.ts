@@ -233,7 +233,50 @@ describe('commitMessage()', () => {
       0,
       lines.findIndex((l) => l.startsWith('diff --git')),
     );
-    expect(commitMessage(head)).toEqual(amMessage(text));
+    const am = amMessage(text);
+    const ours = commitMessage(head);
+    expect(ours.message).toBe(am.message);
+    // The author is always the mail header's: an in-body From: line, which
+    // `git am` would credit, never is.
+    expect(ours.author).toEqual({
+      name: 'Trop Test',
+      email: 'trop@example.com',
+      ...(/^From: Trop/m.test(text) ? {} : am.author),
+    });
+  });
+
+  it('never takes the author from an in-body From: line', () => {
+    const text = mail(
+      [from, 'Subject: [PATCH] squash'],
+      ['From: Victim <victim@example.com>', '', 'body'],
+    );
+    const lines = text.split('\n');
+    const { message, author } = commitMessage(
+      lines.slice(
+        0,
+        lines.findIndex((l) => l.startsWith('diff --git')),
+      ),
+    );
+    expect(author).toEqual({ name: 'Trop Test', email: 'trop@example.com' });
+    expect(message).toBe(amMessage(text).message);
+    expect(amMessage(text).author.email).toBe('victim@example.com');
+  });
+
+  it.each([
+    // The security review's case: a newline smuggled into the address.
+    'From: Eve <=?UTF-8?q?eve=40x.com=0ASigned-off-by=3A_Maintainer?=>',
+    'From: =?UTF-8?q?Eve=0ASigned-off-by=3A_X?= <eve@x.com>',
+    'From: =?UTF-8?q?Eve_=3Cother=40x.com=3E?= <eve@x.com>',
+    'From: Eve <eve@x.com\u0007>',
+  ])('refuses an author that could add a trailer: %s', (fromHeader) => {
+    const { author } = commitMessage([
+      'From 1234567890123456789012345678901234567890 Mon Sep 17 00:00:00 2001',
+      fromHeader,
+      'Subject: [PATCH] x',
+      '',
+      'body',
+    ]);
+    expect(author).toBeUndefined();
   });
 });
 

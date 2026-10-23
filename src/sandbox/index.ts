@@ -114,8 +114,8 @@ export interface BackportCommit {
   message: string;
   /** Its author, credited with a Co-authored-by trailer. */
   author: { name: string; email: string };
-  /** GitHub's list of its files (for the backstop), if fetched. */
-  files: OriginalFile[] | null;
+  /** GitHub's list of its files (for the backstop). */
+  files: OriginalFile[];
 }
 
 export interface BackportAttempt {
@@ -188,7 +188,11 @@ export const runSandboxedBackport = async (
     try {
       return await runOnce(opts, deps);
     } catch (error) {
-      if (!(error instanceof SandboxInfraError) || attempt >= delays.length) {
+      if (
+        !(error instanceof SandboxInfraError) ||
+        !error.retryable ||
+        attempt >= delays.length
+      ) {
         throw error;
       }
       log(
@@ -266,7 +270,7 @@ const runOnce = async (
                   lease.baseSha,
                   attempt.commits.map((c) => c.diff),
                 ),
-              targetBlobIds: (paths) => cache.idsAt(lease.baseSha, paths),
+              targetFiles: (paths) => cache.filesAt(lease.baseSha, paths),
               gitBlobId: (sha) => job.blobs.gitId(sha),
             });
           }
@@ -299,8 +303,11 @@ const runOnce = async (
         case 'conflict':
           return { kind: 'conflict', diff: result.diff };
         case 'error':
+          // What the job reports itself (git failing on these patches, a
+          // refused upload) would happen again: not retried.
           throw new SandboxInfraError(
             `Sandbox job ${job.id} failed: ${result.message}`,
+            false,
           );
       }
     } finally {

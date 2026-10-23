@@ -83,10 +83,21 @@ const context = () => {
   };
 };
 
-const backport = async (purpose: BackportPurpose) => {
+const backport = async (
+  purpose: BackportPurpose,
+  setup: (ctx: ReturnType<typeof context>) => void = () => {},
+  prOverrides: object = {},
+) => {
   const ctx = context();
+  setup(ctx);
   const done = new Promise((r) => queue.once('empty', r));
-  await backportImpl({} as never, ctx as never, pr as never, '42-x-y', purpose);
+  await backportImpl(
+    {} as never,
+    ctx as never,
+    { ...pr, ...prOverrides } as never,
+    '42-x-y',
+    purpose,
+  );
   await done;
   return ctx;
 };
@@ -127,6 +138,40 @@ describe('backportImpl()', () => {
       '42-x-y',
       { infraError: true },
     );
+  });
+
+  it('fails closed as an internal error when GitHub lists no files', async () => {
+    const ctx = await backport(BackportPurpose.ExecuteBackport, (c) =>
+      c.octokit.repos.getCommit.mockRejectedValue(new Error('502')),
+    );
+    expect(runSandboxedBackport).not.toHaveBeenCalled();
+    expect(ctx.octokit.repos.getCommit).toHaveBeenCalledTimes(3);
+    const { body } = ctx.octokit.issues.createComment.mock.calls[0][0];
+    expect(body).toContain('internal error');
+    expect(addLabels).not.toHaveBeenCalled();
+  });
+
+  it('reports a conflict as an internal error when the squash could not be tried', async () => {
+    vi.mocked(runSandboxedBackport).mockResolvedValueOnce({
+      kind: 'conflict',
+      diff: '',
+    });
+    const ctx = await backport(
+      BackportPurpose.ExecuteBackport,
+      (c) =>
+        c.octokit.repos.getCommit.mockImplementation(
+          async ({ ref }: { ref: string }) => {
+            if (ref === 'd'.repeat(40)) throw new Error('502');
+            return { data: { files: [] } };
+          },
+        ),
+      { merged: true, merge_commit_sha: 'd'.repeat(40) },
+    );
+    const [opts] = vi.mocked(runSandboxedBackport).mock.calls[0];
+    expect(opts.attempts.map((a) => a.kind)).toEqual(['all']);
+    const { body } = ctx.octokit.issues.createComment.mock.calls[0][0];
+    expect(body).toContain('internal error');
+    expect(addLabels).not.toHaveBeenCalled();
   });
 
   it('still asks for a manual backport after a conflict', async () => {

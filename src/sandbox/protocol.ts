@@ -91,8 +91,19 @@ export const LIMITS = {
   resultBytes: 64 * 1024 * 1024,
   /** One uploaded file: GitHub's own limit for a blob. */
   fileBytes: 100 * 1024 * 1024,
-  /** All files uploaded by one job (identical contents are stored once). */
-  totalContentBytes: 2 * 1024 * 1024 * 1024,
+  /**
+   * All files uploaded by one job (identical contents are stored once): the
+   * full contents of every file the backport changes, which for a real
+   * backport is kilobytes to a few megabytes. Five times GitHub's limit for
+   * one file.
+   */
+  totalContentBytes: 512 * 1024 * 1024,
+  /**
+   * All files the server holds for its jobs at once: the queue runs up to
+   * five. Below the size of the volume they are stored on (sandbox-blobs in
+   * deploy/base/server-sandbox-patch.yaml), so that is never exceeded.
+   */
+  serverContentBytes: 2560 * 1024 * 1024,
   /** File changes in one commit, and in a whole result. */
   changesPerCommit: 100_000,
   totalChanges: 500_000,

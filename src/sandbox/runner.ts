@@ -30,18 +30,26 @@ export interface SandboxRunner {
   run(spec: SandboxJobSpec): Promise<SandboxResult>;
 }
 
-/** From starting a job to its result, including waiting for a node. */
-export const DEFAULT_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
+/**
+ * From starting a job to its result, including up to 15 minutes waiting for
+ * a node: a few minutes is typical, and a job that hangs only holds a queue
+ * slot this long (it is not retried).
+ */
+export const DEFAULT_SANDBOX_TIMEOUT_MS = 40 * 60 * 1000;
 
 /**
- * A failure of the sandbox machinery (a Job that can't start, dies, or runs
- * out of time; the job server; a job reporting an internal error), as
- * opposed to a conflict or an invalid result. These are retried, and if
- * they persist, reported as internal errors rather than as a backport that
- * needs to be done by hand.
+ * An internal failure, as opposed to a conflict or an invalid result: the
+ * sandbox machinery (a Job that can't start, dies or runs out of time; the
+ * job server; a job reporting an error of its own) or GitHub not answering.
+ * Reported as an internal error rather than as a backport that needs to be
+ * done by hand. Only `retryable` ones, which a new job may well not hit
+ * again, are retried.
  */
 export class SandboxInfraError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly retryable = true,
+  ) {
     super(message);
     this.name = 'SandboxInfraError';
   }
@@ -59,7 +67,11 @@ export const raceResult = async (
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new SandboxInfraError(`Sandbox job ${spec.id} timed out`)),
+      () =>
+        // Not retried: a patch that hangs git would hang again.
+        reject(
+          new SandboxInfraError(`Sandbox job ${spec.id} timed out`, false),
+        ),
       timeoutMs,
     );
   });

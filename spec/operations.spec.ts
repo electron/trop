@@ -187,6 +187,10 @@ describe('runner', () => {
       changes: Record<string, string | Buffer | null>,
     ) => {
       for (const [file, content] of Object.entries(changes)) {
+        // Replace whatever is there, never write through a symlink.
+        if (content !== null) {
+          await fs.promises.rm(path.join(dir, file), { force: true });
+        }
         if (content === null) {
           await fs.promises.rm(path.join(dir, file));
         } else if (Buffer.isBuffer(content)) {
@@ -704,10 +708,15 @@ describe('runner', () => {
       expect(outcome.kind).toBe('success');
       if (outcome.kind !== 'success') return;
       const expected = await amCommits(sourceDir, messages.length);
-      expect(
-        outcome.commits.map((c) => ({ message: c.message, author: c.author })),
-      ).toEqual(expected);
-      expect(outcome.commits[3].author.email).toBe('else@example.com');
+      expect(outcome.commits.map((c) => c.message)).toEqual(
+        expected.map((c) => c.message),
+      );
+      // The author is always the commit's own; `git am` would credit the
+      // in-body From: line instead.
+      expect(outcome.commits.map((c) => c.author)).toEqual(
+        expected.map(() => ({ name: 'Trop Test', email: 'trop@example.com' })),
+      );
+      expect(expected[3].author.email).toBe('else@example.com');
     });
 
     it('never applies a diff written into a commit message', async () => {
@@ -733,6 +742,13 @@ describe('runner', () => {
             '@@ -1 +1,2 @@',
             ' name: ci',
             '+on: push # injected',
+            // A copy of the real diff's header, too (the re-review's PoC).
+            'diff --git a/README b/README',
+            '--- a/README',
+            '+++ b/README',
+            '@@ -1 +1,2 @@',
+            ' hello',
+            '+evil',
           ].join('\n'),
         ],
         deps: { backstop: false },
@@ -912,19 +928,7 @@ describe('runner', () => {
         listenHost: '127.0.0.1',
         run: async (spec) => {
           runs += 1;
-          if (runs === 1) throw new SandboxInfraError('no node came up');
-          if (runs === 2) {
-            // A job that reports an internal error counts as one, too.
-            await fetch(`${spec.url}/result`, {
-              method: 'POST',
-              headers: {
-                authorization: `Bearer ${spec.token}`,
-                'content-type': 'application/json',
-              },
-              body: JSON.stringify({ outcome: 'error', message: 'oom' }),
-            });
-            return spec.result;
-          }
+          if (runs <= 2) throw new SandboxInfraError('no node came up');
           return local.run(spec);
         },
       };
@@ -938,6 +942,100 @@ describe('runner', () => {
       });
       expect(runs).toBe(3);
       expect(outcome.kind).toBe('success');
+    });
+
+    it.each([
+      [
+        'an error the job reports itself',
+        async (spec: SandboxJobSpec) => {
+          await fetch(`${spec.url}/result`, {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${spec.token}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ outcome: 'error', message: 'git died' }),
+          });
+          return spec.result;
+        },
+      ],
+      [
+        'a timeout',
+        async () => {
+          throw new SandboxInfraError('Sandbox job timed out', false);
+        },
+      ],
+    ])('does not retry %s', async (_, run) => {
+      let runs = 0;
+      const failing: SandboxRunner = {
+        kind: 'local',
+        listenHost: '127.0.0.1',
+        run: async (spec) => {
+          runs += 1;
+          return run(spec);
+        },
+      };
+      await expect(
+        setupAndBackport({
+          initial: { 'feature.txt': 'initial\n' },
+          changes: { 'feature.txt': 'changed\n' },
+          deps: {
+            sandbox: { runner: failing, server: sandbox.server },
+            retryDelaysMs: [0, 0],
+          },
+        }),
+      ).rejects.toBeInstanceOf(SandboxInfraError);
+      expect(runs).toBe(1);
+    });
+
+    it('refuses uploads from a job that pushes nothing', async () => {
+      let status = 0;
+      const uploader: SandboxRunner = {
+        kind: 'local',
+        listenHost: '127.0.0.1',
+        run: async (spec) => {
+          const content = 'x'.repeat(1024);
+          const sha = createHash('sha256').update(content).digest('hex');
+          status = (
+            await fetch(`${spec.url}/blobs/${sha}`, {
+              method: 'PUT',
+              headers: { authorization: `Bearer ${spec.token}` },
+              body: content,
+            })
+          ).status;
+          return new LocalProcessRunner(50_000).run(spec);
+        },
+      };
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: { 'feature.txt': 'changed\n' },
+        includeChanges: false,
+        deps: { sandbox: { runner: uploader, server: sandbox.server } },
+      });
+      expect(status).toBe(403);
+      expect(outcome.kind).toBe('success');
+    });
+
+    it('carries a change of mode or type through the backstop', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: {
+          'tool.sh': '#!/bin/sh\n',
+          link: 'symlink:tool.sh',
+          'file.txt': 'file\n',
+        },
+        changes: {
+          'tool.sh': 'exec:#!/bin/sh\n',
+          link: 'now a file\n',
+          'file.txt': 'symlink:tool.sh',
+        },
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const [commit] = outcome.commits;
+      expect(changeFor(commit, 'tool.sh')).toMatchObject({ mode: '100755' });
+      expect(contentOf(changeFor(commit, 'tool.sh'))).toBe('#!/bin/sh\n');
+      expect(changeFor(commit, 'link')).toMatchObject({ mode: '100644' });
+      expect(changeFor(commit, 'file.txt')).toMatchObject({ mode: '120000' });
     });
 
     it('gives up after its retries with an infrastructure error', async () => {

@@ -2,6 +2,17 @@ import { isUtf8 } from 'buffer';
 
 import { SimpleWebHookRepoContext, WebHookRepoContext } from '../types';
 import type { BackportResultCommit } from './index';
+import type { SandboxFileChange } from './protocol';
+
+const MAX_INLINE_BYTES = 32 * 1024 * 1024;
+
+type TreeEntry = {
+  path: string;
+  mode: '100644' | '100755' | '120000';
+  type: 'blob';
+  sha?: string | null;
+  content?: string;
+};
 
 export interface CreateBackportCommitsOptions {
   github: WebHookRepoContext['octokit'];
@@ -30,6 +41,55 @@ export const createBackportCommits = async ({
   readBlob,
   tempBranch,
 }: CreateBackportCommitsOptions) => {
+  // Text goes into the tree request inline, as trop always sent it, up to
+  // this much per commit; the rest as blobs, so memory stays bounded.
+  let inlineBudget = 0;
+  const treeEntry = async (change: SandboxFileChange): Promise<TreeEntry> => {
+    if ('deleted' in change) {
+      return {
+        path: change.path,
+        mode: '100644' as const,
+        type: 'blob' as const,
+        sha: null,
+      };
+    }
+
+    const contents = await readBlob(change.blob);
+    // A symlink is stored as a blob holding its target, which is
+    // never resolved: the sandbox read it from the commit's tree.
+    if (change.mode === '120000') {
+      return {
+        path: change.path,
+        mode: change.mode,
+        type: 'blob' as const,
+        content: contents.toString('utf8'),
+      };
+    }
+
+    if (isUtf8(contents) && contents.length <= inlineBudget) {
+      inlineBudget -= contents.length;
+      return {
+        path: change.path,
+        mode: change.mode,
+        type: 'blob' as const,
+        content: contents.toString('utf-8'),
+      };
+    }
+
+    const blob = await github.git.createBlob(
+      context.repo({
+        content: contents.toString('base64'),
+        encoding: 'base64',
+      }),
+    );
+    return {
+      path: change.path,
+      mode: change.mode,
+      type: 'blob' as const,
+      sha: blob.data.sha,
+    };
+  };
+
   let baseCommitSha = baseSha;
   const baseTree = await github.git.getCommit(
     context.repo({ commit_sha: baseCommitSha }),
@@ -39,56 +99,14 @@ export const createBackportCommits = async ({
   for (const commit of commits) {
     if (!commit.changes) throw new Error('Commit has no changes to push');
 
+    // One file at a time, so only one file's contents are in memory.
+    const tree: TreeEntry[] = [];
+    inlineBudget = MAX_INLINE_BYTES;
+    for (const change of commit.changes) {
+      tree.push(await treeEntry(change));
+    }
     const newTree = await github.git.createTree(
-      context.repo({
-        base_tree: baseTreeSha,
-        tree: await Promise.all(
-          commit.changes.map(async (change) => {
-            if ('deleted' in change) {
-              return {
-                path: change.path,
-                mode: '100644' as const,
-                type: 'blob' as const,
-                sha: null,
-              };
-            }
-
-            const contents = await readBlob(change.blob);
-            // A symlink is stored as a blob holding its target, which is
-            // never resolved: the sandbox read it from the commit's tree.
-            if (change.mode === '120000') {
-              return {
-                path: change.path,
-                mode: change.mode,
-                type: 'blob' as const,
-                content: contents.toString('utf8'),
-              };
-            }
-
-            if (isUtf8(contents)) {
-              return {
-                path: change.path,
-                mode: change.mode,
-                type: 'blob' as const,
-                content: contents.toString('utf-8'),
-              };
-            }
-
-            const blob = await github.git.createBlob(
-              context.repo({
-                content: contents.toString('base64'),
-                encoding: 'base64',
-              }),
-            );
-            return {
-              path: change.path,
-              mode: change.mode,
-              type: 'blob' as const,
-              sha: blob.data.sha,
-            };
-          }),
-        ),
-      }),
+      context.repo({ base_tree: baseTreeSha, tree }),
     );
 
     const newMessage = `${commit.message}\n\nCo-authored-by: ${commit.author.name} <${commit.author.email}>`;

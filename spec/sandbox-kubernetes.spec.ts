@@ -537,6 +537,10 @@ describe('KubernetesJobRunner', () => {
     await vi.advanceTimersByTimeAsync(31_000);
     expect(await timedOut).toBeInstanceOf(SandboxInfraError);
     expect((await timedOut).message).toContain('timed out');
+    // A patch that hangs git would hang a new job too.
+    expect((await timedOut) as SandboxInfraError).toMatchObject({
+      retryable: false,
+    });
     expect(requests.at(-1)?.method).toBe('DELETE');
   });
 

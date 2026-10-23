@@ -278,9 +278,11 @@ const stripspace = (text: string) => {
  * computed here rather than taken from anything the job returns: the
  * unfolded, decoded Subject without `[PATCH]` and other leading brackets,
  * then the message up to mailinfo's first patch break, with in-body
- * `Subject:`/`From:`/`Date:` lines at its start honoured, and whitespace
- * cleaned up as `git am` does; and the author `git am` would have recorded
- * (the `From:` header, or an in-body `From:` line).
+ * `Subject:`/`From:`/`Date:` lines at its start taken out of it, and
+ * whitespace cleaned up as `git am` does. And the author from the `From:`
+ * header; unlike `git am`, never from an in-body `From:` line, and none (a
+ * PatchError for the caller) if the name or address has a control
+ * character or angle bracket.
  */
 export const commitMessage = (patchHead: string[]) => {
   const lines = patchHead.map((l) => l.replace(/\r$/, ''));
@@ -303,7 +305,6 @@ export const commitMessage = (patchHead: string[]) => {
       ?.slice(name.length + 1)
       .trim();
   let subject = decodeHeader(header('Subject') ?? '');
-  let from: string | undefined;
 
   const message: string[] = [];
   let inBodyHeaders = true;
@@ -313,7 +314,10 @@ export const commitMessage = (patchHead: string[]) => {
       const m = /^(From|Subject|Date):\s*(.*)$/i.exec(line);
       if (m) {
         if (m[1].toLowerCase() === 'subject') subject = decodeHeader(m[2]);
-        if (m[1].toLowerCase() === 'from') from = decodeHeader(m[2]);
+        // An in-body From: is dropped from the message as `git am` does,
+        // but unlike `git am` it never changes the author: GitHub's patches
+        // never carry one, so it can only be a message crediting someone
+        // else.
         continue;
       }
       inBodyHeaders = false;
@@ -323,17 +327,20 @@ export const commitMessage = (patchHead: string[]) => {
   }
 
   let author: { name: string; email: string } | undefined;
-  const m = /^(.*?)\s*<([^>]*)>\s*$/.exec(
-    from ?? decodeHeader(header('From') ?? ''),
-  );
+  const m = /^(.*?)\s*<([^>]*)>\s*$/.exec(decodeHeader(header('From') ?? ''));
   if (m) {
-    author = {
-      name: (/^"(.*)"$/.test(m[1].trim())
+    const name = (
+      /^"(.*)"$/.test(m[1].trim())
         ? m[1].trim().slice(1, -1).replace(/\\(.)/g, '$1')
         : m[1]
-      ).trim(),
-      email: m[2].trim(),
-    };
+    ).trim();
+    const email = m[2].trim();
+    // It ends up in a Co-authored-by trailer: one line, one address.
+    // eslint-disable-next-line no-control-regex
+    const unsafe = /[\u0000-\u001f\u007f<>]/;
+    if (!unsafe.test(name) && !unsafe.test(email) && email) {
+      author = { name, email };
+    }
   }
   return {
     message: stripspace(

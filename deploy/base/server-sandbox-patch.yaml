@@ -1,8 +1,9 @@
 # What the server needs to run sandbox Jobs (src/sandbox/): its pod IP for
-# the Jobs to call back to, the internal port they use, the Job template, and
-# a short-lived token for the Kubernetes API. The pod keeps
-# automountServiceAccountToken: false; the token is projected explicitly so
-# that it expires after an hour (the kubelet rotates it).
+# the Jobs to call back to, the internal port they use, the Job template,
+# space for the files Jobs upload, and a short-lived token for the
+# Kubernetes API. The pod keeps automountServiceAccountToken: false; the
+# token is projected explicitly so that it expires after an hour (the
+# kubelet rotates it).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -46,6 +47,8 @@ spec:
             # replacements), so both always come from the same commit.
             - name: TROP_SANDBOX_IMAGE
               value: electronionicplatform.azurecr.io/trop-sandbox:main
+            - name: TROP_SANDBOX_BLOB_DIR
+              value: /sandbox-blobs
           volumeMounts:
             - name: sandbox-job-template
               mountPath: /etc/trop
@@ -53,7 +56,15 @@ spec:
             - name: kube-api-access
               mountPath: /var/run/secrets/kubernetes.io/serviceaccount
               readOnly: true
+            - name: sandbox-blobs
+              mountPath: /sandbox-blobs
       volumes:
+        # The files sandbox Jobs upload until they are pushed: apart from
+        # the git cache, and larger than the server's own limit for them
+        # (LIMITS.serverContentBytes, 2.5GiB), which it never exceeds.
+        - name: sandbox-blobs
+          emptyDir:
+            sizeLimit: 3Gi
         - name: sandbox-job-template
           configMap:
             name: sandbox-job-template

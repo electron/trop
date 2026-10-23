@@ -8,9 +8,12 @@
 //    file list and the diff's own headers), or where the target branch
 //    renamed one of them, which `git am -3` follows;
 //  - where the target branch had a file exactly as the original commit
-//    found it, the result is exactly what the original commit made of it
-//    (`git am` then applies the diff as is; a three-way merge result, where
-//    the two differ, can't be predicted and is not checked).
+//    found it (same blob and mode), the result is exactly what the original
+//    commit made of it: its blob (GitHub's file list, or the diff's
+//    abbreviated id where the list falls short) and its mode, or the
+//    target's content for a change of mode only. `git am` applies the diff
+//    as is there; a three-way merge result, where the two differ, can't be
+//    predicted and is not checked.
 // It never rejects a legitimate backport. All of it lives here and runs from
 // one call in index.ts, so it can be removed in one place.
 
@@ -28,8 +31,14 @@ export interface OriginalFile {
 export interface BackstopCommit {
   /** The commit's diff, as cut from its `.patch`. */
   diff: string;
-  /** GitHub's list of the commit's files, if it could be fetched. */
-  files: OriginalFile[] | null;
+  /** GitHub's list of the commit's files (it lists up to 3000). */
+  files: OriginalFile[];
+}
+
+/** A file in a tree. */
+export interface TreeFile {
+  mode: string;
+  id: string;
 }
 
 export interface BackstopContext {
@@ -38,8 +47,8 @@ export interface BackstopContext {
   applied: (SandboxApplied | null)[];
   /** Paths the target branch renamed the commits' files to. */
   renamedOnTarget: () => Promise<Set<string>>;
-  /** Blob ids at these paths on the target branch tip (null: absent). */
-  targetBlobIds: (paths: string[]) => Promise<Map<string, string | null>>;
+  /** The files at these paths on the target branch tip (absent: none). */
+  targetFiles: (paths: string[]) => Promise<Map<string, TreeFile>>;
   /** The git blob id of an uploaded blob. */
   gitBlobId: (sha256: string) => string;
 }
@@ -78,20 +87,24 @@ export const checkBackstop = async (ctx: BackstopContext) => {
       ),
     ),
   ].filter((p): p is string => !!p);
-  const state = await ctx.targetBlobIds(touched);
+  const state = new Map<string, TreeFile | null>(touched.map((p) => [p, null]));
+  for (const [p, f] of await ctx.targetFiles(touched)) state.set(p, f);
 
   for (const [i, commit] of ctx.commits.entries()) {
     const applied = ctx.applied[i];
     if (!applied?.changes) continue;
-    const result = new Map<string, string | null>();
+    const result = new Map<string, TreeFile | null>();
     for (const change of applied.changes) {
       result.set(
         change.path,
-        'deleted' in change ? null : ctx.gitBlobId(change.blob),
+        'deleted' in change
+          ? null
+          : { mode: change.mode, id: ctx.gitBlobId(change.blob) },
       );
     }
 
-    for (const file of diffFiles(commit.diff)) {
+    const files = diffFiles(commit.diff);
+    for (const file of files) {
       // Renames and copies move content around; only check files that
       // stay where they are (or are added or deleted).
       if (file.oldPath && file.newPath && file.oldPath !== file.newPath) {
@@ -101,28 +114,59 @@ export const checkBackstop = async (ctx: BackstopContext) => {
       // entrypoint), so there is nothing to compare.
       if (file.oldMode === '160000' || file.newMode === '160000') continue;
       const path = (file.newPath ?? file.oldPath)!;
-      const before = state.get(path) ?? null;
-      const sameStart = file.preimage
-        ? before !== null && before.startsWith(file.preimage)
-        : before === null;
-      if (!sameStart) continue;
-
-      const original = commit.files?.find((f) => f.filename === path);
-      let expected: string | null | undefined;
-      if (!file.newPath) expected = null;
-      else if (original && original.status !== 'removed' && original.sha) {
-        expected = original.sha;
+      // A change of type (say, from a symlink to a file) is a deletion and
+      // an addition of the same path: checked as one, at the addition.
+      const removal = files.find(
+        (f) => f !== file && f.oldPath === path && !f.newPath,
+      );
+      if (
+        !file.newPath &&
+        files.some((f) => f !== file && f.newPath === path)
+      ) {
+        continue;
       }
-      if (expected === undefined) continue;
+      const from = file.oldPath ? file : removal;
+
+      // Did the target have the file just as the original commit found it?
+      const before = state.get(path) ?? null;
+      const same = !from
+        ? before === null
+        : before !== null &&
+          (from.oldMode === undefined || before.mode === from.oldMode) &&
+          (from.preimage
+            ? before.id.startsWith(from.preimage)
+            : // A change of mode only has no index line.
+              !file.postimage);
+      if (!same) continue;
 
       const after = result.has(path) ? result.get(path)! : before;
-      if (after !== expected) {
+      let ok: boolean;
+      if (!file.newPath) {
+        ok = after === null;
+      } else if (!file.postimage) {
+        // A change of mode only: the target's content, the new mode.
+        ok =
+          after !== null &&
+          before !== null &&
+          after.id === before.id &&
+          after.mode === (file.newMode ?? before.mode);
+      } else {
+        const original = commit.files.find(
+          (f) => f.filename === path && f.status !== 'removed' && f.sha,
+        );
+        ok =
+          after !== null &&
+          after.mode === (file.newMode ?? before?.mode ?? '100644') &&
+          after.id.startsWith(file.postimage) &&
+          (!original || after.id === original.sha);
+      }
+      if (!ok) {
         throw new BackstopError(
           `the backport's ${path} differs from the original commit's, although the target branch had the same file`,
         );
       }
     }
 
-    for (const [path, id] of result) state.set(path, id);
+    for (const [path, entry] of result) state.set(path, entry);
   }
 };

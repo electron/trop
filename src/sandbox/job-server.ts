@@ -87,6 +87,8 @@ interface JobState extends JobRegistration {
   gitIds: Map<string, string>;
   blobBytes: number;
   uploadingBlob: boolean;
+  /** Unregistered: no more blobs are stored for it. */
+  closed: boolean;
   inFlight: number;
   servedBytes: number;
   resolve: (r: SandboxResult) => void;
@@ -141,6 +143,8 @@ const ROUTE =
 export class SandboxJobServer {
   private readonly jobs = new Map<string, JobState>();
   private totalUploadPacks = 0;
+  /** Bytes of uploaded blobs on disk, across jobs. */
+  private storedBytes = 0;
   private readonly server: http.Server;
   private address: AddressInfo | null = null;
 
@@ -152,7 +156,10 @@ export class SandboxJobServer {
   constructor(
     private readonly listenHost: string,
     private readonly port: number,
-    private readonly blobRoot = path.join(os.tmpdir(), 'trop-sandbox-blobs'),
+    // Its own volume in the cluster; per process otherwise, as start()
+    // empties it.
+    private readonly blobRoot = process.env.TROP_SANDBOX_BLOB_DIR ??
+      path.join(os.tmpdir(), `trop-sandbox-blobs-${process.pid}`),
   ) {
     this.server = http.createServer(
       // A whole request (a result, a 100MB blob) has 5 minutes to arrive.
@@ -198,6 +205,14 @@ export class SandboxJobServer {
   }
 
   async start() {
+    // Blobs of jobs from before a restart are of no use any more.
+    await fs.promises.mkdir(this.blobRoot, { recursive: true, mode: 0o700 });
+    for (const entry of await fs.promises.readdir(this.blobRoot)) {
+      await fs.promises.rm(path.join(this.blobRoot, entry), {
+        recursive: true,
+        force: true,
+      });
+    }
     await new Promise<void>((resolve, reject) => {
       this.server.once('error', reject);
       this.server.listen(this.port, this.listenHost, () => {
@@ -263,10 +278,18 @@ export class SandboxJobServer {
         if (!id) throw new Error(`No uploaded blob ${sha}`);
         return id;
       },
-      dispose: () => fs.promises.rm(blobDir, { recursive: true, force: true }),
+      dispose: async () => {
+        if (disposed) return;
+        disposed = true;
+        // Uploads end with the job (unregister), so nothing adds to these.
+        await fs.promises.rm(blobDir, { recursive: true, force: true });
+        this.storedBytes -= state.blobBytes;
+        state.blobBytes = 0;
+      },
     };
+    let disposed = false;
 
-    this.jobs.set(id, {
+    const state: JobState = {
       ...registration,
       blobDir,
       blobs,
@@ -274,6 +297,7 @@ export class SandboxJobServer {
       gitIds,
       blobBytes: 0,
       uploadingBlob: false,
+      closed: false,
       inFlight: 0,
       servedBytes: 0,
       tokenDigest: digest(token),
@@ -283,7 +307,8 @@ export class SandboxJobServer {
       uploadPacks: new Set(),
       resolve,
       reject,
-    });
+    };
+    this.jobs.set(id, state);
 
     return {
       id,
@@ -295,6 +320,7 @@ export class SandboxJobServer {
         const job = this.jobs.get(id);
         if (!job) return;
         this.jobs.delete(id);
+        job.closed = true;
         // Its fetches end with it.
         for (const child of job.uploadPacks) child.kill('SIGKILL');
         job.reject(new Error('Sandbox job ended without a result'));
@@ -378,6 +404,10 @@ export class SandboxJobServer {
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ) {
+    // Only a backport that pushes needs file contents.
+    if (!job.expectation.includeChanges) {
+      throw new HttpError(403, 'this job uploads no files');
+    }
     if (job.blobSizes.has(sha)) {
       req.resume();
       res.writeHead(200).end();
@@ -390,6 +420,7 @@ export class SandboxJobServer {
     const remaining = Math.min(
       LIMITS.fileBytes,
       LIMITS.totalContentBytes - job.blobBytes,
+      LIMITS.serverContentBytes - this.storedBytes,
     );
     const declared = Number(req.headers['content-length']);
     if (Number.isFinite(declared) && declared > remaining) {
@@ -401,16 +432,23 @@ export class SandboxJobServer {
       job.blobDir,
       `.upload-${randomBytes(8).toString('hex')}`,
     );
+    let size = 0;
+    let stored = false;
     try {
       const hash = createHash('sha256');
-      let size = 0;
+      // Counted as it arrives, so concurrent uploads of several jobs can't
+      // together go past the server's limit.
+      const count = (bytes: number) => {
+        this.storedBytes += bytes;
+        return this.storedBytes <= LIMITS.serverContentBytes;
+      };
       const out = fs.createWriteStream(tmp, { flags: 'wx', mode: 0o600 });
       await pipeline(
         req,
         new Transform({
           transform(chunk: Buffer, _, cb) {
             size += chunk.length;
-            if (size > remaining) {
+            if (!count(chunk.length) || size > remaining) {
               cb(new HttpError(413, 'blob too large'));
               return;
             }
@@ -427,12 +465,15 @@ export class SandboxJobServer {
       const gitId = createHash('sha1').update(`blob ${size}\0`);
       await pipeline(fs.createReadStream(tmp), gitId);
       job.gitIds.set(sha, gitId.digest('hex'));
+      if (job.closed) throw new HttpError(409, 'the job is over');
       await fs.promises.rename(tmp, path.join(job.blobDir, sha));
       job.blobSizes.set(sha, size);
       job.blobBytes += size;
+      stored = true;
       res.writeHead(201).end();
     } finally {
       job.uploadingBlob = false;
+      if (!stored) this.storedBytes -= size;
       await fs.promises.rm(tmp, { force: true });
     }
   }

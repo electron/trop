@@ -496,6 +496,45 @@ describe('SandboxJobServer', { timeout: 30_000 }, () => {
     await other.blobs.dispose();
   });
 
+  it('refuses uploads from a job that pushes nothing', async () => {
+    const job = server.register({
+      cacheDir: lease.dir,
+      ref: lease.ref,
+      inputs: { ...inputs(lease), includeChanges: false },
+      expectation: { patchCounts: [1], includeChanges: false },
+    });
+    expect((await putBlob(job, 'x\n')).status).toBe(403);
+    expect(job.blobs.size(sha256('x\n'))).toBeUndefined();
+    job.unregister();
+  });
+
+  it('refuses a blob past the per-job limit before reading it', async () => {
+    const job = newJob();
+    const url = new URL(job.url);
+    const response = await new Promise<string>((resolve) => {
+      const socket = net.connect(Number(url.port), url.hostname);
+      let data = '';
+      socket.on('data', (d) => (data += d.toString()));
+      socket.on('close', () => resolve(data));
+      socket.on('error', () => resolve(data));
+      socket.write(
+        `PUT ${url.pathname}/blobs/${sha256('x')} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ${job.token}\r\nContent-Length: ${600 * 1024 * 1024}\r\n\r\n`,
+      );
+    });
+    expect(response).toMatch(/^HTTP\/1\.1 413/);
+    job.unregister();
+  });
+
+  it('empties its blob directory when it starts', async () => {
+    const root = path.join(tmp, 'blob-root');
+    fs.mkdirSync(path.join(root, 'old-job'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'old-job', 'blob'), 'stale');
+    const other = new SandboxJobServer('127.0.0.1', 0, root);
+    await other.start();
+    expect(fs.readdirSync(root)).toEqual([]);
+    await other.stop();
+  });
+
   it('refuses a GET with a body at once', async () => {
     const job = newJob();
     const url = new URL(job.url);
@@ -539,6 +578,50 @@ describe('SandboxJobServer', { timeout: 30_000 }, () => {
       expect(response.status).toBe(200);
     } finally {
       clearInterval(trickle);
+      sockets.forEach((s) => s.destroy());
+      evil.unregister();
+      victim.unregister();
+    }
+  });
+
+  it('serves a second peer while one holds 200 connections (security review PoC)', async () => {
+    const evil = newJob();
+    const victim = newJob();
+    const url = new URL(evil.url);
+    const sockets: net.Socket[] = [];
+    for (let i = 0; i < 200; i++) {
+      const socket = net.connect({
+        port: Number(url.port),
+        host: '127.0.0.1',
+        localAddress: '127.0.0.1',
+      });
+      socket.on('error', () => {});
+      socket.write(
+        `GET ${url.pathname}/inputs HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ${evil.token}\r\n`,
+      );
+      sockets.push(socket);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      const status = await new Promise<string>((resolve) => {
+        const socket = net.connect(
+          {
+            port: Number(url.port),
+            host: '127.0.0.1',
+            localAddress: '127.0.0.2',
+          },
+          () =>
+            socket.write(
+              `GET ${new URL(victim.url).pathname}/inputs HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ${victim.token}\r\nConnection: close\r\n\r\n`,
+            ),
+        );
+        let data = '';
+        socket.on('data', (d) => (data += d.toString()));
+        socket.on('close', () => resolve(data.split('\r\n')[0]));
+        socket.on('error', (e) => resolve(String(e)));
+      });
+      expect(status).toContain('200');
+    } finally {
       sockets.forEach((s) => s.destroy());
       evil.unregister();
       victim.unregister();

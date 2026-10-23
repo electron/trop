@@ -20,8 +20,8 @@ import type {
   SandboxResult,
 } from './protocol';
 
-// Generous: the server's overall timeout (60 minutes) is what bounds a job.
-const GIT_TIMEOUT_MS = 45 * 60 * 1000;
+// Generous: the server's overall timeout (40 minutes) is what bounds a job.
+const GIT_TIMEOUT_MS = 30 * 60 * 1000;
 
 // Used only until the inputs (which carry the server's limits) are read.
 const FALLBACK_ERROR_CHARS = 1000;

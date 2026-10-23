@@ -207,6 +207,8 @@ and must be performed manually.',
   return { kind: 'all', commits: backportCommits };
 };
 
+const FILES_RETRY_DELAY_MS = process.env.VITEST ? 0 : 2000;
+
 /** GETs a commit from the REST API in one of its text media types. */
 const fetchCommitAs = async (
   opts: TryBackportOptions,
@@ -233,36 +235,47 @@ const fetchCommitAs = async (
   }
 };
 
-/** GitHub's file list for a commit (up to the API's 3000), or null. */
+/**
+ * GitHub's list of files for a commit (up to the API's 3000). The backstop
+ * needs it, so a backport that can't get it fails as an internal error.
+ */
 const fetchCommitFiles = async (
   opts: TryBackportOptions,
   sha: string,
-): Promise<OriginalFile[] | null> => {
-  try {
-    const files: OriginalFile[] = [];
-    for (let page = 1; page <= 30; page++) {
-      const { data } = await opts.context.octokit.repos.getCommit(
-        opts.context.repo({ ref: sha, per_page: 100, page }),
-      );
-      for (const f of data.files ?? []) {
-        files.push({
-          filename: f.filename,
-          previousFilename: f.previous_filename,
-          status: f.status,
-          sha: f.sha,
-        });
+): Promise<OriginalFile[]> => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const files: OriginalFile[] = [];
+      for (let page = 1; page <= 30; page++) {
+        const { data } = await opts.context.octokit.repos.getCommit(
+          opts.context.repo({ ref: sha, per_page: 100, page }),
+        );
+        for (const f of data.files ?? []) {
+          files.push({
+            filename: f.filename,
+            previousFilename: f.previous_filename,
+            status: f.status,
+            sha: f.sha,
+          });
+        }
+        if ((data.files?.length ?? 0) < 100) break;
       }
-      if ((data.files?.length ?? 0) < 100) break;
+      return files;
+    } catch (error) {
+      log(
+        'backportImpl',
+        LogLevel.WARN,
+        `Could not list the files of ${sha} (attempt ${attempt})`,
+        error,
+      );
+      if (attempt === 3) {
+        throw new SandboxInfraError(
+          `Could not list the files of ${sha} from GitHub`,
+          false,
+        );
+      }
+      await new Promise((r) => setTimeout(r, FILES_RETRY_DELAY_MS * attempt));
     }
-    return files;
-  } catch (error) {
-    log(
-      'backportImpl',
-      LogLevel.WARN,
-      `Could not list the files of ${sha}`,
-      error,
-    );
-    return null;
   }
 };
 
@@ -795,6 +808,7 @@ export const backportStackImpl = async (
         slug,
         targetBranch,
       };
+      let squashError: unknown;
       const attempts = (
         await Promise.all([
           getAllCommitsAttempt(tryOpts),
@@ -808,11 +822,15 @@ export const backportStackImpl = async (
               'Could not fetch the squash commit(s)',
               error,
             );
+            // A patch `git am` could never apply just fails the attempt;
+            // anything else only matters if the squash is needed.
+            if (!(error instanceof PatchError)) squashError = error;
             return null;
           }),
         ])
       ).filter((attempt): attempt is BackportAttempt => attempt !== null);
       if (attempts.length === 0) {
+        if (squashError instanceof SandboxInfraError) throw squashError;
         throw new Error(`Found nothing to backport to ${targetBranch}`);
       }
 
@@ -856,6 +874,15 @@ export const backportStackImpl = async (
         );
       } else {
         conflictDiff = outcome.diff;
+        if (squashError !== undefined) {
+          // The squash commit(s) might have applied, but couldn't be tried.
+          throw squashError instanceof SandboxInfraError
+            ? squashError
+            : new SandboxInfraError(
+                `Could not fetch the squash commit(s): ${squashError instanceof Error ? squashError.message : 'unknown error'}`,
+                false,
+              );
+        }
       }
 
       console.log(
