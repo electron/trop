@@ -1,44 +1,51 @@
+import { createHash } from 'crypto';
+
 import { describe, expect, it } from 'vitest';
 
-import { assertChangesMatchPatches } from '../src/sandbox';
-import { patchPaths, unquoteGitPath } from '../src/sandbox/patch-paths';
 import {
   LIMITS,
+  UploadedBlobs,
   validateRepoPath,
   validateSandboxResult,
 } from '../src/sandbox/protocol';
 
-const b64 = (s: string | Buffer) => Buffer.from(s).toString('base64');
+const sha256 = (s: string | Buffer) =>
+  createHash('sha256').update(s).digest('hex');
 
-const commit = (changes?: unknown[], overrides: object = {}) => ({
-  message: 'fix: a thing\n\nNotes: none\n',
-  author: {
-    name: 'Some One',
-    email: 'some.one@example.com',
-    date: '2026-10-22T12:00:00-07:00',
-  },
+// The blobs a job uploaded, by SHA-256.
+const uploads = (...contents: (string | Buffer)[]): UploadedBlobs => {
+  const blobs = new Map(contents.map((c) => [sha256(c), Buffer.from(c)]));
+  return {
+    size: (sha) => blobs.get(sha)?.length,
+    read: (sha) => blobs.get(sha)!,
+  };
+};
+
+const blobs = uploads('hi\n', '#!/bin/sh\n', '../a/b.txt', 'a\0b', '');
+
+const applied = (changes?: unknown[], overrides: object = {}) => ({
   ...(changes ? { changes } : {}),
   ...overrides,
 });
 
-const success = (commits: unknown[], attempt = 0) => ({
+const success = (entries: unknown[], attempt = 0) => ({
   outcome: 'success',
   attempt,
-  commits,
+  applied: entries,
 });
 
 const expectation = { patchCounts: [1, 2], includeChanges: true };
 const validate = (value: unknown, expect = expectation) =>
-  validateSandboxResult(value, expect);
+  validateSandboxResult(value, expect, blobs);
 
 describe('validateSandboxResult()', () => {
   it('accepts a well-formed success', () => {
     const result = validate(
       success([
-        commit([
-          { path: 'a/b.txt', mode: '100644', content: b64('hi\n') },
-          { path: 'script.sh', mode: '100755', content: b64('#!/bin/sh\n') },
-          { path: 'link', mode: '120000', content: b64('../a/b.txt') },
+        applied([
+          { path: 'a/b.txt', mode: '100644', blob: sha256('hi\n') },
+          { path: 'script.sh', mode: '100755', blob: sha256('#!/bin/sh\n') },
+          { path: 'link', mode: '120000', blob: sha256('../a/b.txt') },
           { path: 'gone.txt', deleted: true },
         ]),
       ]),
@@ -47,9 +54,15 @@ describe('validateSandboxResult()', () => {
   });
 
   it('accepts null for a patch that made no commit', () => {
-    expect(validate(success([commit([]), null], 1))).toMatchObject({
-      commits: [expect.anything(), null],
+    expect(validate(success([applied([]), null], 1))).toMatchObject({
+      applied: [{ changes: [] }, null],
     });
+  });
+
+  it('accepts no changes when none were asked for', () => {
+    expect(
+      validate(success([{}]), { patchCounts: [1], includeChanges: false }),
+    ).toEqual({ outcome: 'success', attempt: 0, applied: [{}] });
   });
 
   it('accepts a conflict and an error', () => {
@@ -63,14 +76,16 @@ describe('validateSandboxResult()', () => {
     });
   });
 
+  const change = (c: object) => success([applied([c])]);
+
   it.each([
     ['not an object', []],
     ['an unknown outcome', { outcome: 'pwned' }],
     ['extra keys', { outcome: 'conflict', diff: '', extra: 1 }],
-    ['an attempt that does not exist', success([commit([])], 2)],
-    ['a fractional attempt', success([commit([])], 0.5)],
-    ['too few commits', success([], 0)],
-    ['too many commits', success([commit([]), commit([])], 0)],
+    ['an attempt that does not exist', success([applied([])], 2)],
+    ['a fractional attempt', success([applied([])], 0.5)],
+    ['too few patches', success([], 0)],
+    ['too many patches', success([applied([]), applied([])], 0)],
     ['a non-string diff', { outcome: 'conflict', diff: 1 }],
     [
       'an oversized diff',
@@ -80,114 +95,70 @@ describe('validateSandboxResult()', () => {
       'an oversized error',
       { outcome: 'error', message: 'x'.repeat(LIMITS.errorChars + 1) },
     ],
-    ['a missing changes list', success([commit()])],
+    ['a lone surrogate', { outcome: 'error', message: 'a\ud800b' }],
+    ['a missing changes list', success([applied()])],
+    // Messages, authors and dates are the server's, never the job's.
+    ['a commit message', success([applied([], { message: 'mine' })])],
+    ['an author', success([applied([], { author: { name: 'me' } })])],
     [
-      'changes on a check',
-      success([commit([])]),
+      'changes when none were asked for',
+      success([applied([])]),
       { patchCounts: [1], includeChanges: false },
     ],
+    ['a bad mode', change({ path: 'a', mode: '100777', blob: sha256('hi\n') })],
     [
-      'an author with a newline',
+      'a submodule',
+      change({ path: 'a', mode: '160000', blob: sha256('hi\n') }),
+    ],
+    ['inline contents', change({ path: 'a', mode: '100644', content: 'aGk=' })],
+    [
+      'a blob that is not a SHA-256',
+      change({ path: 'a', mode: '100644', blob: 'x' }),
+    ],
+    [
+      'a blob that was never uploaded',
+      change({ path: 'a', mode: '100644', blob: sha256('other') }),
+    ],
+    [
+      'a symlink with a NUL in its target',
+      change({ path: 'a', mode: '120000', blob: sha256('a\0b') }),
+    ],
+    [
+      'a symlink with an empty target',
+      change({ path: 'a', mode: '120000', blob: sha256('') }),
+    ],
+    [
+      'a symlinked .gitattributes',
+      change({
+        path: 'x/.GITATTRIBUTES',
+        mode: '120000',
+        blob: sha256('../a/b.txt'),
+      }),
+    ],
+    ['deleted: false', change({ path: 'a', deleted: false })],
+    [
+      'a deletion with contents',
+      change({ path: 'a', deleted: true, blob: sha256('hi\n') }),
+    ],
+    [
+      'a duplicate path',
       success([
-        commit([], {
-          author: {
-            name: 'a\nSigned-off-by: x',
-            email: 'e@x',
-            date: '2026-01-01',
-          },
-        }),
-      ]),
-    ],
-    [
-      'an email with angle brackets',
-      success([
-        commit([], {
-          author: { name: 'a', email: 'e@x> <f@y', date: '2026-01-01' },
-        }),
-      ]),
-    ],
-    [
-      'an invalid date',
-      success([
-        commit([], { author: { name: 'a', email: 'e@x', date: 'yesterday' } }),
-      ]),
-    ],
-    ['a message with NUL', success([commit([], { message: 'a\0b' })])],
-    ['a lone surrogate', success([commit([], { message: 'a\ud800b' })])],
-  ])('rejects %s', (_, value, expect_ = expectation) => {
-    expect(() => validate(value, expect_)).toThrow('Invalid sandbox result');
-  });
-
-  const change = (c: object) => success([commit([c])]);
-
-  it.each([
-    ['a bad mode', { path: 'a', mode: '100777', content: '' }],
-    ['a gitlink', { path: 'a', mode: '160000', content: '' }],
-    ['a tree', { path: 'a', mode: '040000', content: '' }],
-    ['a numeric mode', { path: 'a', mode: 100644, content: '' }],
-    ['invalid base64', { path: 'a', mode: '100644', content: 'not base64!' }],
-    ['unpadded base64', { path: 'a', mode: '100644', content: 'YQ' }],
-    ['deleted: false', { path: 'a', deleted: false }],
-    ['deleted with content', { path: 'a', deleted: true, content: '' }],
-    ['an empty symlink', { path: 'a', mode: '120000', content: '' }],
-    ['a symlink with NUL', { path: 'a', mode: '120000', content: b64('a\0b') }],
-    [
-      'a symlink that is not UTF-8',
-      { path: 'a', mode: '120000', content: b64(Buffer.from([0xff, 0xfe])) },
-    ],
-    [
-      'a symlinked .gitmodules',
-      { path: '.gitmodules', mode: '120000', content: b64('/etc/passwd') },
-    ],
-    [
-      'a symlinked nested .gitattributes',
-      { path: 'a/.GitAttributes', mode: '120000', content: b64('x') },
-    ],
-    [
-      'an oversized file',
-      {
-        path: 'a',
-        mode: '100644',
-        content: b64(Buffer.alloc(LIMITS.fileBytes + 1)),
-      },
-    ],
-  ])('rejects a change with %s', (_, c) => {
-    expect(() => validate(change(c))).toThrow('Invalid sandbox result');
-  });
-
-  it('rejects duplicate paths in a commit', () => {
-    expect(() =>
-      validate(
-        success([
-          commit([
-            { path: 'a', deleted: true },
-            { path: 'a', mode: '100644', content: '' },
-          ]),
+        applied([
+          { path: 'a', mode: '100644', blob: sha256('hi\n') },
+          { path: 'a', deleted: true },
         ]),
-      ),
-    ).toThrow('duplicate path');
-  });
-
-  it('caps the total content of a result', () => {
-    const big = b64(Buffer.alloc(LIMITS.fileBytes));
-    const files = Array.from(
-      { length: Math.ceil(LIMITS.totalContentBytes / LIMITS.fileBytes) + 1 },
-      (_, i) => ({ path: `f${i}`, mode: '100644', content: big }),
-    );
-    expect(() => validate(success([commit(files)]))).toThrow(
-      'bytes of content',
-    );
+      ]),
+    ],
+  ])('rejects %s', (_, value, expected = expectation) => {
+    expect(() => validate(value, expected)).toThrow('Invalid sandbox result');
   });
 
   it('caps the number of changes', () => {
     const files = Array.from(
       { length: LIMITS.changesPerCommit + 1 },
-      (_, i) => ({
-        path: `f${i}`,
-        deleted: true,
-      }),
+      (_, i) => ({ path: `f${i}`, deleted: true }),
     );
-    expect(() => validate(success([commit(files)]))).toThrow('changes');
+    expect(() => validate(success([applied(files)]))).toThrow('changes');
   });
 });
 
@@ -201,7 +172,11 @@ describe('validateRepoPath()', () => {
     'a/.gitkeep',
     'a/..b/c',
     'unicode/文件.txt',
-  ])('accepts %s', (p) => {
+    // git allows these, so a backport may carry them.
+    'a\\b',
+    'a\nb',
+    'tab\there',
+  ])('accepts %j', (p) => {
     expect(validateRepoPath('path', p)).toBe(p);
   });
 
@@ -225,95 +200,11 @@ describe('validateRepoPath()', () => {
     'GIT~1/config',
     '.g‌it/config',
     '.git﻿/config',
-    'a\\b',
     'a\0b',
-    'a\nb',
     'x'.repeat(LIMITS.pathBytes + 1),
     42,
     null,
   ])('rejects %j', (p) => {
     expect(() => validateRepoPath('path', p)).toThrow('Invalid sandbox result');
-  });
-});
-
-describe('patchPaths()', () => {
-  const patch = [
-    'From 0123 Mon Sep 17 00:00:00 2001',
-    'Subject: [PATCH] fix: things',
-    '',
-    '---',
-    'diff --git a/src/file.ts b/src/file.ts',
-    'index 1111111..2222222 100644',
-    '--- a/src/file.ts',
-    '+++ b/src/file.ts',
-    '@@ -1 +1 @@',
-    '-a',
-    '+b',
-    'diff --git a/dir with space/x.txt b/dir with space/x.txt',
-    'new file mode 100644',
-    '--- /dev/null',
-    '+++ b/dir with space/x.txt',
-    'diff --git a/old.txt b/new.txt',
-    'similarity index 100%',
-    'rename from old.txt',
-    'rename to new.txt',
-    'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"',
-    'deleted file mode 100644',
-    'diff --git a/img.png b/img.png',
-    'GIT binary patch',
-  ].join('\n');
-
-  it('names every path the diff headers touch', () => {
-    expect([...patchPaths(patch)].sort()).toEqual(
-      [
-        'café.txt',
-        'dir with space/x.txt',
-        'img.png',
-        'new.txt',
-        'old.txt',
-        'src/file.ts',
-      ].sort(),
-    );
-  });
-
-  it('unquotes git C-style paths', () => {
-    expect(unquoteGitPath('"a\\tb\\"c\\\\"')).toBe('a\tb"c\\');
-    expect(unquoteGitPath('plain')).toBe('plain');
-    expect(unquoteGitPath('"broken')).toBeNull();
-    expect(unquoteGitPath('"bad\\q"')).toBeNull();
-  });
-});
-
-describe('assertChangesMatchPatches()', () => {
-  const patch =
-    'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n';
-
-  it('allows changes to the files a patch touches', () => {
-    expect(() =>
-      assertChangesMatchPatches([patch], [
-        commit([{ path: 'src/a.ts', mode: '100644', content: '' }]),
-      ] as never),
-    ).not.toThrow();
-  });
-
-  it('refuses a change to any other file', () => {
-    expect(() =>
-      assertChangesMatchPatches([patch], [
-        commit([
-          { path: 'src/a.ts', mode: '100644', content: '' },
-          { path: '.github/workflows/evil.yml', mode: '100644', content: '' },
-        ]),
-      ] as never),
-    ).toThrow('.github/workflows/evil.yml');
-  });
-
-  it('checks each commit against its own patch', () => {
-    const other = 'diff --git a/b.txt b/b.txt\n';
-    expect(() =>
-      assertChangesMatchPatches([patch, other], [
-        null,
-        commit([{ path: 'src/a.ts', deleted: true }]),
-      ] as never),
-    ).toThrow('patch 2');
   });
 });

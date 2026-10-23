@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -15,16 +16,26 @@ import {
 
 import { PRChange } from '../src/enums';
 import { updateManualBackport } from '../src/operations/update-manual-backport';
-import { runSandboxedBackport, Sandbox } from '../src/sandbox';
+import {
+  BackportAttempt,
+  BackportCommit,
+  BackportResultCommit,
+  runSandboxedBackport,
+  Sandbox,
+  SandboxDeps,
+} from '../src/sandbox';
+import { BackstopError, OriginalFile } from '../src/sandbox/backstop';
 import { createBackportCommits } from '../src/sandbox/commits';
 import { SandboxJobServer } from '../src/sandbox/job-server';
-import {
-  SandboxAttempt,
-  SandboxCommit,
-  SandboxFileChange,
-} from '../src/sandbox/protocol';
+import { commitMessage, splitPatch } from '../src/sandbox/patches';
+import { SandboxFileChange, SandboxResult } from '../src/sandbox/protocol';
 import { RepoCache } from '../src/sandbox/repo-cache';
-import { LocalProcessRunner } from '../src/sandbox/runner';
+import {
+  LocalProcessRunner,
+  SandboxInfraError,
+  SandboxJobSpec,
+  SandboxRunner,
+} from '../src/sandbox/runner';
 import { getPRApprovers, tagBackportReviewers } from '../src/utils';
 import { addLabels, removeLabel } from '../src/utils/label-utils';
 
@@ -63,6 +74,54 @@ const writeRepoFile = async (
 };
 
 const buildPatchList = (...entries: string[]) => entries.join('\n');
+
+/**
+ * What the server learns about a commit from GitHub (fetchBackportCommit in
+ * src/utils.ts), from a local repository instead: the `.patch` is
+ * format-patch output, the `.diff` the same diff without binary data, and
+ * the file list diff-tree's.
+ */
+const localBackportCommit = (
+  dir: string,
+  sha: string,
+  editPatch: (patch: string) => string = (p) => p,
+): BackportCommit => {
+  const patch = `${runGit(dir, ['format-patch', '-1', '--stdout', sha])}\n`;
+  const diff = runGit(dir, ['show', '--format=', sha]);
+  const { head, diff: own } = splitPatch(editPatch(patch), diff);
+  const { message, author } = commitMessage(head);
+  const files: OriginalFile[] = [];
+  const raw = runGit(dir, [
+    'diff-tree',
+    '-r',
+    '-M',
+    '--no-commit-id',
+    '--no-abbrev',
+    '-z',
+    sha,
+  ])
+    .split('\0')
+    .filter(Boolean);
+  for (let i = 0; i < raw.length; ) {
+    const [, , , , newSha, status] = raw[i].split(/[ :]/);
+    const renamed = /^[RC]/.test(status);
+    const file: OriginalFile = {
+      filename: renamed ? raw[i + 2] : raw[i + 1],
+      status: status.startsWith('R')
+        ? 'renamed'
+        : status === 'D'
+          ? 'removed'
+          : status === 'A'
+            ? 'added'
+            : 'modified',
+      sha: status === 'D' ? null : newSha,
+    };
+    if (renamed) file.previousFilename = raw[i + 1];
+    files.push(file);
+    i += renamed ? 3 : 2;
+  }
+  return { diff: own, message, author: author!, files };
+};
 
 vi.mock('../src/utils', () => ({
   getPRApprovers: vi.fn().mockResolvedValue([]),
@@ -116,6 +175,7 @@ describe('runner', () => {
       runGit(dir, ['add', '-A', '--', ...files]);
       runGit(dir, [
         'commit',
+        '--allow-empty',
         '--author=Trop Test <trop@example.com>',
         '-m',
         message,
@@ -131,6 +191,17 @@ describe('runner', () => {
           await fs.promises.rm(path.join(dir, file));
         } else if (Buffer.isBuffer(content)) {
           await fs.promises.writeFile(path.join(dir, file), content);
+        } else if (content.startsWith('exec:')) {
+          await writeRepoFile(dir, file, content.slice('exec:'.length));
+          await fs.promises.chmod(path.join(dir, file), 0o755);
+        } else if (content.startsWith('gitlink:')) {
+          await fs.promises.mkdir(path.join(dir, file), { recursive: true });
+          runGit(dir, [
+            'update-index',
+            '--add',
+            '--cacheinfo',
+            `160000,${content.slice('gitlink:'.length)},${file}`,
+          ]);
         } else if (content.startsWith('symlink:')) {
           await fs.promises.mkdir(path.dirname(path.join(dir, file)), {
             recursive: true,
@@ -157,9 +228,12 @@ describe('runner', () => {
       // back to a three-way merge.
       targetChanges?: Record<string, string | null>;
       stackedChanges?: Record<string, string | Buffer | null>[];
-      // Further attempts after the patches above, e.g. a squash commit.
-      extraAttempts?: SandboxAttempt[];
+      // Further attempts after the commits above, e.g. a squash commit.
+      extraAttempts?: BackportAttempt[];
       includeChanges?: boolean;
+      // Commit messages, by commit (default: "change", "stacked change").
+      messages?: string[];
+      deps?: Partial<SandboxDeps>;
     }) => {
       const remoteDir = await makeTempDir('trop-remote-');
       const targetDir = await makeTempDir('trop-target-');
@@ -182,7 +256,7 @@ describe('runner', () => {
         runGit(targetDir, ['checkout', 'main']);
       }
 
-      const patches: string[] = [];
+      const commits: BackportCommit[] = [];
       for (const [i, changes] of [
         opts.changes,
         ...(opts.stackedChanges ?? []),
@@ -190,11 +264,14 @@ describe('runner', () => {
         await applyChanges(sourceDir, changes);
         commitAll(
           sourceDir,
-          i === 0 ? 'change' : 'stacked change',
+          opts.messages?.[i] ?? (i === 0 ? 'change' : 'stacked change'),
           Object.keys(changes),
         );
-        patches.push(
-          runGit(sourceDir, ['format-patch', '-1', '--stdout', 'HEAD']),
+        commits.push(
+          localBackportCommit(
+            sourceDir,
+            runGit(sourceDir, ['rev-parse', 'HEAD']),
+          ),
         );
       }
 
@@ -211,22 +288,41 @@ describe('runner', () => {
           slug: 'electron/trop',
           token: '',
           targetBranch: '42-x-y',
-          attempts: [{ kind: 'all', patches }, ...(opts.extraAttempts ?? [])],
+          attempts: [{ kind: 'all', commits }, ...(opts.extraAttempts ?? [])],
           includeChanges: opts.includeChanges ?? true,
+          // The job's files go once the backport returns; keep them.
+          onSuccess: async (success) => {
+            for (const c of success.commits) {
+              for (const change of c.changes ?? []) {
+                if (!('deleted' in change)) {
+                  uploaded.set(
+                    change.blob,
+                    await success.readBlob(change.blob),
+                  );
+                }
+              }
+            }
+          },
         },
-        { sandbox, cache },
+        { sandbox, cache, retryDelaysMs: [], ...opts.deps },
       );
       const targetTip = runGit(remoteDir, ['rev-parse', '42-x-y']);
-      return { outcome, targetTip, cacheDir, patches };
+      return { outcome, targetTip, cacheDir, commits, sourceDir, remoteDir };
     };
 
-    const changeFor = (commit: SandboxCommit, file: string) =>
+    // The files successful jobs uploaded, by SHA-256.
+    const uploaded = new Map<string, Buffer>();
+    const readBlob = async (sha: string) => uploaded.get(sha)!;
+
+    const changeFor = (commit: BackportResultCommit, file: string) =>
       commit.changes?.find((c) => c.path === file);
 
-    const contentOf = (change: SandboxFileChange | undefined) => {
+    const bytesOf = (change: SandboxFileChange | undefined) => {
       if (!change || 'deleted' in change) return undefined;
-      return Buffer.from(change.content, 'base64').toString('utf8');
+      return uploaded.get(change.blob);
     };
+    const contentOf = (change: SandboxFileChange | undefined) =>
+      bytesOf(change)?.toString('utf8');
 
     const patchFiles = (
       dir: string,
@@ -297,7 +393,7 @@ describe('runner', () => {
         initial: { 'feature.txt': 'initial\n' },
         targetChanges: { 'feature.txt': 'target\n' },
         changes: { 'feature.txt': 'source\n' },
-        extraAttempts: [{ kind: 'squash', patches: [] }],
+        extraAttempts: [{ kind: 'squash', commits: [] }],
       });
       // An attempt with no patches trivially applies.
       expect(outcome).toMatchObject({ kind: 'success', attempt: 'squash' });
@@ -442,6 +538,7 @@ describe('runner', () => {
         context: { repo: (o: object) => o } as never,
         baseSha: outcome.baseSha,
         commits: outcome.commits,
+        readBlob,
         tempBranch: 'trop/42-x-y-bp-test',
       });
       expect(github.trees[0]).toEqual(
@@ -509,6 +606,7 @@ describe('runner', () => {
         context: { repo: (o: object) => o } as never,
         baseSha: outcome.baseSha,
         commits: outcome.commits,
+        readBlob,
         tempBranch: 'trop/42-x-y-bp-test',
       });
 
@@ -554,13 +652,315 @@ describe('runner', () => {
       });
       expect(outcome.kind).toBe('success');
       if (outcome.kind !== 'success') return;
-      const change = changeFor(outcome.commits[0], 'big.bin');
-      expect(change && 'content' in change).toBe(true);
-      if (!change || !('content' in change)) return;
-      expect(Buffer.from(change.content, 'base64').equals(big)).toBe(true);
+      expect(bytesOf(changeFor(outcome.commits[0], 'big.bin'))).toEqual(big);
       expect(contentOf(changeFor(outcome.commits[0], 'small.txt'))).toBe(
         'small\n',
       );
+    });
+
+    // The commits as `git am` itself makes them from the original `.patch`
+    // files, as trop used to push them: message (trimmed) and author.
+    const amCommits = async (sourceDir: string, count: number) => {
+      const dir = path.join(await makeTempDir('trop-am-'), 'wt');
+      runGit(sourceDir, ['worktree', 'add', '--detach', dir, `HEAD~${count}`]);
+      for (let i = count - 1; i >= 0; i--) {
+        const patchPath = `${dir}.patch`;
+        await fs.promises.writeFile(
+          patchPath,
+          `${runGit(sourceDir, ['format-patch', '-1', '--stdout', `HEAD~${i}`])}\n`,
+        );
+        runGit(dir, ['am', '-3', '--keep-cr', patchPath]);
+      }
+      return runGit(dir, [
+        'log',
+        `-${count}`,
+        '--reverse',
+        '--format=%B%x01%an%x01%ae%x02',
+      ])
+        .split('\x02')
+        .filter((e) => e.trim())
+        .map((e) => {
+          const [message, name, email] = e.replace(/^\n/, '').split('\x01');
+          return { message: message.trim(), author: { name, email } };
+        });
+    };
+
+    it('gives each commit the message and author `git am` gave it', async () => {
+      const messages = [
+        '[PATCH] fix: something [ci skip]\n\nbody\n\n---\nafter a scissors-ish line',
+        'Re: [tag] chore: a subject long enough that format-patch has to fold it across more than one header line, surely\n\nbody',
+        'fix: café ✓ 漢字\n\nnon-ASCII body ü\n\n\n\ntrailing   \n',
+        'feat: in-body header\n\nFrom: Someone Else <else@example.com>\n\nthe real body\n\nSigned-off-by: A <a@example.com>',
+        'subject: with: colons',
+      ];
+      const { outcome, sourceDir } = await setupAndBackport({
+        initial: { 'f.txt': '0\n' },
+        changes: { 'f.txt': '1\n' },
+        stackedChanges: messages
+          .slice(1)
+          .map((_, i) => ({ 'f.txt': `${i + 2}\n` })),
+        messages,
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const expected = await amCommits(sourceDir, messages.length);
+      expect(
+        outcome.commits.map((c) => ({ message: c.message, author: c.author })),
+      ).toEqual(expected);
+      expect(outcome.commits[3].author.email).toBe('else@example.com');
+    });
+
+    it('never applies a diff written into a commit message', async () => {
+      // The PoC from the security review: the message carries a diff of a
+      // workflow file the commit doesn't touch. trop used to apply it (git
+      // am reads the message as part of the patch); now only the commit's
+      // own diff reaches git, even with the backstop off.
+      const { outcome } = await setupAndBackport({
+        initial: {
+          '.github/workflows/ci.yml': 'name: ci\n',
+          README: 'hello\n',
+        },
+        changes: { README: 'hello\nworld\n' },
+        messages: [
+          [
+            'Update README',
+            '',
+            'Context:',
+            '',
+            'diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml',
+            '--- a/.github/workflows/ci.yml',
+            '+++ b/.github/workflows/ci.yml',
+            '@@ -1 +1,2 @@',
+            ' name: ci',
+            '+on: push # injected',
+          ].join('\n'),
+        ],
+        deps: { backstop: false },
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const [commit] = outcome.commits;
+      expect(commit.changes!.map((c) => c.path)).toEqual(['README']);
+      // The message is still cut where `git am` would have cut it.
+      expect(commit.message).toBe('Update README\n\nContext:');
+    });
+
+    it('follows a file the target branch renamed', async () => {
+      const content = 'one\ntwo\nthree\nfour\nfive\nsix\n';
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': content },
+        targetChanges: { 'feature.txt': null, 'renamed.txt': content },
+        changes: { 'feature.txt': content.replace('three', 'THREE') },
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const [commit] = outcome.commits;
+      expect(commit.changes!.map((c) => c.path)).toEqual(['renamed.txt']);
+      expect(contentOf(changeFor(commit, 'renamed.txt'))).toBe(
+        content.replace('three', 'THREE'),
+      );
+    });
+
+    it('follows a directory the target branch renamed', async () => {
+      const a = 'a1\na2\na3\na4\na5\n';
+      const b = 'b1\nb2\nb3\nb4\nb5\n';
+      const { outcome } = await setupAndBackport({
+        initial: { 'lib/a.txt': a, 'lib/b.txt': b },
+        targetChanges: {
+          'lib/a.txt': null,
+          'lib/b.txt': null,
+          'src/a.txt': a,
+          'src/b.txt': b,
+        },
+        changes: {
+          'lib/a.txt': a.replace('a3', 'A3'),
+          'lib/b.txt': b.replace('b3', 'B3'),
+          'lib/new.txt': 'new\n',
+        },
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const [commit] = outcome.commits;
+      expect(commit.changes!.map((c) => c.path).sort()).toEqual([
+        // A new file isn't merged, so it stays where the commit put it,
+        // as it always has with `git am -3`.
+        'lib/new.txt',
+        'src/a.txt',
+        'src/b.txt',
+      ]);
+      expect(contentOf(changeFor(commit, 'src/a.txt'))).toBe(
+        a.replace('a3', 'A3'),
+      );
+    });
+
+    it('skips a commit that is on the target already', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        targetChanges: { 'feature.txt': 'changed\n' },
+        changes: { 'feature.txt': 'changed\n' },
+        stackedChanges: [{ 'other.txt': 'other\n' }],
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      expect(outcome.commits.map((c) => c.message)).toEqual(['stacked change']);
+    });
+
+    it('fails an attempt with an empty commit, as `git am` always has', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: {},
+        extraAttempts: [{ kind: 'squash', commits: [] }],
+      });
+      expect(outcome).toMatchObject({ kind: 'success', attempt: 'squash' });
+    });
+
+    it('carries modes, CRLF line endings and submodules as before', async () => {
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n', 'crlf.txt': 'a\r\nb\r\n' },
+        changes: {
+          'bin/run.sh': 'exec:#!/bin/sh\n',
+          'crlf.txt': 'a\r\nB\r\n',
+          'third_party/sub': `gitlink:${'1'.repeat(40)}`,
+        },
+      });
+      expect(outcome.kind).toBe('success');
+      if (outcome.kind !== 'success') return;
+      const [commit] = outcome.commits;
+      expect(changeFor(commit, 'bin/run.sh')).toMatchObject({
+        mode: '100755',
+      });
+      expect(contentOf(changeFor(commit, 'crlf.txt'))).toBe('a\r\nB\r\n');
+      // Submodules have always been pushed as deletions.
+      expect(changeFor(commit, 'third_party/sub')).toEqual({
+        path: 'third_party/sub',
+        deleted: true,
+      });
+    });
+
+    // A job that skips git and posts whatever it likes, as a compromised one
+    // could.
+    const maliciousRunner = (files: Record<string, string>): SandboxRunner => ({
+      kind: 'local',
+      listenHost: '127.0.0.1',
+      run: async (spec: SandboxJobSpec) => {
+        const authorization = `Bearer ${spec.token}`;
+        const changes: SandboxFileChange[] = [];
+        for (const [file, content] of Object.entries(files)) {
+          const sha = createHash('sha256').update(content).digest('hex');
+          await fetch(`${spec.url}/blobs/${sha}`, {
+            method: 'PUT',
+            headers: { authorization },
+            body: content,
+          });
+          changes.push({ path: file, mode: '100644', blob: sha });
+        }
+        const result: SandboxResult = {
+          outcome: 'success',
+          attempt: 0,
+          applied: [{ changes }],
+        };
+        await fetch(`${spec.url}/result`, {
+          method: 'POST',
+          headers: { authorization, 'content-type': 'application/json' },
+          body: JSON.stringify(result),
+        });
+        return spec.result;
+      },
+    });
+
+    const withRunner = (runner: SandboxRunner, backstop = true) => ({
+      sandbox: { runner, server: sandbox.server },
+      backstop,
+    });
+
+    it('refuses a job result that changes a file no commit touches', async () => {
+      const files = {
+        'feature.txt': 'changed\n',
+        '.github/workflows/evil.yml': 'on: push\n',
+      };
+      await expect(
+        setupAndBackport({
+          initial: { 'feature.txt': 'initial\n' },
+          changes: { 'feature.txt': 'changed\n' },
+          deps: withRunner(maliciousRunner(files)),
+        }),
+      ).rejects.toThrow(BackstopError);
+      // It is the backstop that catches it.
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: { 'feature.txt': 'changed\n' },
+        deps: withRunner(maliciousRunner(files), false),
+      });
+      expect(outcome.kind).toBe('success');
+    });
+
+    it('refuses a job result whose contents differ from the original commit where they must not', async () => {
+      await expect(
+        setupAndBackport({
+          initial: { 'feature.txt': 'initial\n' },
+          changes: { 'feature.txt': 'changed\n' },
+          deps: withRunner(maliciousRunner({ 'feature.txt': 'evil\n' })),
+        }),
+      ).rejects.toThrow(BackstopError);
+    });
+
+    it('retries a job that failed for want of infrastructure', async () => {
+      const local = new LocalProcessRunner(50_000);
+      let runs = 0;
+      const flaky: SandboxRunner = {
+        kind: 'local',
+        listenHost: '127.0.0.1',
+        run: async (spec) => {
+          runs += 1;
+          if (runs === 1) throw new SandboxInfraError('no node came up');
+          if (runs === 2) {
+            // A job that reports an internal error counts as one, too.
+            await fetch(`${spec.url}/result`, {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${spec.token}`,
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({ outcome: 'error', message: 'oom' }),
+            });
+            return spec.result;
+          }
+          return local.run(spec);
+        },
+      };
+      const { outcome } = await setupAndBackport({
+        initial: { 'feature.txt': 'initial\n' },
+        changes: { 'feature.txt': 'changed\n' },
+        deps: {
+          sandbox: { runner: flaky, server: sandbox.server },
+          retryDelaysMs: [0, 0],
+        },
+      });
+      expect(runs).toBe(3);
+      expect(outcome.kind).toBe('success');
+    });
+
+    it('gives up after its retries with an infrastructure error', async () => {
+      let runs = 0;
+      const broken: SandboxRunner = {
+        kind: 'local',
+        listenHost: '127.0.0.1',
+        run: async () => {
+          runs += 1;
+          throw new SandboxInfraError('no node came up');
+        },
+      };
+      await expect(
+        setupAndBackport({
+          initial: { 'feature.txt': 'initial\n' },
+          changes: { 'feature.txt': 'changed\n' },
+          deps: {
+            sandbox: { runner: broken, server: sandbox.server },
+            retryDelaysMs: [0, 0],
+          },
+        }),
+      ).rejects.toBeInstanceOf(SandboxInfraError);
+      expect(runs).toBe(3);
     });
 
     it('fails when the target branch does not exist', async () => {
@@ -576,10 +976,10 @@ describe('runner', () => {
             slug: 'electron/trop',
             token: '',
             targetBranch: '42-x-y',
-            attempts: [{ kind: 'all', patches: [] }],
+            attempts: [{ kind: 'all', commits: [] }],
             includeChanges: true,
           },
-          { sandbox, cache },
+          { sandbox, cache, retryDelaysMs: [] },
         ),
       ).rejects.toThrow('42-x-y');
     });

@@ -7,12 +7,14 @@ import { LogLevel } from '../enums';
 import { log } from '../utils/log-util';
 import { SandboxJobServer } from './job-server';
 import { KubernetesJobRunner } from './kubernetes';
-import { LIMITS, SandboxAttempt, SandboxCommit } from './protocol';
-import { patchPaths } from './patch-paths';
+import { LIMITS, SandboxAttempt, SandboxFileChange } from './protocol';
+import { checkBackstop, OriginalFile } from './backstop';
+import { backportMbox } from './patches';
 import { RepoCache } from './repo-cache';
 import {
   DEFAULT_SANDBOX_TIMEOUT_MS,
   LocalProcessRunner,
+  SandboxInfraError,
   SandboxRunner,
 } from './runner';
 
@@ -104,29 +106,42 @@ const getCommitter = () => {
   return committer;
 };
 
-/**
- * Each commit may only change files its own patch names: whatever happened
- * inside the sandbox, the server never pushes a change to a file (say, a
- * workflow) that the backported commits did not touch. This rules out the
- * rare backport where `git am -3` follows a rename on the target branch;
- * that one fails and is left to a manual backport.
- */
-export const assertChangesMatchPatches = (
-  patches: string[],
-  commits: (SandboxCommit | null)[],
-) => {
-  for (const [i, commit] of commits.entries()) {
-    if (!commit?.changes) continue;
-    const allowed = patchPaths(patches[i]);
-    for (const change of commit.changes) {
-      if (!allowed.has(change.path)) {
-        throw new Error(
-          `Sandbox job changed ${change.path}, which patch ${i + 1} does not touch`,
-        );
-      }
-    }
-  }
-};
+/** One original commit to backport, as the server knows it from GitHub. */
+export interface BackportCommit {
+  /** The commit's diff, cut from its `.patch` (patches.ts splitPatch). */
+  diff: string;
+  /** The message `git am` would have given it (patches.ts commitMessage). */
+  message: string;
+  /** Its author, credited with a Co-authored-by trailer. */
+  author: { name: string; email: string };
+  /** GitHub's list of its files (for the backstop), if fetched. */
+  files: OriginalFile[] | null;
+}
+
+export interface BackportAttempt {
+  kind: SandboxAttempt['kind'];
+  commits: BackportCommit[];
+}
+
+/** A commit to create on the backport branch. */
+export interface BackportResultCommit {
+  message: string;
+  author: { name: string; email: string };
+  /** The files it changes; only when the contents were asked for. */
+  changes?: SandboxFileChange[];
+}
+
+/** A successful sandbox job, for the caller to push before its files go. */
+export interface SandboxSuccess {
+  attempt: SandboxAttempt['kind'];
+  /** The target branch tip the server resolved: the new commits' base. */
+  baseSha: string;
+  /** The commits to create, oldest first (patches already on the target
+   *  make none). */
+  commits: BackportResultCommit[];
+  /** Reads a file the job uploaded (SandboxFileChange.blob). */
+  readBlob: (sha256: string) => Promise<Buffer>;
+}
 
 export interface SandboxedBackportOptions {
   slug: string;
@@ -134,40 +149,77 @@ export interface SandboxedBackportOptions {
   token: string;
   targetBranch: string;
   /** Tried in order until one applies cleanly. */
-  attempts: SandboxAttempt[];
+  attempts: BackportAttempt[];
   /** Whether the commits' file contents are needed (to push them). */
   includeChanges: boolean;
+  /** Runs (e.g. pushes) while the job's files are still available. */
+  onSuccess?: (success: SandboxSuccess) => Promise<void>;
 }
 
 export type SandboxedBackportOutcome =
-  | {
-      kind: 'success';
-      attempt: SandboxAttempt['kind'];
-      /** The target branch tip the server resolved: the new commits' base. */
-      baseSha: string;
-      /** The commits to push, oldest first. */
-      commits: SandboxCommit[];
-    }
+  | ({ kind: 'success' } & Omit<SandboxSuccess, 'readBlob'>)
   | { kind: 'conflict'; diff: string };
 
+export interface SandboxDeps {
+  sandbox?: Sandbox;
+  cache?: RepoCache;
+  /** Waits before retrying after an infrastructure failure. */
+  retryDelaysMs?: number[];
+  /** Set false to run without the backstop (backstop.ts). */
+  backstop?: boolean;
+}
+
+const DEFAULT_RETRY_DELAYS_MS = [30_000, 120_000];
+
 /**
- * Applies a backport's patches in a sandbox job: the server fetches the
+ * Applies a backport's commits in a sandbox job: the server fetches the
  * target branch from GitHub into its cache and resolves its tip, and the job
- * applies the patches on top of that tip with `git am -3`. Throws if the job
- * fails or its result is invalid.
+ * applies each commit's diff on top of that tip with `git am -3`. The
+ * commits to push get their messages and authors from the server's own data.
+ * Infrastructure failures are retried; one that persists, a job's invalid
+ * result or a backstop violation throws.
  */
 export const runSandboxedBackport = async (
   opts: SandboxedBackportOptions,
-  deps: { sandbox?: Sandbox; cache?: RepoCache } = {},
+  deps: SandboxDeps = {},
 ): Promise<SandboxedBackportOutcome> => {
-  const { runner, server } = deps.sandbox ?? (await getSandbox());
+  const delays = deps.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await runOnce(opts, deps);
+    } catch (error) {
+      if (!(error instanceof SandboxInfraError) || attempt >= delays.length) {
+        throw error;
+      }
+      log(
+        'runSandboxedBackport',
+        LogLevel.WARN,
+        `Retrying after a sandbox failure: ${error.message}`,
+      );
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+    }
+  }
+};
+
+const runOnce = async (
+  opts: SandboxedBackportOptions,
+  deps: SandboxDeps,
+): Promise<SandboxedBackportOutcome> => {
+  let sandbox: Sandbox;
+  try {
+    sandbox = deps.sandbox ?? (await getSandbox());
+  } catch (error) {
+    throw new SandboxInfraError(
+      `The sandbox is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const { runner, server } = sandbox;
   const cache = deps.cache ?? RepoCache.for(opts.slug);
 
   const lease = await cache.acquire(opts.token, opts.targetBranch);
   try {
-    const preimageBlobs = await cache.resolvePreimageBlobs(
-      opts.attempts.flatMap((a) => a.patches),
-    );
+    const diffs = opts.attempts.flatMap((a) => a.commits.map((c) => c.diff));
+    const preimageBlobs = await cache.resolvePreimageBlobs(diffs);
     const job = server.register({
       cacheDir: lease.dir,
       ref: lease.ref,
@@ -175,14 +227,17 @@ export const runSandboxedBackport = async (
         version: 1,
         ref: lease.ref,
         baseSha: lease.baseSha,
-        attempts: opts.attempts,
+        attempts: opts.attempts.map((a) => ({
+          kind: a.kind,
+          patches: a.commits.map((c) => backportMbox(c.diff)),
+        })),
         preimageBlobs,
         includeChanges: opts.includeChanges,
         committer: getCommitter(),
         limits: { diffChars: LIMITS.diffChars, errorChars: LIMITS.errorChars },
       },
       expectation: {
-        patchCounts: opts.attempts.map((a) => a.patches.length),
+        patchCounts: opts.attempts.map((a) => a.commits.length),
         includeChanges: opts.includeChanges,
       },
     });
@@ -200,28 +255,57 @@ export const runSandboxedBackport = async (
         result: job.result,
       });
       switch (result.outcome) {
-        case 'success':
-          assertChangesMatchPatches(
-            opts.attempts[result.attempt].patches,
-            result.commits,
-          );
+        case 'success': {
+          const attempt = opts.attempts[result.attempt];
+          if (deps.backstop ?? true) {
+            await checkBackstop({
+              commits: attempt.commits,
+              applied: result.applied,
+              renamedOnTarget: () =>
+                cache.renamedOnTarget(
+                  lease.baseSha,
+                  attempt.commits.map((c) => c.diff),
+                ),
+              targetBlobIds: (paths) => cache.idsAt(lease.baseSha, paths),
+              gitBlobId: (sha) => job.blobs.gitId(sha),
+            });
+          }
+          const commits = attempt.commits.flatMap((c, i) => {
+            const applied = result.applied[i];
+            return applied
+              ? [
+                  {
+                    message: c.message,
+                    author: c.author,
+                    changes: applied.changes,
+                  },
+                ]
+              : [];
+          });
+          const success: SandboxSuccess = {
+            attempt: attempt.kind,
+            baseSha: lease.baseSha,
+            commits,
+            readBlob: (sha) => job.blobs.readAsync(sha),
+          };
+          await opts.onSuccess?.(success);
           return {
             kind: 'success',
-            attempt: opts.attempts[result.attempt].kind,
-            baseSha: lease.baseSha,
-            // Patches already on the target made no commit (as before the
-            // sandbox, when only the commits git made were pushed).
-            commits: result.commits.filter(
-              (c): c is SandboxCommit => c !== null,
-            ),
+            attempt: success.attempt,
+            baseSha: success.baseSha,
+            commits,
           };
+        }
         case 'conflict':
           return { kind: 'conflict', diff: result.diff };
         case 'error':
-          throw new Error(`Sandbox job ${job.id} failed: ${result.message}`);
+          throw new SandboxInfraError(
+            `Sandbox job ${job.id} failed: ${result.message}`,
+          );
       }
     } finally {
       job.unregister();
+      await job.blobs.dispose();
     }
   } finally {
     await lease.release();

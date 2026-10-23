@@ -1,4 +1,6 @@
 import { spawn, spawnSync } from 'child_process';
+import { createHash } from 'crypto';
+import * as net from 'net';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
@@ -10,11 +12,17 @@ import { RegisteredJob, SandboxJobServer } from '../src/sandbox/job-server';
 import { SandboxInputs } from '../src/sandbox/protocol';
 import { CacheLease, RepoCache } from '../src/sandbox/repo-cache';
 
-const git = (cwd: string, args: string[], env: NodeJS.ProcessEnv = {}) => {
+const git = (
+  cwd: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = {},
+  input?: string,
+) => {
   const result = spawnSync('git', args, {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, ...env },
+    input,
   });
   return {
     status: result.status,
@@ -54,17 +62,10 @@ const clientEnv = (job: RegisteredJob): NodeJS.ProcessEnv => ({
   GIT_CONFIG_VALUE_2: '',
 });
 
-const validCommit = (changes: unknown[]) => ({
-  message: 'fix: something\n',
-  author: {
-    name: 'Someone',
-    email: 'someone@example.com',
-    date: '2026-10-22T12:00:00-07:00',
-  },
-  changes,
-});
+const sha256 = (s: string | Buffer) =>
+  createHash('sha256').update(s).digest('hex');
 
-const b64 = (s: string) => Buffer.from(s).toString('base64');
+const applied = (changes: unknown[]) => ({ changes });
 
 describe('SandboxJobServer', { timeout: 30_000 }, () => {
   console.error = vi.fn();
@@ -320,21 +321,44 @@ describe('SandboxJobServer', { timeout: 30_000 }, () => {
     job.unregister();
   });
 
+  const putBlob = (
+    job: RegisteredJob,
+    contents: string | Buffer,
+    sha?: string,
+  ) =>
+    request(job, `blobs/${sha ?? sha256(contents)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: contents,
+    });
+
   it('accepts a valid result exactly once', async () => {
     const job = newJob();
+    for (const c of ['new\n', '/etc/passwd']) {
+      expect((await putBlob(job, c)).ok).toBe(true);
+    }
     const body = {
       outcome: 'success',
       attempt: 0,
-      commits: [
-        validCommit([
-          { path: 'file.txt', mode: '100644', content: b64('new\n') },
+      applied: [
+        applied([
+          { path: 'file.txt', mode: '100644', blob: sha256('new\n') },
           { path: 'old.txt', deleted: true },
-          { path: 'link', mode: '120000', content: b64('/etc/passwd') },
+          { path: 'link', mode: '120000', blob: sha256('/etc/passwd') },
+          {
+            path: 'dir\\with\\backslashes\tand tab',
+            mode: '100755',
+            blob: sha256('new\n'),
+          },
         ]),
       ],
     };
     expect((await postResult(job, body)).status).toBe(200);
     await expect(job.result).resolves.toMatchObject({ outcome: 'success' });
+    expect(job.blobs.read(sha256('new\n')).toString()).toBe('new\n');
+    expect(job.blobs.gitId(sha256('new\n'))).toBe(
+      git(tmp, ['hash-object', '--stdin'], {}, 'new\n').stdout,
+    );
 
     // A second POST, or any other request, is refused.
     expect((await postResult(job, body)).status).toBe(409);
@@ -342,35 +366,79 @@ describe('SandboxJobServer', { timeout: 30_000 }, () => {
     job.unregister();
   });
 
+  it('accepts a patch that made no commit', async () => {
+    const job = newJob();
+    expect(
+      (
+        await postResult(job, {
+          outcome: 'success',
+          attempt: 0,
+          applied: [null],
+        })
+      ).status,
+    ).toBe(200);
+    await expect(job.result).resolves.toEqual({
+      outcome: 'success',
+      attempt: 0,
+      applied: [null],
+    });
+    job.unregister();
+  });
+
+  const content = sha256('x\n');
   const rejected: [string, unknown][] = [
     [
       'a path traversal',
-      validCommit([{ path: '../../etc/x', mode: '100644', content: '' }]),
+      applied([{ path: '../../etc/x', mode: '100644', blob: content }]),
     ],
     [
       'an absolute path',
-      validCommit([{ path: '/etc/x', mode: '100644', content: '' }]),
+      applied([{ path: '/etc/x', mode: '100644', blob: content }]),
     ],
     [
       'a .git path',
-      validCommit([
-        { path: '.git/hooks/post-checkout', mode: '100755', content: '' },
+      applied([
+        { path: '.git/hooks/post-checkout', mode: '100755', blob: content },
       ]),
     ],
     [
       'a nested .GIT path',
-      validCommit([{ path: 'a/.GIT/config', mode: '100644', content: '' }]),
+      applied([{ path: 'a/.GIT/config', mode: '100644', blob: content }]),
     ],
-    ['a bad mode', validCommit([{ path: 'a', mode: '100777', content: '' }])],
-    ['a submodule', validCommit([{ path: 'a', mode: '160000', content: '' }])],
+    [
+      'an NTFS .git alias',
+      applied([{ path: 'a/git~1/config', mode: '100644', blob: content }]),
+    ],
+    ['a bad mode', applied([{ path: 'a', mode: '100777', blob: content }])],
+    ['a submodule', applied([{ path: 'a', mode: '160000', blob: content }])],
+    [
+      'a blob that was never uploaded',
+      applied([{ path: 'a', mode: '100644', blob: sha256('other') }]),
+    ],
+    [
+      'a symlinked .gitmodules',
+      applied([{ path: '.gitmodules', mode: '120000', blob: content }]),
+    ],
+    [
+      'inline contents',
+      applied([{ path: 'a', mode: '100644', content: 'eA==' }]),
+    ],
+    [
+      'a duplicate path',
+      applied([
+        { path: 'a', mode: '100644', blob: content },
+        { path: 'a', deleted: true },
+      ]),
+    ],
   ];
 
-  it.each(rejected)('rejects a result with %s', async (_, commit) => {
+  it.each(rejected)('rejects a result with %s', async (_, entry) => {
     const job = newJob();
+    expect((await putBlob(job, 'x\n')).ok).toBe(true);
     const response = await postResult(job, {
       outcome: 'success',
       attempt: 0,
-      commits: [commit],
+      applied: [entry],
     });
     expect(response.status).toBe(400);
     await expect(job.result).rejects.toThrow('Invalid sandbox result');
@@ -380,22 +448,122 @@ describe('SandboxJobServer', { timeout: 30_000 }, () => {
         await postResult(job, {
           outcome: 'success',
           attempt: 0,
-          commits: [validCommit([])],
+          applied: [null],
         })
       ).status,
     ).toBe(409);
     job.unregister();
   });
 
-  it('rejects the wrong number of commits', async () => {
+  it('rejects the wrong number of applied patches', async () => {
     const job = newJob();
     const response = await postResult(job, {
       outcome: 'success',
       attempt: 0,
-      commits: [validCommit([]), validCommit([])],
+      applied: [null, null],
     });
     expect(response.status).toBe(400);
-    await expect(job.result).rejects.toThrow('2 commits for 1 patches');
+    await expect(job.result).rejects.toThrow(
+      'results for 2 patches, expected 1',
+    );
+    job.unregister();
+  });
+
+  it('rejects a commit message or author from the job', async () => {
+    const job = newJob();
+    const response = await postResult(job, {
+      outcome: 'success',
+      attempt: 0,
+      applied: [{ changes: [], message: 'mine', author: 'me' }],
+    });
+    expect(response.status).toBe(400);
+    await expect(job.result).rejects.toThrow('unexpected key "message"');
+    job.unregister();
+  });
+
+  it('stores only blobs whose SHA-256 matches', async () => {
+    const job = newJob();
+    expect((await putBlob(job, 'x\n', sha256('y\n'))).status).toBe(400);
+    expect(job.blobs.size(sha256('y\n'))).toBeUndefined();
+    expect((await putBlob(job, 'y\n')).ok).toBe(true);
+    expect(job.blobs.size(sha256('y\n'))).toBe(2);
+    // Another job never sees them.
+    const other = newJob();
+    expect(other.blobs.size(sha256('y\n'))).toBeUndefined();
+    job.unregister();
+    other.unregister();
+    await job.blobs.dispose();
+    await other.blobs.dispose();
+  });
+
+  it('refuses a GET with a body at once', async () => {
+    const job = newJob();
+    const url = new URL(job.url);
+    const response = await new Promise<string>((resolve) => {
+      const socket = net.connect(Number(url.port), url.hostname);
+      let data = '';
+      socket.on('data', (d) => (data += d.toString()));
+      socket.on('close', () => resolve(data));
+      socket.on('error', () => resolve(data));
+      socket.write(
+        `GET ${url.pathname}/inputs HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ${job.token}\r\nContent-Length: 100000000\r\n\r\n`,
+      );
+    });
+    expect(response).toMatch(/^HTTP\/1\.1 400/);
+    job.unregister();
+  });
+
+  it('keeps answering other jobs while one job floods it (security review PoC)', async () => {
+    const evil = newJob();
+    const victim = newJob();
+    const url = new URL(evil.url);
+    const sockets: net.Socket[] = [];
+    for (let i = 0; i < 64; i++) {
+      const socket = net.connect(Number(url.port), '127.0.0.1');
+      socket.on('error', () => {});
+      socket.write(
+        `GET ${url.pathname}/inputs HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer ${evil.token}\r\nContent-Length: 100000000\r\n\r\n`,
+      );
+      sockets.push(socket);
+    }
+    const trickle = setInterval(
+      () => sockets.forEach((s) => s.write('a')),
+      200,
+    );
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const response = await fetch(`${victim.url}/inputs`, {
+        headers: { authorization: `Bearer ${victim.token}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      expect(response.status).toBe(200);
+    } finally {
+      clearInterval(trickle);
+      sockets.forEach((s) => s.destroy());
+      evil.unregister();
+      victim.unregister();
+    }
+  });
+
+  it('serves only blob:none partial clones', async () => {
+    const job = newJob();
+    const client = path.join(tmp, `filter-${Date.now()}`);
+    git(tmp, ['init', '--quiet', client]);
+    const fetchWith = (filter: string) =>
+      gitAsync(
+        client,
+        [
+          'fetch',
+          '--quiet',
+          '--depth=1',
+          `--filter=${filter}`,
+          `${job.url}/repo.git`,
+          lease.baseSha,
+        ],
+        clientEnv(job),
+      );
+    expect((await fetchWith('tree:0')).status).not.toBe(0);
+    expect((await fetchWith('blob:none')).status).toBe(0);
     job.unregister();
   });
 

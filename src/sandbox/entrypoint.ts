@@ -9,17 +9,19 @@
 
 import { isUtf8 } from 'buffer';
 import { spawn } from 'child_process';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
 import type {
-  SandboxCommit,
+  SandboxApplied,
   SandboxFileChange,
   SandboxInputs,
   SandboxResult,
 } from './protocol';
 
-const GIT_TIMEOUT_MS = 10 * 60 * 1000;
+// Generous: the server's overall timeout (60 minutes) is what bounds a job.
+const GIT_TIMEOUT_MS = 45 * 60 * 1000;
 
 // Used only until the inputs (which carry the server's limits) are read.
 const FALLBACK_ERROR_CHARS = 1000;
@@ -41,7 +43,10 @@ const main = async () => {
   const serverUrl = process.env.TROP_SANDBOX_URL;
   const token = process.env.TROP_SANDBOX_TOKEN;
   if (!serverUrl || !token) throw new Error('missing sandbox job settings');
-  // Nothing the job spawns needs to see these.
+  // Tidiness only: the token still reaches every git process (and the merge
+  // driver) through the extraHeader config below, and it stays readable in
+  // this process tree. That is fine: it only grants this job's own inputs,
+  // read-only fetches and result.
   delete process.env.TROP_SANDBOX_URL;
   delete process.env.TROP_SANDBOX_TOKEN;
 
@@ -75,6 +80,26 @@ const main = async () => {
         `server rejected the result: ${response.status} ${await response.text()}`,
       );
     }
+  };
+
+  // Uploads a file's contents once and returns its SHA-256.
+  const uploaded = new Set<string>();
+  const upload: Upload = async (contents) => {
+    const sha = createHash('sha256').update(contents).digest('hex');
+    if (uploaded.has(sha)) return sha;
+    const response = await fetch(`${serverUrl}/blobs/${sha}`, {
+      method: 'PUT',
+      headers: { authorization, 'content-type': 'application/octet-stream' },
+      body: contents,
+      redirect: 'error',
+    });
+    if (!response.ok) {
+      throw new Error(
+        `uploading a file failed: ${response.status} ${await response.text()}`,
+      );
+    }
+    uploaded.add(sha);
+    return sha;
   };
 
   let errorChars = FALLBACK_ERROR_CHARS;
@@ -230,8 +255,8 @@ const main = async () => {
       await git(['reset', '--quiet', '--hard', baseSha]);
       await git(['clean', '--quiet', '-ffdx']);
 
-      // The commit each patch made, or null for a patch that turned out to
-      // be on the target already (`git am` then makes no commit).
+      // The commit `git am` made for each patch, or null for a patch whose
+      // changes are on the target already (`git am` then makes none).
       const made: (string | null)[] = [];
       let applied = true;
       for (const [i, patch] of attempt.patches.entries()) {
@@ -248,14 +273,12 @@ const main = async () => {
           made.push(null);
           continue;
         }
-        // One patch, one commit: an mbox that git splits into several
-        // messages is not a patch GitHub would have served for a commit.
+        // The server's mbox holds one message, so one commit at most.
         const parent = (await git(['rev-parse', `${after}^`]))
           .toString('utf8')
           .trim();
-        if (parent !== before) {
-          throw new Error(`patch ${i} made more than one commit`);
-        }
+        if (parent !== before)
+          throw new Error(`patch ${i} made several commits`);
         made.push(after);
       }
 
@@ -265,13 +288,21 @@ const main = async () => {
         continue;
       }
 
-      const commits: (SandboxCommit | null)[] = [];
+      const results: (SandboxApplied | null)[] = [];
       for (const hash of made) {
-        commits.push(
-          hash ? await describeCommit(git, hash, inputs.includeChanges) : null,
+        results.push(
+          hash === null
+            ? null
+            : inputs.includeChanges
+              ? { changes: await collectChanges(git, hash, upload) }
+              : {},
         );
       }
-      await post({ outcome: 'success', attempt: attemptIndex, commits });
+      await post({
+        outcome: 'success',
+        attempt: attemptIndex,
+        applied: results,
+      });
       return;
     }
 
@@ -283,33 +314,18 @@ const main = async () => {
 };
 
 type Git = (args: string[], input?: string | Buffer) => Promise<Buffer>;
-
-/** A commit `git am` made, with its changed files if asked for. */
-const describeCommit = async (
-  git: Git,
-  hash: string,
-  includeChanges: boolean,
-): Promise<SandboxCommit> => {
-  const [name, email, date, message] = (
-    await git(['show', '-s', '--format=%an%x00%ae%x00%aI%x00%B', hash])
-  )
-    .toString('utf8')
-    .split('\0');
-  const commit: SandboxCommit = {
-    message: message ?? '',
-    author: { name: name.trim(), email: email.trim(), date: date.trim() },
-  };
-  if (includeChanges) commit.changes = await collectChanges(git, hash);
-  return commit;
-};
+type Upload = (contents: Buffer) => Promise<string>;
 
 /**
- * The files a commit changed, read from the commit's own tree (never from
- * the working tree, so a symlink is reported as a link and never followed).
+ * The files a commit changed, read from the commit's own tree: a symlink is
+ * its target (never followed), a submodule (gitlink) is a deletion as it has
+ * always been for trop (its checkout is an empty directory, not a file).
+ * Contents are uploaded and referred to by SHA-256.
  */
 const collectChanges = async (
   git: Git,
   hash: string,
+  upload: Upload,
 ): Promise<SandboxFileChange[]> => {
   // `:oldmode newmode oldoid newoid status` NUL path NUL, for each file.
   const raw = nulSeparated(
@@ -333,43 +349,38 @@ const collectChanges = async (
     entries.push({ path: raw[i + 1], mode: match[1], oid: match[2] });
   }
 
-  const files = entries.filter(
-    (e) => e.mode === '100644' || e.mode === '100755' || e.mode === '120000',
-  );
+  const isFile = (mode: string) =>
+    mode === '100644' || mode === '100755' || mode === '120000';
   const blobs = await readBlobs(
     git,
-    files.map((f) => f.oid),
+    entries.filter((e) => isFile(e.mode)).map((e) => e.oid),
   );
 
-  return entries.map((entry): SandboxFileChange => {
-    // Deleted (mode 000000) - or a submodule (gitlink), which trop has
-    // always backported as a deletion: its checkout is an empty directory,
-    // not a file.
+  const changes: SandboxFileChange[] = [];
+  for (const entry of entries) {
     if (entry.mode === '000000' || entry.mode === '160000') {
-      return { path: entry.path, deleted: true };
-    }
-    if (
-      entry.mode !== '100644' &&
-      entry.mode !== '100755' &&
-      entry.mode !== '120000'
-    ) {
+      changes.push({ path: entry.path, deleted: true });
+    } else if (isFile(entry.mode)) {
+      changes.push({
+        path: entry.path,
+        mode: entry.mode as '100644' | '100755' | '120000',
+        blob: await upload(blobs.get(entry.oid)!),
+      });
+    } else {
       throw new Error(`unexpected mode ${entry.mode} for ${entry.path}`);
     }
-    return {
-      path: entry.path,
-      mode: entry.mode,
-      content: blobs.get(entry.oid)!.toString('base64'),
-    };
-  });
+  }
+  return changes;
 };
 
 /** The contents of `oids`, read with a single `git cat-file --batch`. */
 const readBlobs = async (git: Git, oids: string[]) => {
   const blobs = new Map<string, Buffer>();
-  if (oids.length === 0) return blobs;
-  const out = await git(['cat-file', '--batch'], oids.join('\n') + '\n');
+  const unique = [...new Set(oids)];
+  if (unique.length === 0) return blobs;
+  const out = await git(['cat-file', '--batch'], unique.join('\n') + '\n');
   let offset = 0;
-  for (const oid of oids) {
+  for (const oid of unique) {
     const newline = out.indexOf(0x0a, offset);
     const match = /^([0-9a-f]+) blob (\d+)$/.exec(
       out.subarray(offset, newline).toString('utf8'),

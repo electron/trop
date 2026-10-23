@@ -31,7 +31,21 @@ export interface SandboxRunner {
 }
 
 /** From starting a job to its result, including waiting for a node. */
-export const DEFAULT_SANDBOX_TIMEOUT_MS = 20 * 60 * 1000;
+export const DEFAULT_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
+
+/**
+ * A failure of the sandbox machinery (a Job that can't start, dies, or runs
+ * out of time; the job server; a job reporting an internal error), as
+ * opposed to a conflict or an invalid result. These are retried, and if
+ * they persist, reported as internal errors rather than as a backport that
+ * needs to be done by hand.
+ */
+export class SandboxInfraError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SandboxInfraError';
+  }
+}
 
 /**
  * Settles with the job's result, or rejects when `ended` (the workload
@@ -45,7 +59,7 @@ export const raceResult = async (
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`Sandbox job ${spec.id} timed out`)),
+      () => reject(new SandboxInfraError(`Sandbox job ${spec.id} timed out`)),
       timeoutMs,
     );
   });
@@ -53,7 +67,7 @@ export const raceResult = async (
     return await Promise.race([
       spec.result,
       ended.then((reason) => {
-        throw new Error(
+        throw new SandboxInfraError(
           `Sandbox job ${spec.id} ended without a result: ${reason}`,
         );
       }),

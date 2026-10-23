@@ -12,7 +12,11 @@ import {
   KubernetesJobRunner,
 } from '../src/sandbox/kubernetes';
 import { SandboxResult } from '../src/sandbox/protocol';
-import { LocalProcessRunner, SandboxJobSpec } from '../src/sandbox/runner';
+import {
+  LocalProcessRunner,
+  SandboxInfraError,
+  SandboxJobSpec,
+} from '../src/sandbox/runner';
 
 // The Job template exactly as deploy/base ships it.
 const templateYaml: string = parse(
@@ -164,6 +168,70 @@ describe('assertSafeJobTemplate()', () => {
           mountPath: '/x',
         }),
     ],
+    ['no TTL', (j) => delete j.spec.ttlSecondsAfterFinished],
+    ['a day-long deadline', (j) => (j.spec.activeDeadlineSeconds = 86_400)],
+    ['parallel pods', (j) => (j.spec.parallelism = 2)],
+    [
+      'another node pool',
+      (j) =>
+        (j.spec.template.spec.nodeSelector = { 'electronjs.org/pool': 'apps' }),
+    ],
+    [
+      'tolerating everything',
+      (j) => j.spec.template.spec.tolerations.push({ operator: 'Exists' }),
+    ],
+    [
+      'node affinity',
+      (j) => (j.spec.template.spec.affinity = { nodeAffinity: {} }),
+    ],
+    ['a node name', (j) => (j.spec.template.spec.nodeName = 'node-1')],
+    [
+      'a priority class',
+      (j) => (j.spec.template.spec.priorityClassName = 'system-node-critical'),
+    ],
+    [
+      'another runtime',
+      (j) => (j.spec.template.spec.runtimeClassName = 'runc'),
+    ],
+    [
+      'no seccomp profile',
+      (j) => delete j.spec.template.spec.securityContext.seccompProfile,
+    ],
+    [
+      'an unconfined AppArmor profile',
+      (j) =>
+        (j.spec.template.spec.securityContext.appArmorProfile = {
+          type: 'Unconfined',
+        }),
+    ],
+    [
+      'sysctls',
+      (j) =>
+        (j.spec.template.spec.securityContext.sysctls = [
+          { name: 'net.ipv4.ip_unprivileged_port_start', value: '0' },
+        ]),
+    ],
+    [
+      'an unconfined container',
+      (j) =>
+        (j.spec.template.spec.containers[0].securityContext.seccompProfile = {
+          type: 'Unconfined',
+        }),
+    ],
+    [
+      'a container running as root',
+      (j) => (j.spec.template.spec.containers[0].securityContext.runAsUser = 0),
+    ],
+    [
+      'no memory limit',
+      (j) => delete j.spec.template.spec.containers[0].resources.limits.memory,
+    ],
+    [
+      'an unmasked /proc',
+      (j) =>
+        (j.spec.template.spec.containers[0].securityContext.procMount =
+          'Unmasked'),
+    ],
     [
       'missing policy labels',
       (j) =>
@@ -261,6 +329,91 @@ describe('KubernetesJobRunner', () => {
     expect(() => runner()).toThrow('Unsafe sandbox Job template');
   });
 
+  it('builds Jobs that the restricted Pod Security Standard admits', () => {
+    const job = runner().buildJob(spec(deferred<SandboxResult>().promise));
+    const pod = job.spec.template.spec;
+    const containers = [
+      ...pod.containers,
+      ...(pod.initContainers ?? []),
+      ...(pod.ephemeralContainers ?? []),
+    ];
+    // Baseline.
+    expect(pod.hostNetwork || pod.hostPID || pod.hostIPC).toBeFalsy();
+    for (const c of containers) {
+      expect(c.securityContext?.privileged).toBeFalsy();
+      expect(c.securityContext?.procMount ?? 'Default').toBe('Default');
+      for (const p of c.ports ?? []) expect(p.hostPort).toBeUndefined();
+    }
+    expect(pod.securityContext?.sysctls).toBeUndefined();
+    // Restricted.
+    const allowedVolumes = [
+      'configMap',
+      'csi',
+      'downwardAPI',
+      'emptyDir',
+      'ephemeral',
+      'persistentVolumeClaim',
+      'projected',
+      'secret',
+    ];
+    for (const v of pod.volumes) {
+      for (const key of Object.keys(v).filter((k) => k !== 'name')) {
+        expect(allowedVolumes).toContain(key);
+      }
+    }
+    for (const c of containers) {
+      const sc = c.securityContext;
+      expect(sc.allowPrivilegeEscalation).toBe(false);
+      expect(sc.runAsNonRoot ?? pod.securityContext.runAsNonRoot).toBe(true);
+      expect(sc.runAsUser ?? pod.securityContext.runAsUser).not.toBe(0);
+      expect(['RuntimeDefault', 'Localhost']).toContain(
+        (sc.seccompProfile ?? pod.securityContext.seccompProfile).type,
+      );
+      expect(sc.capabilities.drop).toContain('ALL');
+      expect(sc.capabilities.add ?? []).toEqual([]);
+    }
+  });
+
+  it("builds Jobs within the cluster's admission policy for sandbox Jobs", () => {
+    // electron/infra's ValidatingAdmissionPolicy for Jobs the server creates.
+    const job = runner().buildJob(spec(deferred<SandboxResult>().promise));
+    const meta = job.spec.template.metadata;
+    const pod = job.spec.template.spec;
+    expect(meta.labels).toMatchObject({
+      'app.kubernetes.io/part-of': 'trop',
+      'app.kubernetes.io/component': 'sandbox',
+    });
+    expect(meta.labels['azure.workload.identity/use']).toBeUndefined();
+    expect(pod.serviceAccountName).toBe('sandbox');
+    expect(pod.automountServiceAccountToken).toBe(false);
+    expect(pod.nodeSelector?.['electronjs.org/pool']).toBe('sandbox');
+    expect(pod.nodeName).toBeUndefined();
+    for (const t of pod.tolerations)
+      expect(t.key).toBe('electronjs.org/sandbox');
+    expect(pod.hostNetwork || pod.hostPID || pod.hostIPC).toBeFalsy();
+    for (const v of pod.volumes) {
+      expect(Object.keys(v).sort()).toEqual(['emptyDir', 'name']);
+    }
+    for (const c of [
+      ...pod.containers,
+      ...(pod.initContainers ?? []),
+      ...(pod.ephemeralContainers ?? []),
+    ]) {
+      expect(c.image).toMatch(
+        /^electronionicplatform\.azurecr\.io\/trop-sandbox[:@]/,
+      );
+      expect(c.securityContext.privileged).toBeFalsy();
+      expect(c.securityContext.allowPrivilegeEscalation).toBe(false);
+      expect(c.securityContext.capabilities?.add).toBeUndefined();
+      expect(c.envFrom).toBeUndefined();
+      for (const e of c.env ?? []) expect(e.valueFrom).toBeUndefined();
+      for (const p of c.ports ?? []) {
+        expect(p.hostPort).toBeUndefined();
+        expect(p.hostIP).toBeUndefined();
+      }
+    }
+  });
+
   it('creates the Job, returns the result and deletes the Job', async () => {
     const result = deferred<SandboxResult>();
     const run = runner().run(spec(result.promise));
@@ -309,7 +462,7 @@ describe('KubernetesJobRunner', () => {
     createStatus = 500;
     await expect(
       runner().run(spec(deferred<SandboxResult>().promise)),
-    ).rejects.toThrow('Creating sandbox Job');
+    ).rejects.toThrow(SandboxInfraError);
     expect(requests.at(-1)?.method).toBe('DELETE');
   });
 
@@ -328,6 +481,7 @@ describe('KubernetesJobRunner', () => {
       (e: Error) => e,
     );
     await vi.advanceTimersByTimeAsync(4_000);
+    expect(await failed).toBeInstanceOf(SandboxInfraError);
     expect((await failed).message).toContain('ImagePullBackOff');
     expect(requests.at(-1)?.method).toBe('DELETE');
   });
@@ -347,6 +501,7 @@ describe('KubernetesJobRunner', () => {
       (e: Error) => e,
     );
     await vi.advanceTimersByTimeAsync(25_000);
+    expect(await failed).toBeInstanceOf(SandboxInfraError);
     expect((await failed).message).toContain('Unschedulable');
   });
 
@@ -367,6 +522,7 @@ describe('KubernetesJobRunner', () => {
       (e: Error) => e,
     );
     await vi.advanceTimersByTimeAsync(5_000);
+    expect(await failed).toBeInstanceOf(SandboxInfraError);
     expect((await failed).message).toContain('ended without a result');
     expect(requests.at(-1)?.method).toBe('DELETE');
   });
@@ -379,6 +535,7 @@ describe('KubernetesJobRunner', () => {
       (e: Error) => e,
     );
     await vi.advanceTimersByTimeAsync(31_000);
+    expect(await timedOut).toBeInstanceOf(SandboxInfraError);
     expect((await timedOut).message).toContain('timed out');
     expect(requests.at(-1)?.method).toBe('DELETE');
   });
@@ -388,6 +545,8 @@ describe('KubernetesJobRunner', () => {
     const run = runner().run(spec(result.promise));
     result.reject(new Error('Invalid sandbox result: nope'));
     await expect(run).rejects.toThrow('Invalid sandbox result');
+    // Not an infrastructure failure: it is not retried.
+    await expect(run).rejects.not.toBeInstanceOf(SandboxInfraError);
     expect(requests.at(-1)?.method).toBe('DELETE');
   });
 

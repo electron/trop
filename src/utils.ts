@@ -14,9 +14,15 @@ import { PRStatus, BackportPurpose, LogLevel, PRChange } from './enums';
 
 import * as labelUtils from './utils/label-utils';
 import { getRepoToken } from './utils/token-util';
-import { runSandboxedBackport } from './sandbox';
+import {
+  BackportAttempt,
+  BackportCommit,
+  runSandboxedBackport,
+} from './sandbox';
+import { OriginalFile } from './sandbox/backstop';
 import { createBackportCommits } from './sandbox/commits';
-import { SandboxAttempt } from './sandbox/protocol';
+import { commitMessage, PatchError, splitPatch } from './sandbox/patches';
+import { SandboxInfraError } from './sandbox/runner';
 import { getSupportedBranches, getBackportPattern } from './utils/branch-util';
 import {
   CHECK_RUN_MAX_ANNOTATIONS,
@@ -96,7 +102,7 @@ export const labelClosedPR = async (
  */
 const getAllCommitsAttempt = async (
   opts: TryBackportOptions,
-): Promise<SandboxAttempt | null> => {
+): Promise<BackportAttempt | null> => {
   const { context } = opts;
 
   // Gather the commits of every PR bottom to top so a stack applies in the
@@ -163,20 +169,27 @@ and must be performed manually.',
     `Found ${commits.length} commits to backport - requesting details now.`,
   );
 
-  const patches: string[] = new Array(commits.length).fill('');
+  const backportCommits: BackportCommit[] = new Array(commits.length);
+  let unusable = false;
   const q = new Queue({ concurrency: 5 });
   q.stop();
 
   for (const [i, commit] of commits.entries()) {
     q.push(async () => {
-      const patchUrl = `https://api.github.com/repos/${opts.slug}/commits/${commit}`;
-      const patchBody = await fetch(patchUrl, {
-        headers: {
-          Accept: 'application/vnd.github.VERSION.patch',
-          Authorization: `token ${opts.repoAccessToken}`,
-        },
-      });
-      patches[i] = await patchBody.text();
+      try {
+        backportCommits[i] = await fetchBackportCommit(opts, commit);
+      } catch (error) {
+        // A patch `git am` could never apply (as trop used to find out
+        // only once it tried): this attempt fails, the squash may not.
+        if (!(error instanceof PatchError)) throw error;
+        log(
+          'backportImpl',
+          LogLevel.WARN,
+          `Cannot backport all commits: ${error.message}`,
+        );
+        unusable = true;
+        return;
+      }
       log(
         'backportImpl',
         LogLevel.INFO,
@@ -189,45 +202,123 @@ and must be performed manually.',
     q.start((err) => (err ? reject(err) : resolve())),
   );
   log('backportImpl', LogLevel.INFO, 'Got all commit info');
+  if (unusable) return null;
 
-  return { kind: 'all', patches };
+  return { kind: 'all', commits: backportCommits };
 };
 
-const fetchSquashPatch = async (opts: TryBackportOptions, pr: WebHookPR) => {
-  const patchUrl = `https://api.github.com/repos/${opts.slug}/commits/${pr.merge_commit_sha}`;
-  const patchBody = await fetch(patchUrl, {
-    headers: {
-      Accept: 'application/vnd.github.VERSION.patch',
-      Authorization: `token ${opts.repoAccessToken}`,
-    },
-  });
-
-  const rawPatch = await patchBody.text();
-  let patch = '';
-  let subjectLineFound = false;
-  for (const patchLine of rawPatch.split('\n')) {
-    if (patchLine.startsWith('Subject: ') && !subjectLineFound) {
-      subjectLineFound = true;
-      const branchAwarePatchLine = patchLine
-        // Replace branch references in commit message with new branch
-        .replaceAll(`(${getEffectiveBaseRef(pr)})`, `${opts.targetBranch}`)
-        // Replace PR references in squashed message with empty string
-        .replaceAll(/ \(#[0-9]+\)$/g, '');
-      patch += `${branchAwarePatchLine}\n`;
-    } else {
-      patch += `${patchLine}\n`;
+/** GETs a commit from the REST API in one of its text media types. */
+const fetchCommitAs = async (
+  opts: TryBackportOptions,
+  sha: string,
+  type: 'patch' | 'diff',
+) => {
+  const url = `https://api.github.com/repos/${opts.slug}/commits/${sha}`;
+  for (let attempt = 1; ; attempt++) {
+    const response = await fetch(url, {
+      headers: {
+        Accept: `application/vnd.github.VERSION.${type}`,
+        Authorization: `token ${opts.repoAccessToken}`,
+      },
+    });
+    if (response.ok) return response.text();
+    if (response.status < 500 || attempt === 3) {
+      // trop used to hand the error body to `git am`, which failed on it,
+      // so the attempt failed: same here.
+      throw new PatchError(
+        `Fetching the ${type} of ${sha} failed: ${response.status}`,
+      );
     }
+    await new Promise((r) => setTimeout(r, 1000 * attempt));
   }
-
-  return patch;
 };
+
+/** GitHub's file list for a commit (up to the API's 3000), or null. */
+const fetchCommitFiles = async (
+  opts: TryBackportOptions,
+  sha: string,
+): Promise<OriginalFile[] | null> => {
+  try {
+    const files: OriginalFile[] = [];
+    for (let page = 1; page <= 30; page++) {
+      const { data } = await opts.context.octokit.repos.getCommit(
+        opts.context.repo({ ref: sha, per_page: 100, page }),
+      );
+      for (const f of data.files ?? []) {
+        files.push({
+          filename: f.filename,
+          previousFilename: f.previous_filename,
+          status: f.status,
+          sha: f.sha,
+        });
+      }
+      if ((data.files?.length ?? 0) < 100) break;
+    }
+    return files;
+  } catch (error) {
+    log(
+      'backportImpl',
+      LogLevel.WARN,
+      `Could not list the files of ${sha}`,
+      error,
+    );
+    return null;
+  }
+};
+
+/**
+ * Everything the sandbox and the server need about one commit: its diff,
+ * cut out of its `.patch` against its `.diff` so no part of the message can
+ * be applied, and the message and author `git am` would have given it.
+ * `editPatch` adjusts the patch text first (the squash subject rewrite).
+ */
+const fetchBackportCommit = async (
+  opts: TryBackportOptions,
+  sha: string,
+  editPatch: (patch: string) => string = (p) => p,
+): Promise<BackportCommit> => {
+  const [patch, diff, files] = await Promise.all([
+    fetchCommitAs(opts, sha, 'patch'),
+    fetchCommitAs(opts, sha, 'diff'),
+    fetchCommitFiles(opts, sha),
+  ]);
+  const { head, diff: own } = splitPatch(editPatch(patch), diff);
+  const { message, author } = commitMessage(head);
+  if (!author) throw new PatchError(`The patch of ${sha} has no author`);
+  return { diff: own, message, author, files };
+};
+
+/**
+ * The squash commit's `.patch` with its subject made branch-aware, as trop
+ * has always done: the PR's base branch replaced by the target, and the
+ * trailing PR number dropped.
+ */
+const editSquashPatch =
+  (opts: TryBackportOptions, pr: WebHookPR) => (rawPatch: string) => {
+    let patch = '';
+    let subjectLineFound = false;
+    for (const patchLine of rawPatch.split('\n')) {
+      if (patchLine.startsWith('Subject: ') && !subjectLineFound) {
+        subjectLineFound = true;
+        const branchAwarePatchLine = patchLine
+          // Replace branch references in commit message with new branch
+          .replaceAll(`(${getEffectiveBaseRef(pr)})`, `${opts.targetBranch}`)
+          // Replace PR references in squashed message with empty string
+          .replaceAll(/ \(#[0-9]+\)$/g, '');
+        patch += `${branchAwarePatchLine}\n`;
+      } else {
+        patch += `${patchLine}\n`;
+      }
+    }
+    return patch;
+  };
 
 /**
  * The squash-merge commits of the PRs, or null if any of them is unmerged.
  */
 const getSquashAttempt = async (
   opts: TryBackportOptions,
-): Promise<SandboxAttempt | null> => {
+): Promise<BackportAttempt | null> => {
   // Fetch the merged squash commit(s).
   log('backportImpl', LogLevel.INFO, `Fetching squash commit details`);
 
@@ -236,14 +327,20 @@ const getSquashAttempt = async (
     return null;
   }
 
-  const patches: string[] = [];
+  const commits: BackportCommit[] = [];
   for (const pr of opts.prs) {
-    patches.push(await fetchSquashPatch(opts, pr));
+    commits.push(
+      await fetchBackportCommit(
+        opts,
+        pr.merge_commit_sha!,
+        editSquashPatch(opts, pr),
+      ),
+    );
   }
 
   log('backportImpl', LogLevel.INFO, 'Got squash commit details');
 
-  return { kind: 'squash', patches };
+  return { kind: 'squash', commits };
 };
 
 export const getPRNumbersFromPRBody = (pr: WebHookPR, checkNotBot = false) => {
@@ -677,6 +774,9 @@ export const backportStackImpl = async (
       );
 
       const repoAccessToken = await getRepoToken(robot, context);
+      // As before the sandbox, a failure from here on reports an (empty)
+      // diff with the failed check, a conflict its diff.
+      conflictDiff = '';
 
       // Create temporary branch name.
       const sanitizedTitle = pr.title
@@ -698,9 +798,20 @@ export const backportStackImpl = async (
       const attempts = (
         await Promise.all([
           getAllCommitsAttempt(tryOpts),
-          getSquashAttempt(tryOpts),
+          // Fetched up front so both run in one sandbox job; trop used to
+          // fetch it only after the first attempt failed, so a failure to
+          // fetch it doesn't fail the backport.
+          getSquashAttempt(tryOpts).catch((error: unknown) => {
+            log(
+              'backportImpl',
+              LogLevel.WARN,
+              'Could not fetch the squash commit(s)',
+              error,
+            );
+            return null;
+          }),
         ])
-      ).filter((attempt): attempt is SandboxAttempt => attempt !== null);
+      ).filter((attempt): attempt is BackportAttempt => attempt !== null);
       if (attempts.length === 0) {
         throw new Error(`Found nothing to backport to ${targetBranch}`);
       }
@@ -711,7 +822,6 @@ export const backportStackImpl = async (
         `Applying ${attempts.map((a) => a.kind).join(', then ')} patches to "${targetBranch}" for temp: "${tempBranch}"`,
       );
 
-      conflictDiff = '';
       const timer = Date.now();
       const outcome = await runSandboxedBackport({
         slug,
@@ -719,19 +829,22 @@ export const backportStackImpl = async (
         targetBranch,
         attempts,
         includeChanges: purpose === BackportPurpose.ExecuteBackport,
+        // Push the commits to the target repo.
+        onSuccess:
+          purpose === BackportPurpose.ExecuteBackport
+            ? (success) =>
+                createBackportCommits({
+                  github: context.octokit,
+                  context,
+                  baseSha: success.baseSha,
+                  commits: success.commits,
+                  readBlob: success.readBlob,
+                  tempBranch,
+                })
+            : undefined,
       });
 
       if (outcome.kind === 'success') {
-        // Push the commits to the target repo.
-        if (purpose === BackportPurpose.ExecuteBackport) {
-          await createBackportCommits({
-            github: context.octokit,
-            context,
-            baseSha: outcome.baseSha,
-            commits: outcome.commits,
-            tempBranch,
-          });
-        }
         (outcome.attempt === 'all'
           ? backportViaAllHisto
           : backportViaSquashHisto
@@ -897,7 +1010,33 @@ export const backportStackImpl = async (
         }),
       );
     },
-    async () => {
+    async (error: unknown) => {
+      if (error instanceof SandboxInfraError) {
+        // The sandbox couldn't run (after retries): not a conflict, so no
+        // "needs manual" label or comment; the backport can just be retried.
+        log(
+          'backportImpl',
+          LogLevel.ERROR,
+          `${bp} for "${slug}" stopped by an internal error`,
+          error,
+        );
+        if (purpose === BackportPurpose.ExecuteBackport) {
+          await context.octokit.issues.createComment(
+            context.repo({
+              issue_number: pr.number,
+              body: `An internal error stopped me from backporting this PR to "${targetBranch}"; this is not a merge conflict. To try again, comment \`/trop run backport-to ${targetBranch}\`.`,
+            }),
+          );
+        }
+        const checkRun = await getOrCreateCheckRun(context, pr, targetBranch, {
+          supersedeCompleted: purpose === BackportPurpose.Check,
+        });
+        await markBackportCheckFailed(context, checkRun, targetBranch, {
+          infraError: true,
+        });
+        return;
+      }
+
       let annotations: unknown[] | null = null;
       let diff;
       let rawDiff;

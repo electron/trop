@@ -9,7 +9,22 @@ import { LogLevel } from '../enums';
 import { gitAuthEnv, githubRemoteUrl } from '../utils/git-auth';
 import { log } from '../utils/log-util';
 import { assertValidBranchName, OBJECT_ID, runGit } from './git';
-import { LIMITS } from './protocol';
+import { diffFiles, diffPaths } from './patches';
+import { LIMITS, validateRepoPath } from './protocol';
+
+/**
+ * Whether `p` is a valid repository path that `git cat-file --batch-check`
+ * can be asked about (its input is one name per line).
+ */
+const batchable = (p: string) => {
+  if (p.includes('\n')) return false;
+  try {
+    validateRepoPath('path', p);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const baseDir =
   process.env.WORKING_DIR ?? path.resolve(os.tmpdir(), 'trop-working');
@@ -171,36 +186,221 @@ export class RepoCache {
   }
 
   /**
+   * Resolves abbreviated object ids to the full ids of the blobs in the cache
+   * they could name: one for a unique prefix, every candidate blob for an
+   * ambiguous one (as `git am -3` picks among blobs itself), none if the
+   * cache has no such blob. Only validated hex strings ever reach git here.
+   */
+  private async resolveBlobPrefixes(
+    prefixes: string[],
+  ): Promise<Map<string, string[]>> {
+    const resolved = new Map<string, string[]>();
+    const valid = prefixes.filter((p) => /^[0-9a-f]{4,64}$/.test(p));
+    if (valid.length === 0) return resolved;
+
+    const typesOf = async (names: string[]) =>
+      (
+        await this.git(
+          ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
+          undefined,
+          names.join('\n') + '\n',
+        )
+      )
+        .split('\n')
+        .slice(0, names.length);
+
+    const ambiguous: string[] = [];
+    for (const [i, line] of (await typesOf(valid)).entries()) {
+      const [oid, type] = line.split(' ');
+      if (type === 'blob' && OBJECT_ID.test(oid)) {
+        resolved.set(valid[i], [oid]);
+      } else if (type === 'ambiguous') {
+        ambiguous.push(valid[i]);
+      }
+    }
+    for (const prefix of ambiguous) {
+      let candidates: string[] = [];
+      try {
+        candidates = (await this.git(['rev-parse', `--disambiguate=${prefix}`]))
+          .split('\n')
+          .filter((c) => OBJECT_ID.test(c));
+      } catch {}
+      if (candidates.length === 0) continue;
+      const blobs = (await typesOf(candidates))
+        .map((line) => line.split(' '))
+        .filter(([oid, type]) => type === 'blob' && OBJECT_ID.test(oid))
+        .map(([oid]) => oid);
+      if (blobs.length > 0) resolved.set(prefix, blobs);
+    }
+    return resolved;
+  }
+
+  /**
    * Resolves the abbreviated pre-image blob ids in the patches' `index` lines
    * to full ids, for the blobs the cache has.
    *
    * `git am -3` falls back to a three-way merge by looking these blobs up
    * locally by their abbreviated id, which a partial clone cannot fetch on
-   * demand. The job therefore fetches them by full id up front. Only hex
-   * strings extracted from the patch text ever reach git here.
+   * demand. The job therefore fetches them by full id up front.
    */
-  async resolvePreimageBlobs(patches: string[]): Promise<string[]> {
+  async resolvePreimageBlobs(diffs: string[]): Promise<string[]> {
     const prefixes = new Set<string>();
-    for (const patch of patches) {
-      for (const match of patch.matchAll(
-        /^index ([0-9a-f]{7,64})\.\.[0-9a-f]{7,64}(?: [0-7]{6})?$/gm,
-      )) {
+    for (const diff of diffs) {
+      for (const file of diffFiles(diff)) {
         if (prefixes.size >= LIMITS.preimageBlobs) break;
-        if (!/^0+$/.test(match[1])) prefixes.add(match[1]);
+        if (file.oldPath && file.preimage) prefixes.add(file.preimage);
       }
     }
-    if (prefixes.size === 0) return [];
+    const resolved = await this.resolveBlobPrefixes([...prefixes]);
+    return [...new Set([...resolved.values()].flat())];
+  }
 
-    const output = await this.git(
-      ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
-      undefined,
-      [...prefixes].join('\n') + '\n',
+  /**
+   * Where the files the patches modify, rename away from or delete live on
+   * the target branch at `baseSha`, if it renamed them: the paths `git am -3`
+   * may legitimately write besides the patches' own.
+   *
+   * Recomputes what `git am -3` does, from the cache's own objects only: a
+   * merge base made of the patches' pre-image blobs at their paths, and the
+   * target tree. A pre-image path missing on the target is a rename source,
+   * matched against the target's files with the same rename detection a
+   * merge uses (50% similarity). The patches' paths below a directory the
+   * target renamed are mapped too, should git follow the directory rename.
+   */
+  async renamedOnTarget(baseSha: string, diffs: string[]) {
+    const targets = new Set<string>();
+    if (!OBJECT_ID.test(baseSha)) return targets;
+
+    const files = diffs
+      .flatMap((d) => diffFiles(d))
+      .flatMap((f) =>
+        f.oldPath && f.preimage
+          ? [
+              {
+                oldPath: f.oldPath,
+                preimage: f.preimage,
+                mode: f.oldMode ?? '100644',
+              },
+            ]
+          : [],
+      )
+      .filter((f) => {
+        if (!/^(100644|100755|120000)$/.test(f.mode)) return false;
+        return batchable(f.oldPath);
+      });
+    if (files.length === 0) return targets;
+
+    // Which of them the target does not have at that path.
+    const presence = (
+      await this.git(
+        ['cat-file', '--batch-check=%(objecttype)'],
+        undefined,
+        files.map((f) => `${baseSha}:${f.oldPath}`).join('\n') + '\n',
+      )
+    ).split('\n');
+    const missing = files.filter((_, i) => presence[i]?.endsWith(' missing'));
+    if (missing.length === 0) return targets;
+
+    const resolved = await this.resolveBlobPrefixes(
+      missing.map((f) => f.preimage),
     );
-    const blobs = new Set<string>();
-    for (const line of output.split('\n')) {
-      const [oid, type] = line.split(' ');
-      if (type === 'blob' && OBJECT_ID.test(oid)) blobs.add(oid);
+    const base = missing
+      .map((f) => ({ ...f, oid: resolved.get(f.preimage)?.[0] }))
+      .filter((f): f is typeof f & { oid: string } => !!f.oid);
+    if (base.length === 0) return targets;
+
+    // The fake merge base goes into a scratch object directory (reading the
+    // cache's objects through alternates), never into the cache itself.
+    const scratch = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), 'trop-renames-'),
+    );
+    try {
+      const env = {
+        GIT_OBJECT_DIRECTORY: path.join(scratch, 'objects'),
+        GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(this.dir, 'objects'),
+        GIT_INDEX_FILE: path.join(scratch, 'index'),
+      };
+      await fs.promises.mkdir(env.GIT_OBJECT_DIRECTORY);
+      // A path git refuses for an index (and hence a tree) can't be renamed.
+      await this.git(
+        ['update-index', '-z', '--index-info'],
+        env,
+        base.map((f) => `${f.mode} ${f.oid}\t${f.oldPath}\0`).join(''),
+      );
+      const tree = (await this.git(['write-tree'], env)).trim();
+      if (!OBJECT_ID.test(tree)) return targets;
+
+      const renames = (
+        await this.git(
+          [
+            'diff-tree',
+            '-r',
+            '-z',
+            '--find-renames=50%',
+            '-l0',
+            '--diff-filter=R',
+            '--name-status',
+            tree,
+            baseSha,
+          ],
+          env,
+        )
+      ).split('\0');
+      // `R<score>` NUL old NUL new NUL, for each rename.
+      const dirMoves = new Map<string, string>();
+      for (let i = 0; i + 2 < renames.length; i += 3) {
+        if (!renames[i].startsWith('R')) continue;
+        const [from, to] = [renames[i + 1], renames[i + 2]];
+        targets.add(to);
+        const fromParts = from.split('/');
+        const toParts = to.split('/');
+        while (
+          fromParts.length > 1 &&
+          toParts.length > 1 &&
+          fromParts[fromParts.length - 1] === toParts[toParts.length - 1]
+        ) {
+          fromParts.pop();
+          toParts.pop();
+        }
+        const fromDir = fromParts.slice(0, -1).join('/');
+        const toDir = toParts.slice(0, -1).join('/');
+        if (fromDir !== toDir) dirMoves.set(fromDir, toDir);
+      }
+      for (const diff of diffs) {
+        for (const p of diffPaths(diff)) {
+          for (const [fromDir, toDir] of dirMoves) {
+            const prefix = fromDir ? `${fromDir}/` : '';
+            if (p.startsWith(prefix)) {
+              targets.add(
+                `${toDir ? `${toDir}/` : ''}${p.slice(prefix.length)}`,
+              );
+            }
+          }
+        }
+      }
+      return targets;
+    } finally {
+      await fs.promises.rm(scratch, { recursive: true, force: true });
     }
-    return [...blobs];
+  }
+
+  /** The object ids at `paths` in `commit` (null where there is none). */
+  async idsAt(commit: string, paths: string[]) {
+    const ids = new Map<string, string | null>();
+    if (!OBJECT_ID.test(commit)) throw new Error(`not a commit id: ${commit}`);
+    const valid = paths.filter(batchable);
+    if (valid.length === 0) return ids;
+    const output = (
+      await this.git(
+        ['cat-file', '--batch-check=%(objectname)'],
+        undefined,
+        valid.map((p) => `${commit}:${p}`).join('\n') + '\n',
+      )
+    ).split('\n');
+    for (const [i, p] of valid.entries()) {
+      const id = output[i]?.trim() ?? '';
+      ids.set(p, OBJECT_ID.test(id) ? id : null);
+    }
+    return ids;
   }
 }

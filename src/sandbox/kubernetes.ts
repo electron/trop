@@ -8,6 +8,7 @@ import { log } from '../utils/log-util';
 import {
   DEFAULT_SANDBOX_TIMEOUT_MS,
   raceResult,
+  SandboxInfraError,
   SandboxJobSpec,
   SandboxRunner,
 } from './runner';
@@ -108,8 +109,17 @@ export const assertSafeJobTemplate = (job: Json) => {
   if (job?.apiVersion !== 'batch/v1' || job?.kind !== 'Job') fail('not a Job');
   const spec = job.spec ?? fail('no spec');
   if (spec.backoffLimit !== 0) fail('backoffLimit must be 0');
-  if (typeof spec.activeDeadlineSeconds !== 'number') {
-    fail('activeDeadlineSeconds must be set');
+  if (
+    typeof spec.activeDeadlineSeconds !== 'number' ||
+    spec.activeDeadlineSeconds > 4 * 60 * 60
+  ) {
+    fail('activeDeadlineSeconds must be set (at most 4 hours)');
+  }
+  if (typeof spec.ttlSecondsAfterFinished !== 'number') {
+    fail('ttlSecondsAfterFinished must be set');
+  }
+  if ((spec.parallelism ?? 1) !== 1 || (spec.completions ?? 1) !== 1) {
+    fail('parallelism and completions must be 1');
   }
   const pod = spec.template?.spec ?? fail('no pod spec');
   const labels = spec.template?.metadata?.labels ?? {};
@@ -133,10 +143,48 @@ export const assertSafeJobTemplate = (job: Json) => {
   }
   if (pod.shareProcessNamespace) fail('shareProcessNamespace is not allowed');
   if (pod.restartPolicy !== 'Never') fail('restartPolicy must be Never');
-  if (pod.dnsPolicy !== 'None') fail('dnsPolicy must be None');
-  if (pod.securityContext?.runAsNonRoot !== true) {
-    fail('runAsNonRoot must be true');
+  // On the tainted sandbox pool and nowhere else.
+  if (
+    JSON.stringify(pod.nodeSelector) !==
+    JSON.stringify({ 'electronjs.org/pool': 'sandbox' })
+  ) {
+    fail('nodeSelector must be exactly electronjs.org/pool=sandbox');
   }
+  if (
+    JSON.stringify(pod.tolerations) !==
+    JSON.stringify([
+      {
+        key: 'electronjs.org/sandbox',
+        operator: 'Equal',
+        value: 'true',
+        effect: 'NoSchedule',
+      },
+    ])
+  ) {
+    fail('tolerations must be exactly the sandbox pool taint');
+  }
+  if (pod.affinity || pod.nodeName || pod.priorityClassName) {
+    fail('affinity, nodeName and priorityClassName are not allowed');
+  }
+  if (
+    pod.runtimeClassName !== undefined &&
+    pod.runtimeClassName !== 'kata-vm-isolation'
+  ) {
+    fail('runtimeClassName may only be kata-vm-isolation');
+  }
+  if (pod.dnsPolicy !== 'None') fail('dnsPolicy must be None');
+  const podSc = pod.securityContext ?? {};
+  if (podSc.runAsNonRoot !== true) fail('runAsNonRoot must be true');
+  if (podSc.runAsUser === 0 || podSc.runAsGroup === 0) {
+    fail('must not run as root');
+  }
+  if (podSc.seccompProfile?.type !== 'RuntimeDefault') {
+    fail('seccompProfile must be RuntimeDefault');
+  }
+  if (podSc.appArmorProfile?.type === 'Unconfined') {
+    fail('appArmorProfile must not be Unconfined');
+  }
+  if (podSc.sysctls?.length) fail('sysctls are not allowed');
   if (pod.initContainers?.length || pod.ephemeralContainers?.length) {
     fail('only a single container is allowed');
   }
@@ -176,6 +224,21 @@ export const assertSafeJobTemplate = (job: Json) => {
     fail('capabilities must drop ALL');
   }
   if (sc.capabilities?.add?.length) fail('capabilities must not be added');
+  if (sc.runAsNonRoot === false || sc.runAsUser === 0 || sc.runAsGroup === 0) {
+    fail('the container must not run as root');
+  }
+  if (
+    sc.seccompProfile?.type === 'Unconfined' ||
+    sc.appArmorProfile?.type === 'Unconfined'
+  ) {
+    fail('the container must not be Unconfined');
+  }
+  if (
+    !container.resources?.limits?.cpu ||
+    !container.resources?.limits?.memory
+  ) {
+    fail('cpu and memory limits are required');
+  }
   if (sc.procMount !== undefined && sc.procMount !== 'Default') {
     fail('procMount must be Default');
   }
@@ -209,7 +272,7 @@ export interface KubernetesRunnerConfig {
   schedulingTimeoutMs?: number;
 }
 
-export const DEFAULT_SCHEDULING_TIMEOUT_MS = 10 * 60 * 1000;
+export const DEFAULT_SCHEDULING_TIMEOUT_MS = 15 * 60 * 1000;
 
 /** Runs each sandbox job as a Kubernetes Job built from a template. */
 export class KubernetesJobRunner implements SandboxRunner {
@@ -294,14 +357,14 @@ export class KubernetesJobRunner implements SandboxRunner {
     try {
       const created = await this.kube.request('POST', this.jobsPath, job);
       if (created.status !== 201) {
-        throw new Error(
-          `Creating sandbox Job ${name} failed: ${created.status} ${created.body.message ?? ''}`,
-        );
+        throw new Error(`${created.status} ${created.body.message ?? ''}`);
       }
     } catch (error) {
       // The API server may have created it even though the call failed.
       await this.delete(name);
-      throw error;
+      throw new SandboxInfraError(
+        `Creating sandbox Job ${name} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     log('KubernetesJobRunner', LogLevel.INFO, `Created sandbox Job ${name}`);
 

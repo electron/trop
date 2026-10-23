@@ -358,9 +358,12 @@ export async function markBackportCheckFailed(
   {
     rawDiff,
     annotations,
+    infraError,
   }: {
     rawDiff?: string;
     annotations?: unknown[];
+    /** The backport was stopped by an internal error, not a conflict. */
+    infraError?: boolean;
   },
 ) {
   const updateOpts = context.repo({
@@ -368,12 +371,20 @@ export async function markBackportCheckFailed(
     name: checkRun.name,
     conclusion: 'neutral' as const,
     completed_at: new Date().toISOString(),
-    output: {
-      title: 'Backport Failed',
-      summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
-      text: rawDiff !== undefined ? buildFailedDiffText(rawDiff) : undefined,
-      annotations,
-    },
+    output: infraError
+      ? {
+          title: 'Backport Errored',
+          summary: `trop hit an internal error while backporting this PR to "${targetBranch}"; this is not a merge conflict, and retrying may succeed.`,
+          text: undefined as string | undefined,
+          annotations: undefined as unknown[] | undefined,
+        }
+      : {
+          title: 'Backport Failed',
+          summary: `This PR was checked and could not be automatically backported to "${targetBranch}" cleanly`,
+          text:
+            rawDiff !== undefined ? buildFailedDiffText(rawDiff) : undefined,
+          annotations,
+        },
   });
 
   log(

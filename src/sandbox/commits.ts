@@ -1,30 +1,33 @@
 import { isUtf8 } from 'buffer';
 
 import { SimpleWebHookRepoContext, WebHookRepoContext } from '../types';
-import { SandboxCommit } from './protocol';
+import type { BackportResultCommit } from './index';
 
 export interface CreateBackportCommitsOptions {
   github: WebHookRepoContext['octokit'];
   context: SimpleWebHookRepoContext;
   /** The target branch tip the server itself resolved from GitHub. */
   baseSha: string;
-  /** Validated commits from the sandbox, oldest first. */
-  commits: SandboxCommit[];
+  /** The commits to create, oldest first. */
+  commits: BackportResultCommit[];
+  /** Reads a file the sandbox uploaded. */
+  readBlob: (sha256: string) => Promise<Buffer>;
   /** The branch to create for the backport PR. */
   tempBranch: string;
 }
 
 /**
- * Recreates the sandbox's commits on GitHub with the REST API (blobs, trees,
- * commits and finally the branch ref), parented on `baseSha`. The sandbox's
- * own commit objects are never used: only its validated file contents,
- * messages and authors.
+ * Creates the backport's commits on GitHub with the REST API (blobs, trees,
+ * commits and finally the branch ref), parented on `baseSha`, as trop always
+ * has. The file contents come from the sandbox (validated); messages and
+ * authors are the server's own.
  */
 export const createBackportCommits = async ({
   github,
   context,
   baseSha,
   commits,
+  readBlob,
   tempBranch,
 }: CreateBackportCommitsOptions) => {
   let baseCommitSha = baseSha;
@@ -50,7 +53,7 @@ export const createBackportCommits = async ({
               };
             }
 
-            const contents = Buffer.from(change.content, 'base64');
+            const contents = await readBlob(change.blob);
             // A symlink is stored as a blob holding its target, which is
             // never resolved: the sandbox read it from the commit's tree.
             if (change.mode === '120000') {
@@ -73,7 +76,7 @@ export const createBackportCommits = async ({
 
             const blob = await github.git.createBlob(
               context.repo({
-                content: change.content,
+                content: contents.toString('base64'),
                 encoding: 'base64',
               }),
             );
@@ -88,7 +91,7 @@ export const createBackportCommits = async ({
       }),
     );
 
-    const newMessage = `${commit.message.trim()}\n\nCo-authored-by: ${commit.author.name} <${commit.author.email}>`;
+    const newMessage = `${commit.message}\n\nCo-authored-by: ${commit.author.name} <${commit.author.email}>`;
 
     const newCommit = await github.git.createCommit(
       context.repo({
