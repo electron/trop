@@ -174,6 +174,30 @@ describe('backportImpl()', () => {
     expect(addLabels).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['a job that timed out', 'Sandbox job x timed out'],
+    ['a refused upload', 'Sandbox job x failed: uploading a file failed: 413'],
+  ])(
+    'leaves %s to a manual backport, as any failure was',
+    async (_, message) => {
+      vi.mocked(runSandboxedBackport).mockRejectedValueOnce(
+        new SandboxInfraError(message, false),
+      );
+      const ctx = await backport(BackportPurpose.ExecuteBackport);
+      const { body } = ctx.octokit.issues.createComment.mock.calls[0][0];
+      expect(body).toContain('backport manually');
+      expect(addLabels).toHaveBeenCalledWith(expect.anything(), 1234, [
+        'needs-manual-bp/42-x-y',
+      ]);
+      expect(markBackportCheckFailed).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        '42-x-y',
+        expect.not.objectContaining({ infraError: true }),
+      );
+    },
+  );
+
   it('still asks for a manual backport after a conflict', async () => {
     vi.mocked(runSandboxedBackport).mockResolvedValueOnce({
       kind: 'conflict',

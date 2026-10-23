@@ -167,6 +167,8 @@ export interface SandboxDeps {
   retryDelaysMs?: number[];
   /** Set false to run without the backstop (backstop.ts). */
   backstop?: boolean;
+  /** For specs: smaller limits for what the job reports. */
+  inputLimits?: { diffChars: number; errorChars: number };
 }
 
 const DEFAULT_RETRY_DELAYS_MS = [30_000, 120_000];
@@ -205,6 +207,20 @@ export const runSandboxedBackport = async (
   }
 };
 
+/**
+ * Runs a step of the server's own git work on its cache, whose failure (git
+ * failing on the cache's own objects) is an internal one, to be retried.
+ */
+const cacheStep = async <T>(step: () => Promise<T>): Promise<T> => {
+  try {
+    return await step();
+  } catch (error) {
+    throw new SandboxInfraError(
+      `The repository cache failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
+
 const runOnce = async (
   opts: SandboxedBackportOptions,
   deps: SandboxDeps,
@@ -223,7 +239,9 @@ const runOnce = async (
   const lease = await cache.acquire(opts.token, opts.targetBranch);
   try {
     const diffs = opts.attempts.flatMap((a) => a.commits.map((c) => c.diff));
-    const preimageBlobs = await cache.resolvePreimageBlobs(diffs);
+    const preimageBlobs = await cacheStep(() =>
+      cache.resolvePreimageBlobs(diffs),
+    );
     const job = server.register({
       cacheDir: lease.dir,
       ref: lease.ref,
@@ -238,7 +256,10 @@ const runOnce = async (
         preimageBlobs,
         includeChanges: opts.includeChanges,
         committer: getCommitter(),
-        limits: { diffChars: LIMITS.diffChars, errorChars: LIMITS.errorChars },
+        limits: deps.inputLimits ?? {
+          diffChars: LIMITS.diffChars,
+          errorChars: LIMITS.errorChars,
+        },
       },
       expectation: {
         patchCounts: opts.attempts.map((a) => a.commits.length),
@@ -266,11 +287,14 @@ const runOnce = async (
               commits: attempt.commits,
               applied: result.applied,
               renamedOnTarget: () =>
-                cache.renamedOnTarget(
-                  lease.baseSha,
-                  attempt.commits.map((c) => c.diff),
+                cacheStep(() =>
+                  cache.renamedOnTarget(
+                    lease.baseSha,
+                    attempt.commits.map((c) => c.diff),
+                  ),
                 ),
-              targetFiles: (paths) => cache.filesAt(lease.baseSha, paths),
+              targetFiles: (paths) =>
+                cacheStep(() => cache.filesAt(lease.baseSha, paths)),
               gitBlobId: (sha) => job.blobs.gitId(sha),
             });
           }

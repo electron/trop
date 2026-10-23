@@ -27,6 +27,16 @@ const GIT_TIMEOUT_MS = 30 * 60 * 1000;
 const FALLBACK_ERROR_CHARS = 1000;
 const PREFETCH_BATCH = 1000;
 
+/**
+ * The first `max` UTF-16 code units of `s`, without splitting a surrogate
+ * pair: the server refuses a string with a lone surrogate.
+ */
+const truncate = (s: string, max: number) => {
+  if (s.length <= max) return s;
+  const code = s.charCodeAt(max - 1);
+  return s.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
+};
+
 /** git's NUL-separated output as strings; paths must be UTF-8 for GitHub. */
 const nulSeparated = (output: Buffer) => {
   if (!isUtf8(output)) throw new Error('git output is not UTF-8');
@@ -284,7 +294,7 @@ const main = async () => {
 
       if (!applied) {
         const diff = (await git(['diff'])).toString('utf8');
-        lastDiff = diff.slice(0, inputs.limits.diffChars);
+        lastDiff = truncate(diff, inputs.limits.diffChars);
         continue;
       }
 
@@ -309,7 +319,7 @@ const main = async () => {
     await post({ outcome: 'conflict', diff: lastDiff });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await post({ outcome: 'error', message: message.slice(0, errorChars) });
+    await post({ outcome: 'error', message: truncate(message, errorChars) });
   }
 };
 

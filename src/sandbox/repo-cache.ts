@@ -11,6 +11,7 @@ import { log } from '../utils/log-util';
 import { assertValidBranchName, OBJECT_ID, runGit } from './git';
 import { diffFiles, diffPaths } from './patches';
 import { LIMITS, validateRepoPath } from './protocol';
+import { SandboxInfraError } from './runner';
 
 /**
  * Whether `p` is a valid repository path that `git cat-file --batch-check`
@@ -130,24 +131,33 @@ export class RepoCache {
     await assertValidBranchName(branch);
 
     return this.mutex.runExclusive(async () => {
-      await this.ensureRepo();
-      await this.git(
-        [
-          // gc runs separately, never while a job reads the cache.
-          '-c',
-          'gc.auto=0',
-          '-c',
-          'maintenance.auto=false',
-          'fetch',
-          '--quiet',
-          '--prune',
-          '--no-tags',
-          '--no-recurse-submodules',
-          'origin',
-          '+refs/heads/*:refs/heads/*',
-        ],
-        gitAuthEnv(token),
-      );
+      // Failing to set up or fetch the cache (GitHub or the network not
+      // answering) is an internal failure, retried; a branch that doesn't
+      // exist, below, is not.
+      try {
+        await this.ensureRepo();
+        await this.git(
+          [
+            // gc runs separately, never while a job reads the cache.
+            '-c',
+            'gc.auto=0',
+            '-c',
+            'maintenance.auto=false',
+            'fetch',
+            '--quiet',
+            '--prune',
+            '--no-tags',
+            '--no-recurse-submodules',
+            'origin',
+            '+refs/heads/*:refs/heads/*',
+          ],
+          gitAuthEnv(token),
+        );
+      } catch (error) {
+        throw new SandboxInfraError(
+          `Fetching ${this.slug} from GitHub failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
 
       const baseSha = (
         await this.git([

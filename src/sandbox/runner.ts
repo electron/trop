@@ -38,12 +38,14 @@ export interface SandboxRunner {
 export const DEFAULT_SANDBOX_TIMEOUT_MS = 40 * 60 * 1000;
 
 /**
- * An internal failure, as opposed to a conflict or an invalid result: the
- * sandbox machinery (a Job that can't start, dies or runs out of time; the
- * job server; a job reporting an error of its own) or GitHub not answering.
- * Reported as an internal error rather than as a backport that needs to be
- * done by hand. Only `retryable` ones, which a new job may well not hit
- * again, are retried.
+ * A failure other than a conflict or an invalid result: the sandbox
+ * machinery (a Job that can't start, dies or runs out of time; the job
+ * server; a job reporting an error of its own) or GitHub not answering.
+ * `retryable` ones are transient: retried, and if they persist, reported as
+ * an internal error rather than as a backport that needs to be done by hand.
+ * The others would recur with the same input (a timeout, a refused upload,
+ * git failing on the patches) and end like any failed backport always has:
+ * left to a manual backport.
  */
 export class SandboxInfraError extends Error {
   constructor(

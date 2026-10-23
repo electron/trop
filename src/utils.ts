@@ -271,7 +271,6 @@ const fetchCommitFiles = async (
       if (attempt === 3) {
         throw new SandboxInfraError(
           `Could not list the files of ${sha} from GitHub`,
-          false,
         );
       }
       await new Promise((r) => setTimeout(r, FILES_RETRY_DELAY_MS * attempt));
@@ -880,7 +879,6 @@ export const backportStackImpl = async (
             ? squashError
             : new SandboxInfraError(
                 `Could not fetch the squash commit(s): ${squashError instanceof Error ? squashError.message : 'unknown error'}`,
-                false,
               );
         }
       }
@@ -1038,9 +1036,12 @@ export const backportStackImpl = async (
       );
     },
     async (error: unknown) => {
-      if (error instanceof SandboxInfraError) {
-        // The sandbox couldn't run (after retries): not a conflict, so no
-        // "needs manual" label or comment; the backport can just be retried.
+      if (error instanceof SandboxInfraError && error.retryable) {
+        // A transient failure (the sandbox or GitHub not answering, still
+        // after retries): not a conflict, so no "needs manual" label or
+        // comment; the backport can just be retried. Failures that would
+        // recur (a job timing out or refusing the input) are left to a
+        // manual backport below, as any failure always was.
         log(
           'backportImpl',
           LogLevel.ERROR,

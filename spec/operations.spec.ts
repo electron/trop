@@ -1061,6 +1061,46 @@ describe('runner', () => {
       expect(runs).toBe(3);
     });
 
+    it('cuts a long conflict diff without splitting a character', async () => {
+      const conflict = {
+        initial: { 'feature.txt': 'initial\n' },
+        targetChanges: { 'feature.txt': 'target \u{1F600}\n' },
+        changes: { 'feature.txt': 'source \u{1F600}\n' },
+      };
+      const full = await setupAndBackport(conflict);
+      if (full.outcome.kind !== 'conflict') throw new Error('no conflict');
+      const at = full.outcome.diff.indexOf('\u{1F600}');
+      expect(at).toBeGreaterThan(0);
+      // A limit that falls between the emoji's two UTF-16 code units.
+      const { outcome } = await setupAndBackport({
+        ...conflict,
+        deps: { inputLimits: { diffChars: at + 1, errorChars: 1000 } },
+      });
+      expect(outcome.kind).toBe('conflict');
+      if (outcome.kind !== 'conflict') return;
+      expect(outcome.diff).toBe(full.outcome.diff.slice(0, at));
+      expect(outcome.diff.isWellFormed()).toBe(true);
+    });
+
+    it('retries, then reports a cache that cannot fetch as an internal error', async () => {
+      const cache = new RepoCache('electron/trop', {
+        dir: path.join(await makeTempDir('trop-cache-'), 'git-cache'),
+        remoteUrl: path.join(await makeTempDir('trop-gone-'), 'missing.git'),
+      });
+      const error = await runSandboxedBackport(
+        {
+          slug: 'electron/trop',
+          token: '',
+          targetBranch: '42-x-y',
+          attempts: [{ kind: 'all', commits: [] }],
+          includeChanges: true,
+        },
+        { sandbox, cache, retryDelaysMs: [0] },
+      ).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(SandboxInfraError);
+      expect(error).toMatchObject({ retryable: true });
+    });
+
     it('fails when the target branch does not exist', async () => {
       const remoteDir = await makeTempDir('trop-remote-');
       runGit(remoteDir, ['init', '--bare']);

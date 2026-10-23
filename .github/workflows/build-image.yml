@@ -53,9 +53,12 @@ jobs:
           target: sandbox
           platforms: linux/amd64
           push: true
+          # The sha tag is the one deploys use (deploy/overlays/prod). The
+          # branch tag only for main: other branch names can contain `/`,
+          # which a tag can't.
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:${{ github.ref_name }}
+            ${{ github.ref_name == 'main' && format('{0}:main', env.IMAGE) || '' }}
           cache-from: type=gha,scope=sandbox
           cache-to: type=gha,mode=max,scope=sandbox
 
