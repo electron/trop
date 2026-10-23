@@ -1,5 +1,3 @@
-import { simpleGit, SimpleGit } from 'simple-git';
-
 const GITHUB_ORIGIN = 'https://github.com/';
 
 /**
@@ -34,27 +32,4 @@ export const gitAuthEnv = (
   env.GIT_CONFIG_KEY_0 = `http.${origin}.extraHeader`;
   env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${basic}`;
   return env;
-};
-
-/**
- * A simple-git instance for `dir` whose git processes authenticate to GitHub
- * with `token` (see gitAuthEnv). Use it only for commands that talk to GitHub.
- */
-export const authenticatedGit = (dir: string, token: string): SimpleGit => {
-  const authEnv = gitAuthEnv(token);
-  // `.env()` replaces the child's whole environment. Leave out ambient GIT_*
-  // variables, as simple-git does by default: passed explicitly, they would
-  // make it refuse to run.
-  const ambient = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) => !key.toUpperCase().startsWith('GIT_'),
-    ),
-  );
-  // simple-git 4 refuses GIT_* variables (and GIT_CONFIG_COUNT in
-  // particular) passed through `.env()` unless they are explicitly allowed.
-  return simpleGit({
-    baseDir: dir,
-    allowEnvironment: Object.keys(authEnv),
-    unsafe: { allowUnsafeConfigEnvCount: true },
-  }).env({ ...ambient, ...authEnv });
 };

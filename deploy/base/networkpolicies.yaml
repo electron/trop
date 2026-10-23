@@ -1,0 +1,99 @@
+# Peers are selected with matchExpressions and namespaces by their
+# kubernetes.io/metadata.name label (set by the API server, so no other
+# namespace can claim it). Kustomize label transformers never rewrite
+# matchExpressions, so these select exactly what they say in the rendered
+# output too.
+#
+# Anything else added to this namespace (e.g. a CronJob) needs its own policy:
+# by default it can neither send nor receive anything.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: server
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [server] }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # GitHub webhooks through the Envoy Gateway proxies.
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [envoy-gateway-system]
+      ports:
+        - { protocol: TCP, port: 8080 }
+    # The Datadog agents scraping /metrics (the prometheus.io annotations in
+    # the prod overlay). electron/infra deploys them from the DatadogAgent in
+    # namespace `default` (argo/ionic-platform/datadog/agent.yaml). Selected
+    # by namespace only: this is the same port the Gateway exposes to the
+    # internet, so naming the agent pods' labels would add nothing. trop
+    # sends Datadog nothing itself (stdout logs are read from the node), so
+    # it needs no egress to the agents.
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - { key: kubernetes.io/metadata.name, operator: In, values: [default] }
+      ports:
+        - { protocol: TCP, port: 8080 }
+    # Sandbox jobs: their inputs, read-only git fetches and their result.
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/part-of, operator: In, values: [trop] }
+              - { key: app.kubernetes.io/component, operator: In, values: [sandbox] }
+      ports:
+        - { protocol: TCP, port: 8081 }
+  egress:
+    - to:
+        - namespaceSelector:
+            matchExpressions:
+              - { key: kubernetes.io/metadata.name, operator: In, values: [kube-system] }
+          podSelector:
+            matchExpressions:
+              - { key: k8s-app, operator: In, values: [kube-dns] }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # GitHub (API and git) and the Kubernetes API server, which on this
+    # cluster is a public endpoint behind the `kubernetes` Service.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# Sandbox jobs talk to the server's internal port and nothing else: no DNS,
+# no internet, no other pod. Nothing may connect to them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/part-of, operator: In, values: [trop] }
+      - { key: app.kubernetes.io/component, operator: In, values: [sandbox] }
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/name, operator: In, values: [server] }
+      ports:
+        - { protocol: TCP, port: 8081 }

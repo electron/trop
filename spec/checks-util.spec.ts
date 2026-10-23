@@ -433,6 +433,20 @@ describe('checks-util', () => {
       );
     });
 
+    it('concludes an internal error as such, not as a conflict', async () => {
+      octokit.checks.update.mockResolvedValue({ data: {} });
+
+      await markBackportCheckFailed(context, checkRun, '30-x-y', {
+        infraError: true,
+      });
+
+      const [{ output }] = octokit.checks.update.mock.calls[0];
+      expect(output.title).toBe('Backport Errored');
+      expect(output.summary).toContain('not a merge conflict');
+      expect(output.text).toBeUndefined();
+      expect(output.annotations).toBeUndefined();
+    });
+
     const rejection = () =>
       Object.assign(
         new Error(

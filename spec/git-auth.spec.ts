@@ -1,17 +1,10 @@
 import { spawn } from 'child_process';
-import * as fs from 'fs';
 import * as http from 'http';
 import { AddressInfo } from 'net';
-import * as os from 'os';
-import * as path from 'path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  authenticatedGit,
-  gitAuthEnv,
-  githubRemoteUrl,
-} from '../src/utils/git-auth';
+import { gitAuthEnv, githubRemoteUrl } from '../src/utils/git-auth';
 
 const TOKEN = 'ghs_spec0123456789abcdefABCDEF';
 const BASIC = `Basic ${Buffer.from(`x-access-token:${TOKEN}`).toString('base64')}`;
@@ -82,40 +75,6 @@ describe('git-auth', () => {
         expect(authHeaders.length).toBeGreaterThan(0);
         expect(authHeaders.every((h) => h === undefined)).toBe(true);
       });
-    });
-  });
-
-  describe('authenticatedGit()', () => {
-    let dir: string;
-
-    beforeEach(async () => {
-      dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'trop-auth-'));
-    });
-
-    afterEach(async () => {
-      await fs.promises.rm(dir, { recursive: true, force: true });
-    });
-
-    it('hands the header to git through its environment only', async () => {
-      const git = authenticatedGit(dir, TOKEN);
-      await git.init();
-      expect(
-        (
-          await git.raw([
-            'config',
-            '--get-urlmatch',
-            'http.extraHeader',
-            'https://github.com/electron/trop.git',
-          ])
-        ).trim(),
-      ).toBe(`Authorization: ${BASIC}`);
-      // Nothing was written to the repository's config.
-      const config = await fs.promises.readFile(
-        path.join(dir, '.git', 'config'),
-        'utf8',
-      );
-      expect(config).not.toContain(TOKEN);
-      expect(config).not.toContain(BASIC.split(' ')[1]);
     });
   });
 });
