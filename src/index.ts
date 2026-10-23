@@ -54,6 +54,7 @@ import { register } from './utils/prom';
 import { SimpleWebHookRepoContext, WebHookPR, WebHookPRContext } from './types';
 
 import { execSync } from 'child_process';
+import { getSandbox, loadSandboxRunner } from './sandbox';
 
 // @ts-ignore - builtin fetch doesn't support global-agent.
 delete globalThis.fetch;
@@ -327,6 +328,24 @@ you will need to perform this [backport manually](https://github.com/electron/tr
     execSync('git --version', { stdio: 'ignore' });
   } catch {
     robot.log('Git not found - unable to proceed with backporting');
+    process.exit(1);
+  }
+
+  // Backports run git over untrusted patches in sandbox jobs. Refuse to start
+  // with a missing or unsafe sandbox configuration rather than failing (or
+  // worse, running unsandboxed) on the first backport.
+  try {
+    if (loadSandboxRunner().kind === 'kubernetes') {
+      // Starts the internal job listener and removes Jobs a previous
+      // process left behind.
+      getSandbox().catch((error: unknown) => {
+        robot.log.error(
+          `Failed to start the sandbox job server: ${String(error)}`,
+        );
+      });
+    }
+  } catch (error) {
+    robot.log.error(`Invalid sandbox configuration: ${String(error)}`);
     process.exit(1);
   }
 

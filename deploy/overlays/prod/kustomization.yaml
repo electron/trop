@@ -2,6 +2,27 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
+# Run sandbox Jobs from the same commit as the server: copy the server image's
+# tag (set by CI through ArgoCD's kustomize image override, which applies
+# before replacements) onto TROP_SANDBOX_IMAGE. CI pushes trop-sandbox:<sha>
+# before it deploys (.github/workflows/build-image.yml).
+replacements:
+  - source:
+      kind: Deployment
+      name: server
+      fieldPath: spec.template.spec.containers.[name=server].image
+      options:
+        delimiter: ":"
+        index: 1
+    targets:
+      - select:
+          kind: Deployment
+          name: server
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].env.[name=TROP_SANDBOX_IMAGE].value
+        options:
+          delimiter: ":"
+          index: 1
 replicas:
   # Exactly one: trop's in-process queue and per-repo mutexes guard a single
   # shared clone, so a second pod would race it.
@@ -15,6 +36,20 @@ patches:
       - op: replace
         path: /spec/hostnames/0
         value: trop.electronjs.org
+  # Bare electron/electron clone under /tmp/trop-working. A strategic merge
+  # (by volume name), since the base adds volumes ahead of this one.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: server
+      spec:
+        template:
+          spec:
+            volumes:
+              - name: tmp
+                emptyDir:
+                  sizeLimit: 20Gi
   - target:
       kind: Deployment
       name: server
@@ -47,8 +82,3 @@ patches:
         value:
           requests: { cpu: 250m, memory: 1Gi }
           limits: { memory: 4Gi }
-      # Bare electron/electron clone plus per-job worktrees under
-      # /tmp/trop-working.
-      - op: replace
-        path: /spec/template/spec/volumes/0/emptyDir
-        value: { sizeLimit: 20Gi }

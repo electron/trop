@@ -1,34 +1,5 @@
 import { BackportPurpose } from './enums';
-import {
-  SimpleWebHookRepoContext,
-  WebHookPR,
-  WebHookRepoContext,
-} from './types';
-
-export interface RemotesOptions {
-  dir: string;
-  remotes: {
-    name: string;
-    value: string;
-  }[];
-}
-
-export interface InitRepoOptions {
-  slug: string;
-  accessToken: string;
-}
-
-export interface BackportOptions {
-  dir: string;
-  slug: string;
-  targetRemote: string;
-  targetBranch: string;
-  tempBranch: string;
-  patches: string[];
-  shouldPush: boolean;
-  github: WebHookRepoContext['octokit'];
-  context: SimpleWebHookRepoContext;
-}
+import { SimpleWebHookRepoContext, WebHookPR } from './types';
 
 export interface TryBackportOptions {
   context: SimpleWebHookRepoContext;
@@ -36,8 +7,6 @@ export interface TryBackportOptions {
   purpose: BackportPurpose;
   // Every PR whose commits are backported together, ordered bottom to top.
   prs: WebHookPR[];
-  dir: string;
   slug: string;
   targetBranch: string;
-  tempBranch: string;
 }
