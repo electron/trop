@@ -107,6 +107,35 @@ describe('runner', () => {
       ).toBe('patches/chromium/.patches: merge: patches-list');
     });
 
+    it('keeps the token out of the cache and the clone', async () => {
+      const cacheDir = path.resolve(
+        process.env.WORKING_DIR ?? path.resolve(os.tmpdir(), 'trop-working'),
+        'electron/trop',
+        'git-cache',
+      );
+      // Make sure the cache exists, then plant the token-bearing origin URL
+      // that caches cloned by earlier trop versions carry.
+      saveDir(await initRepo({ slug: 'electron/trop', accessToken: '' }));
+      runGit(cacheDir, [
+        'remote',
+        'set-url',
+        'origin',
+        'https://x-access-token:stale-token@github.com/electron/trop.git',
+      ]);
+
+      const dir = saveDir(
+        await initRepo({ slug: 'electron/trop', accessToken: '' }),
+      );
+      expect(runGit(cacheDir, ['remote', 'get-url', 'origin'])).toBe(
+        'https://github.com/electron/trop.git',
+      );
+      for (const repo of [cacheDir, dir]) {
+        expect(runGit(repo, ['config', '--list'])).not.toContain(
+          'x-access-token',
+        );
+      }
+    });
+
     it('should fail if the github repository does not exist', async () => {
       await expect(
         initRepo({
@@ -149,6 +178,7 @@ describe('runner', () => {
     it('should set new remotes correctly', async () => {
       await setupRemotes({
         dir,
+        accessToken: '',
         remotes: [
           {
             name: 'origin',
@@ -282,6 +312,7 @@ describe('runner', () => {
       }
 
       const result = await backportCommitsToBranch({
+        accessToken: '',
         context: {} as never,
         dir: workDir,
         github: {} as never,
@@ -461,6 +492,7 @@ describe('runner', () => {
       // Pass only the single-parent (non-merge) patch — mirroring what
       // tryBackportAllCommits does after filtering out merge commits.
       const result = await backportCommitsToBranch({
+        accessToken: '',
         context: {} as never,
         dir: workDir,
         github: {} as never,

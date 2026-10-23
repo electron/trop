@@ -5,6 +5,7 @@ import { BackportOptions } from '../interfaces';
 import { log } from '../utils/log-util';
 import { LogLevel } from '../enums';
 import { isUtf8 } from 'buffer';
+import { authenticatedGit } from '../utils/git-auth';
 
 const cleanRawGitString = (s: string) => {
   let nS = s.trim();
@@ -34,6 +35,8 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
     `Backporting ${options.patches.length} commits to ${options.targetBranch}`,
   );
 
+  // Not authenticated: `git am` below runs over untrusted patches, and the
+  // processes it spawns (the .patches merge driver) inherit its environment.
   const git = simpleGit(options.dir);
 
   // Abort previous patch attempts
@@ -44,7 +47,10 @@ export const backportCommitsToBranch = async (options: BackportOptions) => {
   // Create branch to cherry-pick the commits to.
   try {
     await git.checkout(`target_repo/${options.targetBranch}`);
-    await git.pull('target_repo', options.targetBranch);
+    await authenticatedGit(options.dir, options.accessToken).pull(
+      'target_repo',
+      options.targetBranch,
+    );
     if (
       Object.keys((await git.branchLocal()).branches).includes(
         options.tempBranch,

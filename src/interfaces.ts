@@ -7,6 +7,8 @@ import {
 
 export interface RemotesOptions {
   dir: string;
+  // Installation token for fetching the remotes; never stored in the clone.
+  accessToken: string;
   remotes: {
     name: string;
     value: string;
@@ -20,6 +22,8 @@ export interface InitRepoOptions {
 
 export interface BackportOptions {
   dir: string;
+  // Installation token for `git pull`; never stored in the clone.
+  accessToken: string;
   slug: string;
   targetRemote: string;
   targetBranch: string;
