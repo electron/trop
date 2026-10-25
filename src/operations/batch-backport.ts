@@ -48,7 +48,8 @@ interface EvaluateOptions {
   left?: number;
   /** Backport the batch now, whatever is still open. */
   force?: boolean;
-  /** Backport the PRs whose last batch backport failed, and only them. */
+  /** Backport the PRs whose last batch backport failed, to those branches
+   *  only. */
   retry?: boolean;
 }
 
@@ -80,10 +81,10 @@ export class BatchBackportQueue {
   /** `<owner>/<repo>#<number>:<branch>` for every batch backport running. */
   private readonly inFlight = new Set<string>();
   /**
-   * `<owner>/<repo>#<number>` of the PRs whose last batch backport an
-   * internal error stopped, with the number of times in a row. They are
-   * retried on their own timer, so they don't set the deadline of the PRs
-   * that waited since.
+   * `<owner>/<repo>#<number>:<branch>` for every PR and target branch whose
+   * last batch backport an internal error stopped, with the number of times
+   * in a row. They are retried on their own timer, so they don't set the
+   * deadline of the PRs that waited since.
    */
   private readonly failed = new Map<string, number>();
 
@@ -235,13 +236,37 @@ export class BatchBackportQueue {
 
     return lock.runExclusive(async () => {
       const queued = await this.listQueued(context, key, merged);
-      const isFailed = (q: QueuedPR) =>
-        this.failed.has(`${key}#${q.pr.number}`);
+      const failedId = (q: QueuedPR, branch: string) =>
+        `${key}#${q.pr.number}:${branch}`;
+      // Each queued PR with its branches being retried, or the others.
+      const split = (failed: boolean) =>
+        queued
+          .map((q) => ({
+            ...q,
+            branches: q.branches.filter(
+              (b) => this.failed.has(failedId(q, b)) === failed,
+            ),
+          }))
+          .filter((q) => q.branches.length > 0);
 
-      // A retry backports the failed PRs again, and only them.
+      // A retry backports the failed PRs again, to the failed branches only.
       if (retry) {
-        const due = queued.filter(isFailed);
+        const due = split(true);
         return due.length > 0 && this.flush(context, key, due);
+      }
+
+      // Forget failures of branches no longer queued (nor running).
+      const queuedIds = new Set(
+        queued.flatMap((q) => q.branches.map((b) => failedId(q, b))),
+      );
+      for (const id of this.failed.keys()) {
+        if (
+          id.startsWith(`${key}#`) &&
+          !queuedIds.has(id) &&
+          !this.inFlight.has(id)
+        ) {
+          this.failed.delete(id);
+        }
       }
 
       if (queued.length === 0) {
@@ -249,8 +274,8 @@ export class BatchBackportQueue {
         return false;
       }
 
-      // The PRs being retried don't make the others overdue.
-      const waiting = queued.filter((q) => !isFailed(q));
+      // The branches being retried don't make the others overdue.
+      const waiting = split(false);
       const deadline =
         waiting.length > 0
           ? Date.parse(waiting[0].pr.merged_at!) + this.maxWaitMs
@@ -421,7 +446,7 @@ or at ${formatDeadline(deadline)} at the latest. Comment \`/trop run backport\` 
       for (const id of ids) this.inFlight.add(id);
       const release = (retryable = false) => {
         for (const id of ids) this.inFlight.delete(id);
-        this.settled(context, key, members, retryable);
+        this.settled(context, key, ids, retryable);
       };
 
       log(
@@ -451,18 +476,17 @@ or at ${formatDeadline(deadline)} at the latest. Comment \`/trop run backport\` 
   }
 
   /**
-   * Records how a batch backport of `members` ended: one an internal error
-   * stopped is retried on its own timer, a few times.
+   * Records how a batch backport ended for its PRs and branch (`ids`): one
+   * an internal error stopped is retried on its own timer, a few times.
    */
   private settled(
     context: SimpleWebHookRepoContext,
     key: string,
-    members: { prs: WebHookPR[] }[],
+    ids: string[],
     retryable: boolean,
   ) {
     let retry = false;
-    for (const { prs } of members) {
-      const id = `${key}#${prs[prs.length - 1].number}`;
+    for (const id of ids) {
       const failures = retryable ? (this.failed.get(id) ?? 0) + 1 : 0;
       if (failures === 0) {
         this.failed.delete(id);

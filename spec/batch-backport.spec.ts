@@ -480,6 +480,58 @@ describe('BatchBackportQueue', () => {
       expect(batches()[1]).toEqual({ branch: '42-x-y', units: [[1], [2]] });
     });
 
+    it('is retried for the branch that failed, even when another branch got through', async () => {
+      const repo = repository(merged(1, 3, ['42-x-y', '41-x-y']));
+      robot.auth.mockResolvedValue(repo.octokit);
+      await queue.flushNow(repo.context);
+      expect(batches().map((b) => b.branch)).toEqual(['42-x-y', '41-x-y']);
+      settle(0, true);
+      settle(1, false);
+      // Backported to 41-x-y, so that label is gone.
+      repo.set(merged(1, 3, ['42-x-y']));
+
+      // A new merge still waits for the open PR: #1 is being retried.
+      const second = merged(2, 0, ['41-x-y']);
+      repo.set(second);
+      repo.set(open(3));
+      await queue.onMerged(repo.context, second as never);
+      expect(batches()).toHaveLength(2);
+      expect(repo.comments()).toEqual([
+        expect.objectContaining({
+          number: 2,
+          body: expect.stringContaining('2026-10-25 14:00 UTC'),
+        }),
+      ]);
+
+      // The retry backports #1 to the branch that failed, and only there.
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await vi.waitFor(() => expect(batches()).toHaveLength(3));
+      expect(batches()[2]).toEqual({ branch: '42-x-y', units: [[1]] });
+    });
+
+    it('counts the retries of each branch on its own', async () => {
+      const repo = repository(merged(1, 1, ['42-x-y', '41-x-y']));
+      robot.auth.mockResolvedValue(repo.octokit);
+      await queue.flushNow(repo.context);
+      settle(0, true);
+      settle(1, true);
+
+      // One retry backports #1 to both branches; then only 41-x-y fails.
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await vi.waitFor(() => expect(batches()).toHaveLength(4));
+      expect(batches().slice(2)).toEqual([
+        { branch: '42-x-y', units: [[1]] },
+        { branch: '41-x-y', units: [[1]] },
+      ]);
+      settle(2, false);
+      settle(3, true);
+      repo.set(merged(1, 1, ['41-x-y']));
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await vi.waitFor(() => expect(batches()).toHaveLength(5));
+      expect(batches()[4]).toEqual({ branch: '41-x-y', units: [[1]] });
+    });
+
     it('is retried three times in a row at most', async () => {
       const repo = repository(merged(1, 1));
       robot.auth.mockResolvedValue(repo.octokit);
