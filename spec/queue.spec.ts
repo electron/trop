@@ -96,4 +96,42 @@ describe('ExecutionQueue', () => {
     expect(task.taskRunner).toHaveBeenCalledTimes(1);
     expect(task2.taskRunner).toHaveBeenCalledTimes(1);
   });
+
+  describe('onSettled', () => {
+    it('is called once a task is done', async () => {
+      const q = new ExecutionQueue();
+      const task = fakeTask('test');
+      const onSettled = vi.fn();
+      await delayedEvent(q, 'empty', async () => {
+        q.enterQueue(...task.args(), onSettled);
+      });
+      expect(onSettled).toHaveBeenCalledTimes(1);
+      expect(task.errorHandler).not.toHaveBeenCalled();
+    });
+
+    it("is called once a failed task's error handler is done", async () => {
+      const q = new ExecutionQueue();
+      const task = fakeTask('test');
+      task.taskRunner.mockRejectedValue('err');
+      const onSettled = vi.fn(() => {
+        expect(task.errorHandler).toHaveBeenCalledTimes(1);
+      });
+      await delayedEvent(q, 'empty', async () => {
+        q.enterQueue(...task.args(), onSettled);
+      });
+      expect(onSettled).toHaveBeenCalledTimes(1);
+    });
+
+    it('is called at once for a task that is queued already', async () => {
+      const q = new ExecutionQueue();
+      const task = fakeTask('test');
+      const onSettled = vi.fn();
+      await delayedEvent(q, 'empty', async () => {
+        q.enterQueue(...task.args());
+        q.enterQueue(...task.args(), onSettled);
+        expect(onSettled).toHaveBeenCalledTimes(1);
+      });
+      expect(task.taskRunner).toHaveBeenCalledTimes(1);
+    });
+  });
 });

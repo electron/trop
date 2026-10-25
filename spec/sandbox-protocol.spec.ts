@@ -162,6 +162,90 @@ describe('validateSandboxResult()', () => {
   });
 });
 
+describe('validateSandboxResult() for a batch', () => {
+  const batchExpectation = {
+    patchCounts: [],
+    memberPatchCounts: [[2, 1], [1]],
+    includeChanges: true,
+  };
+  const validateBatch = (value: unknown) =>
+    validateSandboxResult(value, batchExpectation, blobs);
+  const file = { path: 'a.txt', mode: '100644', blob: sha256('hi\n') };
+
+  it('accepts members that applied and members left out', () => {
+    expect(
+      validateBatch({
+        outcome: 'batch',
+        members: [{ attempt: 1, applied: [applied([file])] }, null],
+      }),
+    ).toEqual({
+      outcome: 'batch',
+      members: [{ attempt: 1, applied: [{ changes: [file] }] }, null],
+    });
+  });
+
+  it('checks each member against its own attempts', () => {
+    expect(() =>
+      validateBatch({
+        outcome: 'batch',
+        members: [null, { attempt: 1, applied: [applied([])] }],
+      }),
+    ).toThrow('members[1].attempt: not one of the attempts');
+    expect(() =>
+      validateBatch({
+        outcome: 'batch',
+        members: [{ attempt: 0, applied: [applied([])] }, null],
+      }),
+    ).toThrow('members[0].results for 1 patches, expected 2');
+  });
+
+  it('rejects the wrong number of members and unexpected keys', () => {
+    expect(() => validateBatch({ outcome: 'batch', members: [null] })).toThrow(
+      'results for 1 members, expected 2',
+    );
+    expect(() =>
+      validateBatch({
+        outcome: 'batch',
+        members: [{ attempt: 0, applied: [null, null], message: 'x' }, null],
+      }),
+    ).toThrow('unexpected key "message"');
+    expect(() =>
+      validateBatch({ outcome: 'batch', members: ['x', null] }),
+    ).toThrow('members[0]: expected an object');
+  });
+
+  it('validates the changes of every member', () => {
+    expect(() =>
+      validateBatch({
+        outcome: 'batch',
+        members: [
+          {
+            attempt: 1,
+            applied: [applied([{ ...file, path: '.git/config' }])],
+          },
+          null,
+        ],
+      }),
+    ).toThrow('path has a .git component');
+  });
+
+  it('only accepts a batch result for a batch job', () => {
+    expect(() =>
+      validateBatch({ outcome: 'success', attempt: 0, applied: [] }),
+    ).toThrow('expected a batch result');
+    expect(() => validateBatch({ outcome: 'conflict', diff: '' })).toThrow(
+      'expected a batch result',
+    );
+    expect(() => validate({ outcome: 'batch', members: [] })).toThrow(
+      'not a batch',
+    );
+    expect(validateBatch({ outcome: 'error', message: 'boom' })).toEqual({
+      outcome: 'error',
+      message: 'boom',
+    });
+  });
+});
+
 describe('validateRepoPath()', () => {
   it.each([
     'README.md',

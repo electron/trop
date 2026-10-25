@@ -17,6 +17,7 @@ import {
   BACKPORT_APPROVAL_CHECK,
   BACKPORT_APPROVED_LABEL,
   BACKPORT_REQUESTED_LABEL,
+  BATCH_BACKPORT_LABEL,
   CHECK_PREFIX,
   NO_BACKPORT_LABEL,
   SKIP_CHECK_LABEL,
@@ -31,6 +32,7 @@ import {
   backportStackToBranch,
   backportStackToLabel,
 } from './operations/backport-to-location';
+import { BatchBackportQueue, hasBatchLabel } from './operations/batch-backport';
 import { updateManualBackport } from './operations/update-manual-backport';
 import { getSupportedBranches, isBranchSupported } from './utils/branch-util';
 import {
@@ -167,6 +169,10 @@ you will need to perform this [backport manually](https://github.com/electron/tr
       void backportStackToLabel(robot, context, prs, label);
     }
   };
+
+  // Merged PRs labeled `batch-backport` are backported together; see
+  // src/operations/batch-backport.ts.
+  const batchQueue = new BatchBackportQueue(robot, getMergedBackportPRs);
 
   /**
    * Concludes the Backport Labels Added check of a lower member of a stack.
@@ -348,6 +354,13 @@ you will need to perform this [backport manually](https://github.com/electron/tr
     robot.log.error(`Invalid sandbox configuration: ${String(error)}`);
     process.exit(1);
   }
+
+  // A restart forgets the deadlines of the batches waiting: find them again.
+  batchQueue.rescan().catch((error: unknown) => {
+    robot.log.error(
+      `Failed to rescan the batch backport queues: ${String(error)}`,
+    );
+  });
 
   /**
    * Checks for backport PRs.
@@ -818,6 +831,8 @@ you will need to perform this [backport manually](https://github.com/electron/tr
       // Check that the closed PR is trop's own and act accordingly.
       if (pr.user.login === getEnvVar('BOT_USER_NAME')) {
         await handleTropBackportClosed(context, pr, PRChange.MERGE);
+      } else if (hasBatchLabel(pr)) {
+        await batchQueue.onMerged(context, pr);
       } else {
         await backportMergedPR(context, pr);
       }
@@ -839,7 +854,19 @@ you will need to perform this [backport manually](https://github.com/electron/tr
         await handleTropBackportClosed(context, pr, PRChange.CLOSE);
       } else {
         await handleClosedPRLabels(context, pr, PRChange.CLOSE);
+        // It no longer holds up a batch.
+        if (hasBatchLabel(pr)) await batchQueue.onLeft(context, pr);
       }
+    }
+  });
+
+  // An open PR taken out of the batch no longer holds it up. (A merged PR
+  // taken out of the queue is left alone: `/trop run backport` backports it
+  // on its own.)
+  robot.on('pull_request.unlabeled', async (context) => {
+    const { pull_request: pr, label } = context.payload;
+    if (label?.name === BATCH_BACKPORT_LABEL && pr.state === 'open') {
+      await batchQueue.onLeft(context, pr);
     }
   });
 
@@ -913,6 +940,19 @@ you will need to perform this [backport manually](https://github.com/electron/tr
               context.repo({ pull_number: issue.number }),
             )
           ).data as WebHookPR;
+          // A PR queued for a batch takes the whole batch with it.
+          if (hasBatchLabel(pr)) {
+            const flushed = await batchQueue.flushNow(context);
+            await context.octokit.issues.createComment(
+              context.repo({
+                body: flushed
+                  ? `The batch backport of the merged \`${BATCH_BACKPORT_LABEL}\` PRs has been manually initiated - here we go! :D`
+                  : `No merged \`${BATCH_BACKPORT_LABEL}\` PR is waiting to be backported (they may be being backported already, or have no \`target/*\` labels left), so there is nothing to backport.`,
+                issue_number: issue.number,
+              }),
+            );
+            return true;
+          }
           await context.octokit.issues.createComment(
             context.repo({
               body: 'The backport process for this PR has been manually initiated - here we go! :D',
@@ -982,6 +1022,15 @@ you will need to perform this [backport manually](https://github.com/electron/tr
                 issue_number: issue.number,
               }),
             );
+
+            // Backported on its own now, so not again with its batch.
+            if (hasBatchLabel(pr)) {
+              await removeLabel(
+                context,
+                pr.number,
+                `${PRStatus.TARGET}${branch}`,
+              );
+            }
 
             if (prs.length === 1) {
               void backportToBranch(robot, context, prs[0], branch);

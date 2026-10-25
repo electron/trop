@@ -57,7 +57,7 @@ const prLabeledEventPath = path.join(
 const prUnlabeledEventPath = path.join(
   __dirname,
   'fixtures',
-  'pull_request.labeled.json',
+  'pull_request.unlabeled.json',
 );
 
 const newPRBackportOpenedEventPath = path.join(
@@ -115,6 +115,25 @@ vi.mock('../src/operations/backport-to-location', () => ({
   backportToLabel: vi.fn(),
   backportStackToBranch: vi.fn(),
   backportStackToLabel: vi.fn(),
+}));
+
+const batchQueue = vi.hoisted(() => ({
+  onMerged: vi.fn(),
+  onLeft: vi.fn(),
+  flushNow: vi.fn(),
+  rescan: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../src/operations/batch-backport', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../src/operations/batch-backport')
+  >()),
+  BatchBackportQueue: class {
+    onMerged = batchQueue.onMerged;
+    onLeft = batchQueue.onLeft;
+    flushNow = batchQueue.flushNow;
+    rescan = batchQueue.rescan;
+  },
 }));
 
 vi.mock('../src/utils/stack-util', async (importOriginal) => ({
@@ -188,6 +207,10 @@ describe('trop', () => {
     expect(pendingMocks, 'Not all Nock interceptors used').toEqual([]);
   });
 
+  it('looks for waiting batch backports when it starts', () => {
+    expect(batchQueue.rescan).toHaveBeenCalledTimes(1);
+  });
+
   describe('issue_comment.created event', () => {
     it('manually triggers the backport on comment', async () => {
       nock(GH_API)
@@ -210,6 +233,71 @@ describe('trop', () => {
       await robot.receive(issueCommentBackportCreatedEvent);
 
       expect(backportToLabel).toHaveBeenCalled();
+    });
+
+    const BATCH_PR = {
+      ...MOCK_PR,
+      number: 1234,
+      labels: [...MOCK_PR.labels, { name: 'batch-backport' }],
+    };
+
+    it.each([
+      [true, 'The batch backport of the merged `batch-backport` PRs'],
+      [false, 'nothing to backport'],
+    ])(
+      'backports the whole batch on comment on a PR queued for one (anything to backport: %s)',
+      async (flushed, message) => {
+        batchQueue.flushNow.mockResolvedValueOnce(flushed);
+        nock(GH_API)
+          .persist()
+          .get('/repos/codebytere/public-repo/pulls/1234')
+          .reply(200, BATCH_PR);
+        nock(GH_API)
+          .post(
+            '/repos/codebytere/public-repo/issues/1234/comments',
+            ({ body }) => {
+              expect(body).toContain(message);
+              return true;
+            },
+          )
+          .reply(200);
+
+        await robot.receive(issueCommentBackportCreatedEvent);
+
+        expect(batchQueue.flushNow).toHaveBeenCalledTimes(1);
+        expect(backportToLabel).not.toHaveBeenCalled();
+      },
+    );
+
+    it('takes a PR queued for a batch out of it for a branch it is backported to on comment', async () => {
+      nock(GH_API)
+        .persist()
+        .get('/repos/codebytere/public-repo/pulls/1234')
+        .reply(200, {
+          ...BATCH_PR,
+          labels: [...BATCH_PR.labels, { name: 'target/thingy' }],
+        });
+      nock(GH_API)
+        .get('/repos/codebytere/public-repo/branches/thingy')
+        .reply(200, {});
+      nock(GH_API)
+        .post('/repos/codebytere/public-repo/issues/1234/comments')
+        .reply(200);
+      nock(GH_API)
+        .get(
+          '/repos/codebytere/public-repo/issues/1234/labels?per_page=100&page=1',
+        )
+        .reply(200, [{ name: 'batch-backport' }, { name: 'target/thingy' }]);
+      const removed = nock(GH_API)
+        .delete(
+          `/repos/codebytere/public-repo/issues/1234/labels/${encodeURIComponent('target/thingy')}`,
+        )
+        .reply(200);
+
+      await robot.receive(issueCommentBackportToCreatedEvent);
+
+      expect(removed.isDone()).toBe(true);
+      expect(backportToBranch).toHaveBeenCalled();
     });
 
     it('does not trigger the backport on comment if the PR is not merged', async () => {
@@ -1406,6 +1494,48 @@ describe('trop', () => {
       nock(GH_API).post('/repos/codebytere/probot-test/check-runs').reply(200);
     });
 
+    describe('of the batch-backport label', () => {
+      const unlabeledEvent = async (overrides: object) => {
+        const event = JSON.parse(
+          await fs.readFile(prUnlabeledEventPath, 'utf-8'),
+        );
+        event.payload.action = 'unlabeled';
+        event.payload.label = { name: 'batch-backport', color: 'fff' };
+        Object.assign(event.payload.pull_request, overrides);
+        nock(GH_API)
+          .persist()
+          .get(
+            '/repos/codebytere/probot-test/commits/ABC/check-runs?per_page=100',
+          )
+          .reply(200, { check_runs: [] });
+        return event;
+      };
+
+      it('lets the batch go if it was the last open PR holding it up', async () => {
+        const event = await unlabeledEvent({ merged: false, state: 'open' });
+
+        await robot.receive(event);
+
+        expect(batchQueue.onLeft).toHaveBeenCalledWith(
+          expect.anything(),
+          event.payload.pull_request,
+        );
+      });
+
+      it('leaves a merged PR alone', async () => {
+        nock.cleanAll();
+        const event = await unlabeledEvent({ merged: true, state: 'closed' });
+        nock(GH_API)
+          .post('/repos/codebytere/probot-test/check-runs')
+          .reply(200);
+
+        await robot.receive(event);
+
+        expect(batchQueue.onLeft).not.toHaveBeenCalled();
+        expect(backportToLabel).not.toHaveBeenCalled();
+      });
+    });
+
     it('skips the backport approval check if PR is not a backport', async () => {
       const event = JSON.parse(
         await fs.readFile(prUnlabeledEventPath, 'utf-8'),
@@ -1580,6 +1710,43 @@ describe('trop', () => {
       expect(backportToLabel).toHaveBeenCalled();
       expect(getStackMemberPRs).not.toHaveBeenCalled();
       expect(backportStackToLabel).not.toHaveBeenCalled();
+    });
+
+    const batchLabel = { name: 'batch-backport', color: 'fff' };
+
+    it('queues a merged PR labeled batch-backport instead of backporting it', async () => {
+      const event = JSON.parse(JSON.stringify(prClosedEvent));
+      event.payload.pull_request.labels = [batchLabel, targetLabel];
+
+      await robot.receive(event);
+
+      expect(batchQueue.onMerged).toHaveBeenCalledWith(
+        expect.anything(),
+        event.payload.pull_request,
+      );
+      expect(backportToLabel).not.toHaveBeenCalled();
+      expect(backportStackToLabel).not.toHaveBeenCalled();
+    });
+
+    it('does not queue a merged PR without the batch-backport label', async () => {
+      await robot.receive(prClosedEvent);
+
+      expect(batchQueue.onMerged).not.toHaveBeenCalled();
+      expect(backportToLabel).toHaveBeenCalled();
+    });
+
+    it('lets the batch go when a PR labeled batch-backport is closed unmerged', async () => {
+      const event = JSON.parse(JSON.stringify(prClosedEvent));
+      event.payload.pull_request.merged = false;
+      event.payload.pull_request.labels = [batchLabel, targetLabel];
+
+      await robot.receive(event);
+
+      expect(batchQueue.onLeft).toHaveBeenCalledWith(
+        expect.anything(),
+        event.payload.pull_request,
+      );
+      expect(batchQueue.onMerged).not.toHaveBeenCalled();
     });
 
     it('does not backport a merged PR that is not the top of its stack', async () => {

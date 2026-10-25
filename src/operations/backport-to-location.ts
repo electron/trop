@@ -1,7 +1,7 @@
 import { PRStatus, BackportPurpose, LogLevel } from '../enums';
 import * as labelUtils from '../utils/label-utils';
 import { log } from '../utils/log-util';
-import { backportStackImpl } from '../utils';
+import { backportBatchImpl, backportStackImpl } from '../utils';
 import { Probot } from 'probot';
 import { SimpleWebHookRepoContext, WebHookPR } from '../types';
 
@@ -108,4 +108,31 @@ export const backportStackToBranch = async (
     labelToRemove,
     labelToAdd,
   );
+};
+
+/**
+ * Backports a batch of merged PRs (units ordered by merge, each a single PR
+ * or a stack bottom to top) as one pull request to the given branch, as if
+ * each was labeled `target/<targetBranch>`.
+ */
+export const backportBatchToBranch = async (
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  units: WebHookPR[][],
+  targetBranch: string,
+  onSettled?: (retryable: boolean) => void,
+) => {
+  log(
+    'backportBatchToBranch',
+    LogLevel.INFO,
+    `Executing batch backport of ${units
+      .map((unit) => `#${unit[unit.length - 1].number}`)
+      .join(', ')} to branch '${targetBranch}'`,
+  );
+
+  await backportBatchImpl(robot, context, units, targetBranch, {
+    labelToRemove: PRStatus.TARGET + targetBranch,
+    labelToAdd: PRStatus.IN_FLIGHT + targetBranch,
+    onSettled,
+  });
 };

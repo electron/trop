@@ -8,7 +8,7 @@
 // this module.
 
 /** Bump when the shape of SandboxInputs or SandboxResult changes. */
-export const SANDBOX_PROTOCOL_VERSION = 1;
+export const SANDBOX_PROTOCOL_VERSION = 2;
 
 /** A set of patches to apply, in order, on top of the base commit. */
 export interface SandboxAttempt {
@@ -30,6 +30,13 @@ export interface SandboxInputs {
   baseSha: string;
   /** Tried in order; the first attempt that applies cleanly wins. */
   attempts: SandboxAttempt[];
+  /**
+   * A batch backport instead (then `attempts` is empty): the members are
+   * applied in order, each on top of the members before it with the first
+   * of its attempts that applies cleanly there. A member none of whose
+   * attempts applies is left out, and the rest still go on.
+   */
+  members?: SandboxAttempt[][];
   /**
    * Full ids of the blobs the patches' `index` lines name as pre-images, so
    * the job can fetch them before `git am -3` (which resolves the abbreviated
@@ -74,6 +81,18 @@ export type SandboxResult =
        */
       applied: (SandboxApplied | null)[];
     }
+  | {
+      outcome: 'batch';
+      /**
+       * One entry per member, in order: the attempt of the member that
+       * applied and one entry per patch of it (as for 'success'), or null
+       * if the member was left out.
+       */
+      members: ({
+        attempt: number;
+        applied: (SandboxApplied | null)[];
+      } | null)[];
+    }
   | { outcome: 'conflict'; diff: string }
   | { outcome: 'error'; message: string };
 
@@ -81,6 +100,11 @@ export type SandboxResult =
 export interface ResultExpectation {
   /** Number of patches of each attempt, in order. */
   patchCounts: number[];
+  /**
+   * For a batch: the number of patches of each attempt of each member. A
+   * batch job reports a 'batch' result (or an error), never anything else.
+   */
+  memberPatchCounts?: number[][];
   includeChanges: boolean;
 }
 
@@ -275,6 +299,49 @@ const validateApplied = (
 };
 
 /**
+ * The attempt index and per-patch results of a 'success' result, or of one
+ * member of a 'batch' result.
+ */
+const validateAttemptResult = (
+  where: string,
+  attempt: unknown,
+  applied: unknown,
+  patchCounts: number[],
+  includeChanges: boolean,
+  blobs: UploadedBlobs,
+  budget: { changes: number },
+) => {
+  if (
+    typeof attempt !== 'number' ||
+    !Number.isInteger(attempt) ||
+    attempt < 0 ||
+    attempt >= patchCounts.length
+  ) {
+    return fail(`${where}attempt: not one of the attempts`);
+  }
+  if (!Array.isArray(applied)) return fail(`${where}applied: not an array`);
+  if (applied.length !== patchCounts[attempt]) {
+    fail(
+      `${where}results for ${applied.length} patches, expected ${patchCounts[attempt]}`,
+    );
+  }
+  return {
+    attempt,
+    applied: applied.map((a: unknown, i) =>
+      a === null
+        ? null
+        : validateApplied(
+            `${where}applied[${i}]`,
+            a,
+            includeChanges,
+            blobs,
+            budget,
+          ),
+    ),
+  };
+};
+
+/**
  * Validates a sandbox job's result against what the server asked for. Throws
  * SandboxResultError for anything unexpected; the returned value contains
  * only validated data.
@@ -288,37 +355,51 @@ export const validateSandboxResult = (
 
   switch (value.outcome) {
     case 'success': {
+      if (expect.memberPatchCounts) return fail('expected a batch result');
       checkKeys('result', value, ['outcome', 'attempt', 'applied']);
-      const { attempt } = value;
-      if (
-        typeof attempt !== 'number' ||
-        !Number.isInteger(attempt) ||
-        attempt < 0 ||
-        attempt >= expect.patchCounts.length
-      ) {
-        return fail('attempt: not one of the attempts');
-      }
-      if (!Array.isArray(value.applied)) return fail('applied: not an array');
-      if (value.applied.length !== expect.patchCounts[attempt]) {
+      return {
+        outcome: 'success',
+        ...validateAttemptResult(
+          '',
+          value.attempt,
+          value.applied,
+          expect.patchCounts,
+          expect.includeChanges,
+          blobs,
+          { changes: 0 },
+        ),
+      };
+    }
+    case 'batch': {
+      const counts = expect.memberPatchCounts;
+      if (!counts) return fail('not a batch');
+      checkKeys('result', value, ['outcome', 'members']);
+      if (!Array.isArray(value.members)) return fail('members: not an array');
+      if (value.members.length !== counts.length) {
         fail(
-          `results for ${value.applied.length} patches, expected ${expect.patchCounts[attempt]}`,
+          `results for ${value.members.length} members, expected ${counts.length}`,
         );
       }
       const budget = { changes: 0 };
-      const applied = value.applied.map((a: unknown, i) =>
-        a === null
-          ? null
-          : validateApplied(
-              `applied[${i}]`,
-              a,
-              expect.includeChanges,
-              blobs,
-              budget,
-            ),
-      );
-      return { outcome: 'success', attempt, applied };
+      const members = value.members.map((m: unknown, i) => {
+        if (m === null) return null;
+        const where = `members[${i}].`;
+        if (!isRecord(m)) return fail(`members[${i}]: expected an object`);
+        checkKeys(`members[${i}]`, m, ['attempt', 'applied']);
+        return validateAttemptResult(
+          where,
+          m.attempt,
+          m.applied,
+          counts[i],
+          expect.includeChanges,
+          blobs,
+          budget,
+        );
+      });
+      return { outcome: 'batch', members };
     }
     case 'conflict':
+      if (expect.memberPatchCounts) return fail('expected a batch result');
       checkKeys('result', value, ['outcome', 'diff']);
       return {
         outcome: 'conflict',

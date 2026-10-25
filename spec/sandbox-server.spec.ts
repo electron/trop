@@ -123,7 +123,7 @@ describe('SandboxJobServer', { timeout: 30_000 }, () => {
   });
 
   const inputs = (l: CacheLease): SandboxInputs => ({
-    version: 1,
+    version: 2,
     ref: l.ref,
     baseSha: l.baseSha,
     attempts: [{ kind: 'all', patches: ['patch'] }],
