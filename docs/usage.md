@@ -49,8 +49,11 @@ or has its `batch-backport` label removed, and at the latest two hours after the
 - `/trop run backport-to <branch>` on a waiting pull request backports it to that branch on its own and removes its
   `target/<branch>` label, so the batch does not backport it there again.
 - A pull request leaves the batch for good once its `target/*` labels are consumed (swapped for `in-flight/*` or
-  `needs-manual-bp/*`); its `batch-backport` label is left in place. If `trop` hits an internal error, the labels stay and the
-  batch is tried again on the next merge, close, `/trop run backport` or restart.
+  `needs-manual-bp/*`); its `batch-backport` label is left in place. If `trop` hits an internal error, the labels stay: the
+  pull requests of that batch are retried on their own a few minutes later (up to three times in a row), and otherwise go out
+  with the next batch, on `/trop run backport` or after a restart. They don't make the pull requests waiting since overdue.
+- A pull request whose commits don't apply and whose squash commit can't be fetched is left out of its batch like one that
+  conflicts.
 
 **Manual Triggering With Labels**:
 1. Open a bugfix or feature pull request to `main`

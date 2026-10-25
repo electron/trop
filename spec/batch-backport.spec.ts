@@ -115,6 +115,10 @@ const batches = () =>
     units: units.map((unit) => unit.map((pr) => pr.number)),
   }));
 
+/** Ends the `n`th batch backport, as stopped by an internal error or not. */
+const settle = (n: number, retryable: boolean) =>
+  vi.mocked(backportBatchToBranch).mock.calls[n][4]?.(retryable);
+
 const settleAll = () => {
   for (const [, , , , onSettled] of vi.mocked(backportBatchToBranch).mock
     .calls) {
@@ -426,6 +430,101 @@ describe('BatchBackportQueue', () => {
     });
   });
 
+  describe('a batch an internal error stopped', () => {
+    it('is retried on its own a few minutes later', async () => {
+      const repo = repository(merged(1, 1));
+      robot.auth.mockResolvedValue(repo.octokit);
+      await queue.flushNow(repo.context);
+      settle(0, true);
+
+      // Meanwhile #2 merges while #3 is still open: it waits.
+      const second = merged(2, 0);
+      repo.set(second);
+      repo.set(open(3));
+      await queue.onMerged(repo.context, second as never);
+      expect(batches()).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await vi.waitFor(() => expect(batches()).toHaveLength(2));
+      expect(batches()[1]).toEqual({ branch: '42-x-y', units: [[1]] });
+    });
+
+    it('does not make the PRs that waited since overdue', async () => {
+      const repo = repository(merged(1, 3));
+      await queue.flushNow(repo.context);
+      settle(0, true);
+
+      const second = merged(2, 0);
+      repo.set(second);
+      repo.set(open(3));
+      await queue.onMerged(repo.context, second as never);
+
+      expect(batches()).toHaveLength(1);
+      expect(repo.comments()).toEqual([
+        expect.objectContaining({
+          number: 2,
+          body: expect.stringContaining('2026-10-25 14:00 UTC'),
+        }),
+      ]);
+    });
+
+    it('still goes out with the next batch', async () => {
+      const repo = repository(merged(1, 3));
+      await queue.flushNow(repo.context);
+      settle(0, true);
+
+      const second = merged(2, 0);
+      repo.set(second);
+      await queue.onMerged(repo.context, second as never);
+
+      expect(batches()[1]).toEqual({ branch: '42-x-y', units: [[1], [2]] });
+    });
+
+    it('is retried three times in a row at most', async () => {
+      const repo = repository(merged(1, 1));
+      robot.auth.mockResolvedValue(repo.octokit);
+      await queue.flushNow(repo.context);
+      for (let i = 0; i < 4; i++) {
+        settle(i, true);
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      }
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+      expect(batches()).toHaveLength(4);
+    });
+
+    it('is no longer retried once a backport of it got through', async () => {
+      const repo = repository(merged(1, 1));
+      robot.auth.mockResolvedValue(repo.octokit);
+      await queue.flushNow(repo.context);
+      settle(0, true);
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await vi.waitFor(() => expect(batches()).toHaveLength(2));
+      settle(1, false);
+
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+      expect(batches()).toHaveLength(2);
+    });
+  });
+
+  describe('handling an event that fails', () => {
+    it('evaluates the batch again a few minutes later', async () => {
+      const pr = merged(1, 0);
+      const repo = repository(pr);
+      robot.auth.mockResolvedValue(repo.octokit);
+      repo.octokit.paginate.mockRejectedValueOnce(new Error('502'));
+
+      await expect(queue.onMerged(repo.context, pr as never)).rejects.toThrow(
+        '502',
+      );
+      expect(backportBatchToBranch).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await vi.waitFor(() =>
+        expect(batches()).toEqual([{ branch: '42-x-y', units: [[1]] }]),
+      );
+    });
+  });
+
   describe('running batches', () => {
     it('backports a batch once, however many events see it go', async () => {
       const first = merged(1, 0);
@@ -575,6 +674,39 @@ describe('BatchBackportQueue', () => {
     it('backports a batch whose last open PR went while trop was down', async () => {
       const repo = repository(merged(1, 0.5));
       installed(repo, [merged(1, 0.5)]);
+
+      await queue.rescan();
+
+      expect(batches()).toEqual([{ branch: '42-x-y', units: [[1]] }]);
+    });
+
+    it('sorts the search by the most recently updated, under its 1000 results', async () => {
+      const repo = repository(merged(1, 0.5));
+      const installation = installed(repo, [merged(1, 0.5)]);
+
+      await queue.rescan();
+
+      expect(installation.paginate).toHaveBeenCalledWith(
+        installation.search.issuesAndPullRequests,
+        expect.objectContaining({ sort: 'updated', order: 'desc' }),
+      );
+    });
+
+    it('carries on with the other installations when one fails', async () => {
+      const repo = repository(merged(1, 3));
+      const installation = installed(repo, [merged(1, 3)]);
+      const app = {
+        apps: { listInstallations: vi.fn() },
+        paginate: vi.fn(async () => [
+          { id: 6, account: { login: 'suspended', type: 'Organization' } },
+          { id: 7, account: { login: 'electron', type: 'Organization' } },
+        ]),
+      };
+      robot.auth.mockImplementation(async (id?: number) => {
+        if (id === undefined) return app;
+        if (id === 6) throw new Error('installation suspended');
+        return installation;
+      });
 
       await queue.rescan();
 

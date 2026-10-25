@@ -728,8 +728,11 @@ export const backportStackImpl = async (
 export interface BatchBackportOptions {
   labelToRemove?: string;
   labelToAdd?: string;
-  /** Called once the backport is over, however it ended. */
-  onSettled?: () => void;
+  /**
+   * Called once the backport is over, however it ended; `retryable` if an
+   * internal error stopped it and it can be tried again.
+   */
+  onSettled?: (retryable: boolean) => void;
 }
 
 /**
@@ -831,7 +834,7 @@ const backportUnitsImpl = async (
           await labelUtils.removeLabel(context, p.number, labelToRemove);
         }
       }
-      onSettled?.();
+      onSettled?.(false);
       return;
     }
   }
@@ -844,7 +847,7 @@ const backportUnitsImpl = async (
         issue_number: pr.number,
       }),
     );
-    onSettled?.();
+    onSettled?.(false);
     return;
   }
 
@@ -854,6 +857,9 @@ const backportUnitsImpl = async (
     .map((p) => `#${p.number}`)
     .join(', ')} to "${targetBranch}"`;
   log('backportImpl', LogLevel.INFO, `Queuing ${bp} for "${slug}"`);
+
+  // Whether an internal error stopped the backport, to be retried.
+  let retryable = false;
 
   // The conflict diff from the sandbox job, for the check run's annotations:
   // empty once a job ran, undefined if none did.
@@ -950,22 +956,16 @@ const backportUnitsImpl = async (
         const found = await getAttempts(unit);
         if (
           batch &&
-          found.squashError !== undefined &&
+          found.squashError instanceof SandboxInfraError &&
+          found.squashError.retryable &&
           !found.attempts.some((a) => a.kind === 'all')
         ) {
-          // Only its squash commit(s) might apply this unit, and they could
-          // not be fetched: it can't be told apart from a conflict, so the
-          // batch stops. GitHub not answering is retried like any internal
-          // error; anything else would fail again, so it is not.
-          throw found.squashError instanceof SandboxInfraError
-            ? found.squashError
-            : new SandboxInfraError(
-                `Could not fetch the squash commit(s) of #${unit[unit.length - 1].number}`,
-                false,
-              );
+          // Only its squash commit(s) might apply this unit, and GitHub did
+          // not answer for them: retry the batch rather than leave it out.
+          throw found.squashError;
         }
-        // A unit of a batch whose commits don't apply is left out whether
-        // or not its squash commit(s) could be tried.
+        // Otherwise a unit of a batch with nothing that can be applied is
+        // left out below, like one that conflicts.
         if (!batch) squashError = found.squashError;
         if (found.attempts.length > 0) {
           candidates.push({ index, attempts: found.attempts });
@@ -1253,6 +1253,7 @@ you will need to perform this ${MANUAL_BACKPORT_LINK}.`,
           `${bp} for "${slug}" stopped by an internal error`,
           error,
         );
+        retryable = true;
         for (const top of tops) {
           if (purpose === BackportPurpose.ExecuteBackport) {
             // A batch keeps its `target/*` labels, so it is still queued and
@@ -1261,7 +1262,7 @@ you will need to perform this ${MANUAL_BACKPORT_LINK}.`,
               context.repo({
                 issue_number: top.number,
                 body: batch
-                  ? `An internal error stopped me from backporting this PR to "${targetBranch}" as part of a batch backport; this is not a merge conflict. To try again, comment \`/trop run backport\`.`
+                  ? `An internal error stopped me from backporting this PR to "${targetBranch}" as part of a batch backport; this is not a merge conflict. I will try again in a few minutes; to try again now, comment \`/trop run backport\`.`
                   : `An internal error stopped me from backporting this PR to "${targetBranch}"; this is not a merge conflict. To try again, comment \`/trop run backport-to ${targetBranch}\`.`,
               }),
             );
@@ -1345,6 +1346,6 @@ you will need to perform this ${MANUAL_BACKPORT_LINK}.`,
         );
       }
     },
-    onSettled,
+    () => onSettled?.(retryable),
   );
 };

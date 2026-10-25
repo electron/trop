@@ -120,7 +120,7 @@ export const backportBatchToBranch = async (
   context: SimpleWebHookRepoContext,
   units: WebHookPR[][],
   targetBranch: string,
-  onSettled?: () => void,
+  onSettled?: (retryable: boolean) => void,
 ) => {
   log(
     'backportBatchToBranch',

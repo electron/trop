@@ -277,6 +277,7 @@ describe('backportBatchImpl()', () => {
     ...overrides,
   });
 
+  let settledWith: unknown;
   const batch = async (
     units: object[][],
     setup: (ctx: ReturnType<typeof context>) => void = () => {},
@@ -298,6 +299,7 @@ describe('backportBatchImpl()', () => {
     );
     await done;
     expect(onSettled).toHaveBeenCalledTimes(1);
+    settledWith = onSettled.mock.calls[0][0];
     return ctx;
   };
 
@@ -447,6 +449,7 @@ describe('backportBatchImpl()', () => {
       ]);
     }
     expect(markBackportCheckFailed).toHaveBeenCalledTimes(2);
+    expect(settledWith).toBe(false);
   });
 
   it('keeps the batch queued after an internal error', async () => {
@@ -459,6 +462,7 @@ describe('backportBatchImpl()', () => {
         expect.stringContaining('`/trop run backport`'),
       ]);
     }
+    expect(settledWith).toBe(true);
     expect(addLabels).not.toHaveBeenCalled();
     expect(removeLabel).not.toHaveBeenCalled();
     expect(markBackportCheckFailed).toHaveBeenCalledWith(
@@ -515,29 +519,37 @@ describe('backportBatchImpl()', () => {
     expect(addLabels).not.toHaveBeenCalled();
   });
 
-  it('does not retry a batch whose squash commit fails for good', async () => {
+  it('leaves out a PR whose only commit to backport fails for good, and backports the rest', async () => {
     const { default: fetch } = await import('node-fetch');
     const fetchPatch = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation(async (url, init) => {
-      if ((url as string).endsWith('f'.repeat(40)))
+      if ((url as string).endsWith('f'.repeat(40))) {
         throw new Error('ECONNRESET');
+      }
       return fetchPatch(url, init);
     });
+    vi.mocked(runSandboxedBackport).mockResolvedValueOnce(success([]));
     try {
       const ctx = await batch(
         [[member(1, { merge_commit_sha: 'f'.repeat(40) })], [member(2)]],
         onlySquash,
       );
-      expect(runSandboxedBackport).not.toHaveBeenCalled();
+      // Only #2 goes to the sandbox, and out.
+      const [opts] = vi.mocked(runSandboxedBackport).mock.calls[0];
+      expect(opts.members).toHaveLength(1);
+      const [created] = ctx.octokit.pulls.create.mock.calls[0];
+      expect(created.title).toBe('fix: thing 2');
+
       expect(commentsOn(ctx, 1)).toEqual([
-        expect.stringContaining('backport manually'),
+        expect.stringMatching(/left out of #99.*backport manually/s),
       ]);
-      expect(markBackportCheckFailed).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.anything(),
-        '42-x-y',
-        expect.not.objectContaining({ infraError: true }),
-      );
+      expect(addLabels).toHaveBeenCalledWith(expect.anything(), 1, [
+        'needs-manual-bp/42-x-y',
+      ]);
+      expect(addLabels).not.toHaveBeenCalledWith(expect.anything(), 2, [
+        'needs-manual-bp/42-x-y',
+      ]);
+      expect(markBackportCheckFailed).toHaveBeenCalledTimes(1);
     } finally {
       vi.mocked(fetch).mockImplementation(fetchPatch);
     }

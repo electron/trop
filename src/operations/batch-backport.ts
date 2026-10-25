@@ -41,14 +41,29 @@ export type ResolveBackportPRs = (
   pr: WebHookPR,
 ) => Promise<WebHookPR[] | null>;
 
+interface EvaluateOptions {
+  /** The PR whose merge is being handled. */
+  merged?: WebHookPR;
+  /** The open PR that just left the batch. */
+  left?: number;
+  /** Backport the batch now, whatever is still open. */
+  force?: boolean;
+  /** Backport the PRs whose last batch backport failed, and only them. */
+  retry?: boolean;
+}
+
 interface QueuedPR {
   pr: WebHookPR;
   /** The target branches it is queued for and not being backported to. */
   branches: string[];
 }
 
-// How soon to try again when handling a deadline failed.
-const DEADLINE_RETRY_MS = 5 * 60 * 1000;
+// How soon to try again when handling a batch failed.
+const RETRY_MS = 5 * 60 * 1000;
+
+// How many times in a row a batch an internal error stopped is retried on
+// its own; after that it waits for the next event (or a restart).
+const MAX_RETRIES = 3;
 
 // Marks trop's comment that a PR waits in a batch, so it is posted once.
 const QUEUED_COMMENT_MARKER = '<!-- trop:batch-backport-queued -->';
@@ -64,6 +79,13 @@ export class BatchBackportQueue {
   >();
   /** `<owner>/<repo>#<number>:<branch>` for every batch backport running. */
   private readonly inFlight = new Set<string>();
+  /**
+   * `<owner>/<repo>#<number>` of the PRs whose last batch backport an
+   * internal error stopped, with the number of times in a row. They are
+   * retried on their own timer, so they don't set the deadline of the PRs
+   * that waited since.
+   */
+  private readonly failed = new Map<string, number>();
 
   constructor(
     private readonly robot: Probot,
@@ -76,14 +98,14 @@ export class BatchBackportQueue {
    * the batch goes out if none is open any more.
    */
   onMerged = (context: SimpleWebHookRepoContext, pr: WebHookPR) =>
-    this.evaluate(context, { merged: pr });
+    this.evaluateOrRetry(context, { merged: pr });
 
   /**
    * An open PR left the batch (closed unmerged, or the label was removed):
    * the batch goes out if it was the last open one.
    */
   onLeft = (context: SimpleWebHookRepoContext, pr: WebHookPR) =>
-    this.evaluate(context, { left: pr.number });
+    this.evaluateOrRetry(context, { left: pr.number });
 
   /**
    * `/trop run backport` on a queued PR: the batch goes out now. Resolves
@@ -102,48 +124,65 @@ export class BatchBackportQueue {
       per_page: 100,
     });
     for (const installation of installations) {
-      const account = installation.account as {
-        login: string;
-        type?: string;
-      } | null;
-      if (!account) continue;
-      const octokit = await this.robot.auth(installation.id);
-      // One search per installation for the repositories with merged PRs
-      // that may still be waiting, rather than a look at every repository.
-      const merged = await octokit.paginate(
-        octokit.search.issuesAndPullRequests,
-        {
-          q: `${account.type === 'Organization' ? 'org' : 'user'}:${account.login} is:pr is:merged label:"${BATCH_BACKPORT_LABEL}"`,
-          per_page: 100,
-        },
-      );
-      const repositories = new Set(
-        merged
-          .filter((item) => getTargetBranches(item).length > 0)
-          .map((item) => item.repository_url),
-      );
-      for (const url of repositories) {
-        const [owner, repo] = url.split('/').slice(-2);
-        try {
-          const { data: repository } = await octokit.repos.get({
-            owner,
-            repo,
-          });
-          await this.evaluate(
-            this.createContext(octokit, installation.id, repository),
-            {},
-          );
-        } catch (error) {
-          log(
-            'batchBackport',
-            LogLevel.ERROR,
-            `Failed to rescan the batch backport queue of ${owner}/${repo}`,
-            error,
-          );
-        }
+      try {
+        await this.rescanInstallation(installation);
+      } catch (error) {
+        log(
+          'batchBackport',
+          LogLevel.ERROR,
+          `Failed to rescan the batch backport queues of installation ${installation.id}`,
+          error,
+        );
       }
     }
   };
+
+  private async rescanInstallation(installation: {
+    id: number;
+    account: unknown;
+  }) {
+    const account = installation.account as {
+      login: string;
+      type?: string;
+    } | null;
+    if (!account) return;
+    const octokit = await this.robot.auth(installation.id);
+    // One search per installation for the repositories with merged PRs that
+    // may still be waiting, rather than a look at every repository. The
+    // most recently updated first: a PR still waiting was updated when it
+    // merged, and search returns 1000 results at most.
+    const merged = await octokit.paginate(
+      octokit.search.issuesAndPullRequests,
+      {
+        q: `${account.type === 'Organization' ? 'org' : 'user'}:${account.login} is:pr is:merged label:"${BATCH_BACKPORT_LABEL}"`,
+        sort: 'updated',
+        order: 'desc',
+        per_page: 100,
+      },
+    );
+    const repositories = new Set(
+      merged
+        .filter((item) => getTargetBranches(item).length > 0)
+        .map((item) => item.repository_url),
+    );
+    for (const url of repositories) {
+      const [owner, repo] = url.split('/').slice(-2);
+      try {
+        const { data: repository } = await octokit.repos.get({ owner, repo });
+        await this.evaluate(
+          this.createContext(octokit, installation.id, repository),
+          {},
+        );
+      } catch (error) {
+        log(
+          'batchBackport',
+          LogLevel.ERROR,
+          `Failed to rescan the batch backport queue of ${owner}/${repo}`,
+          error,
+        );
+      }
+    }
+  }
 
   /** Stops the timers (for specs). */
   dispose = () => {
@@ -185,11 +224,7 @@ export class BatchBackportQueue {
    */
   private evaluate(
     context: SimpleWebHookRepoContext,
-    {
-      merged,
-      left,
-      force = false,
-    }: { merged?: WebHookPR; left?: number; force?: boolean },
+    { merged, left, force = false, retry = false }: EvaluateOptions,
   ): Promise<boolean> {
     const key = this.repoKey(context);
     let lock = this.locks.get(key);
@@ -200,12 +235,26 @@ export class BatchBackportQueue {
 
     return lock.runExclusive(async () => {
       const queued = await this.listQueued(context, key, merged);
+      const isFailed = (q: QueuedPR) =>
+        this.failed.has(`${key}#${q.pr.number}`);
+
+      // A retry backports the failed PRs again, and only them.
+      if (retry) {
+        const due = queued.filter(isFailed);
+        return due.length > 0 && this.flush(context, key, due);
+      }
+
       if (queued.length === 0) {
         this.clearTimer(key);
         return false;
       }
 
-      const deadline = Date.parse(queued[0].pr.merged_at!) + this.maxWaitMs;
+      // The PRs being retried don't make the others overdue.
+      const waiting = queued.filter((q) => !isFailed(q));
+      const deadline =
+        waiting.length > 0
+          ? Date.parse(waiting[0].pr.merged_at!) + this.maxWaitMs
+          : Infinity;
       if (!force && Date.now() < deadline) {
         // GitHub's lists can lag a moment behind the event being handled.
         const open = (await this.listOpen(context)).filter(
@@ -219,7 +268,7 @@ export class BatchBackportQueue {
               .map((q) => `#${q.pr.number}`)
               .join(', ')} for ${open.map((n) => `#${n}`).join(', ')}`,
           );
-          this.armTimer(context, key, deadline);
+          if (deadline !== Infinity) this.armTimer(context, key, deadline);
           const mergedEntry = queued.find(
             (q) => q.pr.number === merged?.number,
           );
@@ -232,6 +281,23 @@ export class BatchBackportQueue {
       this.clearTimer(key);
       return this.flush(context, key, queued);
     });
+  }
+
+  /**
+   * Evaluates the batch for a webhook event; if that fails (GitHub not
+   * answering, say), evaluates it again a little later rather than leave a
+   * merged PR without a deadline.
+   */
+  private async evaluateOrRetry(
+    context: SimpleWebHookRepoContext,
+    options: EvaluateOptions,
+  ) {
+    try {
+      return await this.evaluate(context, options);
+    } catch (error) {
+      this.armTimer(context, this.repoKey(context), Date.now() + RETRY_MS);
+      throw error;
+    }
   }
 
   /** Tells a merged PR that it waits in the batch, once. */
@@ -353,8 +419,9 @@ or at ${formatDeadline(deadline)} at the latest. Comment \`/trop run backport\` 
       );
       // Until the backport is over, its PRs still look queued on GitHub.
       for (const id of ids) this.inFlight.add(id);
-      const release = () => {
+      const release = (retryable = false) => {
         for (const id of ids) this.inFlight.delete(id);
+        this.settled(context, key, members, retryable);
       };
 
       log(
@@ -377,19 +444,50 @@ or at ${formatDeadline(deadline)} at the latest. Comment \`/trop run backport\` 
           `${key}: the batch backport to "${branch}" failed`,
           error,
         );
-        release();
+        release(true);
       });
     }
     return branches.length > 0;
   }
 
-  /** Flushes the repository's batch at `deadline`, unless due earlier. */
+  /**
+   * Records how a batch backport of `members` ended: one an internal error
+   * stopped is retried on its own timer, a few times.
+   */
+  private settled(
+    context: SimpleWebHookRepoContext,
+    key: string,
+    members: { prs: WebHookPR[] }[],
+    retryable: boolean,
+  ) {
+    let retry = false;
+    for (const { prs } of members) {
+      const id = `${key}#${prs[prs.length - 1].number}`;
+      const failures = retryable ? (this.failed.get(id) ?? 0) + 1 : 0;
+      if (failures === 0) {
+        this.failed.delete(id);
+      } else {
+        this.failed.set(id, failures);
+        retry ||= failures <= MAX_RETRIES;
+      }
+    }
+    if (retry) {
+      this.armTimer(context, key, Date.now() + RETRY_MS, { retry: true });
+    }
+  }
+
+  /**
+   * Evaluates the repository's batch at `deadline`, unless due earlier; or,
+   * for a `retry`, backports the PRs that failed again then.
+   */
   private armTimer(
     context: SimpleWebHookRepoContext,
     key: string,
     deadline: number,
+    { retry = false }: { retry?: boolean } = {},
   ) {
-    const armed = this.timers.get(key);
+    const slot = retry ? `${key}:retry` : key;
+    const armed = this.timers.get(slot);
     if (armed && armed.deadline <= deadline) return;
     if (armed) clearTimeout(armed.timer);
 
@@ -405,7 +503,7 @@ or at ${formatDeadline(deadline)} at the latest. Comment \`/trop run backport\` 
     );
     const timer = setTimeout(
       () => {
-        this.timers.delete(key);
+        this.timers.delete(slot);
         const fired = async () =>
           this.evaluate(
             installationId === undefined
@@ -415,7 +513,7 @@ or at ${formatDeadline(deadline)} at the latest. Comment \`/trop run backport\` 
                   installationId,
                   repository,
                 ),
-            {},
+            { retry },
           );
         fired().catch((error: unknown) => {
           log(
@@ -424,13 +522,13 @@ or at ${formatDeadline(deadline)} at the latest. Comment \`/trop run backport\` 
             `${key}: failed to run the batch backport at its deadline - retrying`,
             error,
           );
-          this.armTimer(repoContext, key, Date.now() + DEADLINE_RETRY_MS);
+          this.armTimer(repoContext, key, Date.now() + RETRY_MS, { retry });
         });
       },
       Math.max(0, deadline - Date.now()),
     );
     timer.unref();
-    this.timers.set(key, { deadline, timer });
+    this.timers.set(slot, { deadline, timer });
   }
 
   private clearTimer(key: string) {
