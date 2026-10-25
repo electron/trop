@@ -426,6 +426,176 @@ describe('runner', () => {
       ).toEqual(['bottom\n', 'middle\n', 'top\n']);
     });
 
+    // A batch: each member is one commit on the source, made one after
+    // another, and backported as its own member.
+    const setupAndBackportBatch = async (opts: {
+      initial: Record<string, string>;
+      targetChanges?: Record<string, string | null>;
+      members: Record<string, string | null>[];
+      // Further attempts of a member, after its commit.
+      extraAttempts?: Record<number, BackportAttempt[]>;
+    }) => {
+      const remoteDir = await makeTempDir('trop-remote-');
+      const targetDir = await makeTempDir('trop-target-');
+      const sourceDir = await makeTempDir('trop-source-');
+      const cacheDir = path.join(await makeTempDir('trop-cache-'), 'git-cache');
+
+      runGit(remoteDir, ['init', '--bare']);
+      for (const dir of [targetDir, sourceDir]) {
+        initTestGitRepo(dir);
+        await applyChanges(dir, opts.initial);
+        commitAll(dir, 'initial', ['.']);
+      }
+      runGit(targetDir, ['branch', '42-x-y']);
+      if (opts.targetChanges) {
+        runGit(targetDir, ['checkout', '42-x-y']);
+        await applyChanges(targetDir, opts.targetChanges);
+        commitAll(targetDir, 'target change', Object.keys(opts.targetChanges));
+        runGit(targetDir, ['checkout', 'main']);
+      }
+
+      const members: BackportAttempt[][] = [];
+      for (const [i, changes] of opts.members.entries()) {
+        await applyChanges(sourceDir, changes);
+        commitAll(sourceDir, `member ${i}`, Object.keys(changes));
+        const commit = localBackportCommit(
+          sourceDir,
+          runGit(sourceDir, ['rev-parse', 'HEAD']),
+        );
+        members.push([
+          { kind: 'all', commits: [commit] },
+          ...(opts.extraAttempts?.[i] ?? []),
+        ]);
+      }
+
+      runGit(targetDir, ['remote', 'add', 'origin', remoteDir]);
+      runGit(targetDir, ['push', 'origin', 'main', '42-x-y']);
+      runGit(remoteDir, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+
+      const cache = new RepoCache('electron/trop', {
+        dir: cacheDir,
+        remoteUrl: remoteDir,
+      });
+      return runSandboxedBackport(
+        {
+          slug: 'electron/trop',
+          token: '',
+          targetBranch: '42-x-y',
+          attempts: [],
+          members,
+          includeChanges: true,
+          onSuccess: async (success) => {
+            for (const c of success.commits) {
+              for (const change of c.changes ?? []) {
+                if (!('deleted' in change)) {
+                  uploaded.set(
+                    change.blob,
+                    await success.readBlob(change.blob),
+                  );
+                }
+              }
+            }
+          },
+        },
+        { sandbox, cache, retryDelaysMs: [] },
+      );
+    };
+
+    describe('a batch', () => {
+      it('applies every member in order', async () => {
+        const outcome = await setupAndBackportBatch({
+          initial: { 'feature.txt': 'initial\n' },
+          members: [
+            { 'feature.txt': 'first\n' },
+            { 'feature.txt': 'second\n', 'other.txt': 'other\n' },
+          ],
+        });
+        expect(outcome).toMatchObject({
+          kind: 'success',
+          attempt: 'all',
+          dropped: [],
+        });
+        if (outcome.kind !== 'success') return;
+        expect(outcome.commits.map((c) => c.message.trim())).toEqual([
+          'member 0',
+          'member 1',
+        ]);
+        expect(
+          outcome.commits.map((c) => contentOf(changeFor(c, 'feature.txt'))),
+        ).toEqual(['first\n', 'second\n']);
+      });
+
+      it('leaves out a member that conflicts and applies the rest', async () => {
+        const outcome = await setupAndBackportBatch({
+          initial: { 'a.txt': 'a\n', 'b.txt': 'b\n', 'c.txt': 'c\n' },
+          targetChanges: { 'b.txt': 'target\n' },
+          members: [
+            { 'a.txt': 'a changed\n' },
+            { 'b.txt': 'b changed\n' },
+            { 'c.txt': 'c changed\n' },
+          ],
+        });
+        expect(outcome).toMatchObject({ kind: 'success', dropped: [1] });
+        if (outcome.kind !== 'success') return;
+        expect(outcome.commits.map((c) => c.message.trim())).toEqual([
+          'member 0',
+          'member 2',
+        ]);
+        expect(contentOf(changeFor(outcome.commits[1], 'c.txt'))).toBe(
+          'c changed\n',
+        );
+        expect(
+          outcome.commits.flatMap((c) => c.changes ?? []),
+        ).not.toContainEqual(expect.objectContaining({ path: 'b.txt' }));
+      });
+
+      it('also leaves out a later member that needed the one left out', async () => {
+        const outcome = await setupAndBackportBatch({
+          initial: { 'a.txt': 'a\n', 'b.txt': 'b\n' },
+          targetChanges: { 'b.txt': 'target\n' },
+          members: [
+            { 'b.txt': 'b changed\n' },
+            { 'a.txt': 'a changed\n' },
+            // Rewrites the line member 0 introduced.
+            { 'b.txt': 'b changed again\n' },
+          ],
+        });
+        expect(outcome).toMatchObject({ kind: 'success', dropped: [0, 2] });
+        if (outcome.kind !== 'success') return;
+        expect(outcome.commits.map((c) => c.message.trim())).toEqual([
+          'member 1',
+        ]);
+      });
+
+      it("falls back to a member's next attempt", async () => {
+        const outcome = await setupAndBackportBatch({
+          initial: { 'a.txt': 'a\n', 'b.txt': 'b\n' },
+          targetChanges: { 'a.txt': 'target\n' },
+          members: [{ 'a.txt': 'a changed\n' }, { 'b.txt': 'b changed\n' }],
+          // An attempt with no patches trivially applies.
+          extraAttempts: { 0: [{ kind: 'squash', commits: [] }] },
+        });
+        expect(outcome).toMatchObject({
+          kind: 'success',
+          attempt: 'squash',
+          dropped: [],
+        });
+        if (outcome.kind !== 'success') return;
+        expect(outcome.commits.map((c) => c.message.trim())).toEqual([
+          'member 1',
+        ]);
+      });
+
+      it('is a conflict when no member applies', async () => {
+        const outcome = await setupAndBackportBatch({
+          initial: { 'a.txt': 'a\n' },
+          targetChanges: { 'a.txt': 'target\n' },
+          members: [{ 'a.txt': 'a changed\n' }],
+        });
+        expect(outcome).toEqual({ kind: 'conflict', diff: '' });
+      });
+    });
+
     it('sends no file contents for a check', async () => {
       const { outcome } = await setupAndBackport({
         initial: { 'feature.txt': 'initial\n' },

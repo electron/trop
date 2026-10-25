@@ -40,3 +40,12 @@ export const CLAUDE_BOT_LOGIN = 'claude[bot]';
 
 export const VALID_BACKPORT_CHECK_NAME =
   process.env.VALID_BACKPORT_CHECK_NAME || 'Valid Backport';
+
+// Merged PRs with this label are backported together, as one PR per target
+// branch, once no open PR has it any more (src/operations/batch-backport.ts).
+export const BATCH_BACKPORT_LABEL =
+  process.env.BATCH_BACKPORT_LABEL || 'batch-backport';
+
+// How long a batch waits for open labeled PRs at most, counted from the
+// merge of its oldest PR.
+export const BATCH_BACKPORT_MAX_WAIT_MS = 2 * 60 * 60 * 1000;
