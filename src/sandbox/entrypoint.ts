@@ -15,6 +15,7 @@ import * as path from 'path';
 
 import type {
   SandboxApplied,
+  SandboxAttempt,
   SandboxFileChange,
   SandboxInputs,
   SandboxResult,
@@ -122,7 +123,7 @@ const main = async () => {
       throw new Error(`fetching inputs failed: ${inputsResponse.status}`);
     }
     const inputs = (await inputsResponse.json()) as SandboxInputs;
-    if (inputs.version !== 1) throw new Error('unsupported inputs version');
+    if (inputs.version !== 2) throw new Error('unsupported inputs version');
     errorChars = inputs.limits.errorChars;
 
     // Hardened configuration for every git process, passed through the
@@ -259,25 +260,26 @@ const main = async () => {
     const head = async () =>
       (await git(['rev-parse', 'HEAD'])).toString('utf8').trim();
 
-    let lastDiff = '';
-    for (const [attemptIndex, attempt] of inputs.attempts.entries()) {
+    // Applies an attempt's patches on top of `start`: the commit `git am`
+    // made for each patch, or null for a patch whose changes are on the
+    // target already (`git am` then makes none); or, if a patch does not
+    // apply, null with the conflict left in the work tree.
+    const apply = async (
+      attempt: SandboxAttempt,
+      start: string,
+      name: string,
+    ): Promise<(string | null)[] | null> => {
       await run('git', ['am', '--abort']);
-      await git(['reset', '--quiet', '--hard', baseSha]);
+      await git(['reset', '--quiet', '--hard', start]);
       await git(['clean', '--quiet', '-ffdx']);
 
-      // The commit `git am` made for each patch, or null for a patch whose
-      // changes are on the target already (`git am` then makes none).
       const made: (string | null)[] = [];
-      let applied = true;
       for (const [i, patch] of attempt.patches.entries()) {
-        const patchPath = path.join(patchDir, `${attemptIndex}-${i}.patch`);
+        const patchPath = path.join(patchDir, `${name}-${i}.patch`);
         await fs.promises.writeFile(patchPath, patch, 'utf8');
         const before = await head();
         const am = await run('git', ['am', '-3', '--keep-cr', patchPath]);
-        if (am.code !== 0) {
-          applied = false;
-          break;
-        }
+        if (am.code !== 0) return null;
         const after = await head();
         if (after === before) {
           made.push(null);
@@ -291,13 +293,10 @@ const main = async () => {
           throw new Error(`patch ${i} made several commits`);
         made.push(after);
       }
+      return made;
+    };
 
-      if (!applied) {
-        const diff = (await git(['diff'])).toString('utf8');
-        lastDiff = truncate(diff, inputs.limits.diffChars);
-        continue;
-      }
-
+    const report = async (made: (string | null)[]) => {
       const results: (SandboxApplied | null)[] = [];
       for (const hash of made) {
         results.push(
@@ -308,10 +307,60 @@ const main = async () => {
               : {},
         );
       }
+      return results;
+    };
+
+    if (inputs.members) {
+      // A batch: each member goes on top of the members applied before it,
+      // and one that does not apply there is left out.
+      const applied: ({ attempt: number; made: (string | null)[] } | null)[] =
+        [];
+      for (const [memberIndex, attempts] of inputs.members.entries()) {
+        const start = await head();
+        let result: (typeof applied)[number] = null;
+        for (const [attemptIndex, attempt] of attempts.entries()) {
+          const made = await apply(
+            attempt,
+            start,
+            `${memberIndex}-${attemptIndex}`,
+          );
+          if (made) {
+            result = { attempt: attemptIndex, made };
+            break;
+          }
+        }
+        if (!result) {
+          await run('git', ['am', '--abort']);
+          await git(['reset', '--quiet', '--hard', start]);
+          await git(['clean', '--quiet', '-ffdx']);
+        }
+        applied.push(result);
+      }
+      const members = [];
+      for (const member of applied) {
+        members.push(
+          member && {
+            attempt: member.attempt,
+            applied: await report(member.made),
+          },
+        );
+      }
+      await post({ outcome: 'batch', members });
+      return;
+    }
+
+    let lastDiff = '';
+    for (const [attemptIndex, attempt] of inputs.attempts.entries()) {
+      const made = await apply(attempt, baseSha, String(attemptIndex));
+      if (!made) {
+        const diff = (await git(['diff'])).toString('utf8');
+        lastDiff = truncate(diff, inputs.limits.diffChars);
+        continue;
+      }
       await post({
         outcome: 'success',
         attempt: attemptIndex,
-        applied: results,
+        applied: await report(made),
       });
       return;
     }

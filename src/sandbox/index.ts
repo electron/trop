@@ -7,7 +7,13 @@ import { LogLevel } from '../enums';
 import { log } from '../utils/log-util';
 import { SandboxJobServer } from './job-server';
 import { KubernetesJobRunner } from './kubernetes';
-import { LIMITS, SandboxAttempt, SandboxFileChange } from './protocol';
+import {
+  LIMITS,
+  SANDBOX_PROTOCOL_VERSION,
+  SandboxApplied,
+  SandboxAttempt,
+  SandboxFileChange,
+} from './protocol';
 import { checkBackstop, OriginalFile } from './backstop';
 import { backportMbox } from './patches';
 import { RepoCache } from './repo-cache';
@@ -133,6 +139,7 @@ export interface BackportResultCommit {
 
 /** A successful sandbox job, for the caller to push before its files go. */
 export interface SandboxSuccess {
+  /** For a batch: 'all' if every member applied all its commits. */
   attempt: SandboxAttempt['kind'];
   /** The target branch tip the server resolved: the new commits' base. */
   baseSha: string;
@@ -141,6 +148,9 @@ export interface SandboxSuccess {
   commits: BackportResultCommit[];
   /** Reads a file the job uploaded (SandboxFileChange.blob). */
   readBlob: (sha256: string) => Promise<Buffer>;
+  /** For a batch: the members left out because none of their attempts
+   *  applied, by index. */
+  dropped?: number[];
 }
 
 export interface SandboxedBackportOptions {
@@ -150,6 +160,13 @@ export interface SandboxedBackportOptions {
   targetBranch: string;
   /** Tried in order until one applies cleanly. */
   attempts: BackportAttempt[];
+  /**
+   * A batch instead, with `attempts` empty: each member's attempts are tried
+   * on top of the members before it, and a member none of whose attempts
+   * applies there is left out (SandboxInputs.members). All of them left out
+   * is a conflict.
+   */
+  members?: BackportAttempt[][];
   /** Whether the commits' file contents are needed (to push them). */
   includeChanges: boolean;
   /** Runs (e.g. pushes) while the job's files are still available. */
@@ -238,7 +255,13 @@ const runOnce = async (
 
   const lease = await cache.acquire(opts.token, opts.targetBranch);
   try {
-    const diffs = opts.attempts.flatMap((a) => a.commits.map((c) => c.diff));
+    const toSandbox = (a: BackportAttempt): SandboxAttempt => ({
+      kind: a.kind,
+      patches: a.commits.map((c) => backportMbox(c.diff)),
+    });
+    const diffs = [...opts.attempts, ...(opts.members ?? []).flat()].flatMap(
+      (a) => a.commits.map((c) => c.diff),
+    );
     const preimageBlobs = await cacheStep(() =>
       cache.resolvePreimageBlobs(diffs),
     );
@@ -246,13 +269,13 @@ const runOnce = async (
       cacheDir: lease.dir,
       ref: lease.ref,
       inputs: {
-        version: 1,
+        version: SANDBOX_PROTOCOL_VERSION,
         ref: lease.ref,
         baseSha: lease.baseSha,
-        attempts: opts.attempts.map((a) => ({
-          kind: a.kind,
-          patches: a.commits.map((c) => backportMbox(c.diff)),
-        })),
+        attempts: opts.attempts.map(toSandbox),
+        ...(opts.members && {
+          members: opts.members.map((m) => m.map(toSandbox)),
+        }),
         preimageBlobs,
         includeChanges: opts.includeChanges,
         committer: getCommitter(),
@@ -263,9 +286,55 @@ const runOnce = async (
       },
       expectation: {
         patchCounts: opts.attempts.map((a) => a.commits.length),
+        ...(opts.members && {
+          memberPatchCounts: opts.members.map((m) =>
+            m.map((a) => a.commits.length),
+          ),
+        }),
         includeChanges: opts.includeChanges,
       },
     });
+
+    // Checks what the job made of `commits` and hands it to onSuccess.
+    const succeed = async (
+      kind: SandboxAttempt['kind'],
+      commits: BackportCommit[],
+      applied: (SandboxApplied | null)[],
+      dropped?: number[],
+    ): Promise<SandboxedBackportOutcome> => {
+      if (deps.backstop ?? true) {
+        await checkBackstop({
+          commits,
+          applied,
+          renamedOnTarget: () =>
+            cacheStep(() =>
+              cache.renamedOnTarget(
+                lease.baseSha,
+                commits.map((c) => c.diff),
+              ),
+            ),
+          targetFiles: (paths) =>
+            cacheStep(() => cache.filesAt(lease.baseSha, paths)),
+          gitBlobId: (sha) => job.blobs.gitId(sha),
+        });
+      }
+      const made = commits.flatMap((c, i) => {
+        const a = applied[i];
+        return a
+          ? [{ message: c.message, author: c.author, changes: a.changes }]
+          : [];
+      });
+      const success: SandboxSuccess = {
+        attempt: kind,
+        baseSha: lease.baseSha,
+        commits: made,
+        readBlob: (sha) => job.blobs.readAsync(sha),
+        ...(dropped && { dropped }),
+      };
+      await opts.onSuccess?.(success);
+      const { readBlob: _, ...outcome } = success;
+      return { kind: 'success', ...outcome };
+    };
 
     try {
       log(
@@ -282,47 +351,21 @@ const runOnce = async (
       switch (result.outcome) {
         case 'success': {
           const attempt = opts.attempts[result.attempt];
-          if (deps.backstop ?? true) {
-            await checkBackstop({
-              commits: attempt.commits,
-              applied: result.applied,
-              renamedOnTarget: () =>
-                cacheStep(() =>
-                  cache.renamedOnTarget(
-                    lease.baseSha,
-                    attempt.commits.map((c) => c.diff),
-                  ),
-                ),
-              targetFiles: (paths) =>
-                cacheStep(() => cache.filesAt(lease.baseSha, paths)),
-              gitBlobId: (sha) => job.blobs.gitId(sha),
-            });
-          }
-          const commits = attempt.commits.flatMap((c, i) => {
-            const applied = result.applied[i];
-            return applied
-              ? [
-                  {
-                    message: c.message,
-                    author: c.author,
-                    changes: applied.changes,
-                  },
-                ]
-              : [];
-          });
-          const success: SandboxSuccess = {
-            attempt: attempt.kind,
-            baseSha: lease.baseSha,
-            commits,
-            readBlob: (sha) => job.blobs.readAsync(sha),
-          };
-          await opts.onSuccess?.(success);
-          return {
-            kind: 'success',
-            attempt: success.attempt,
-            baseSha: success.baseSha,
-            commits,
-          };
+          return await succeed(attempt.kind, attempt.commits, result.applied);
+        }
+        case 'batch': {
+          const kept = result.members.flatMap((m, i) =>
+            m
+              ? [{ attempt: opts.members![i][m.attempt], applied: m.applied }]
+              : [],
+          );
+          if (kept.length === 0) return { kind: 'conflict', diff: '' };
+          return await succeed(
+            kept.every((k) => k.attempt.kind === 'all') ? 'all' : 'squash',
+            kept.flatMap((k) => k.attempt.commits),
+            kept.flatMap((k) => k.applied),
+            result.members.flatMap((m, i) => (m ? [] : [i])),
+          );
         }
         case 'conflict':
           return { kind: 'conflict', diff: result.diff };

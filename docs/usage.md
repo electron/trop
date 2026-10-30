@@ -28,6 +28,33 @@ target branch containing the commits of every pull request in the stack, bottom 
 individually but are labeled (`in-flight/*`, `merged/*`) along with the top one. `/trop run backport` and `/trop run backport-to`
 must also be run on the top pull request.
 
+**Batch backports**: pull requests labeled `batch-backport` (as well as their `target/*` labels) are backported together, as one
+pull request per target branch, instead of one backport each. When such a pull request is merged, `trop` checks whether any open
+pull request still has the `batch-backport` label: if one does, the merged pull request waits in the batch (`trop` comments to say
+so), and if none does, the batch goes out. A batch also goes out when the last open labeled pull request is closed without merging
+or has its `batch-backport` label removed, and at the latest two hours after the oldest pull request in it was merged.
+`/trop run backport` on a waiting pull request sends the whole batch out at once.
+- For each target branch, the batch is made of every waiting pull request labeled `target/<branch>`, applied in the order they were
+  merged. A pull request that does not apply cleanly on top of the ones before it is left out: `trop` comments on it and swaps its
+  `target/<branch>` label for `needs-manual-bp/<branch>`, and the rest of the batch still goes out without it.
+- The batch pull request is titled `chore: batch backport of #1, #2` (a single pull request left in a batch keeps its own title),
+  declares `Backport of #N` for each pull request in it with their release notes combined, gets the highest `semver/*` label among
+  them and asks every author for review. Each pull request in it gets a comment linking to it and the usual `in-flight/*` and
+  `merged/*` labels.
+- A stack can be part of a batch: label its **top** pull request with `batch-backport`, and the whole stack is backported in the
+  batch, bottom to top, where its top pull request was merged. A stack that does not apply is left out as a whole.
+- The batch lives in the labels: a pull request is waiting as long as it is merged and still has `batch-backport` and `target/*`
+  labels, so restarting `trop` does not lose it. Removing `batch-backport` from a waiting pull request takes it out of the batch;
+  `/trop run backport` then backports it on its own.
+- `/trop run backport-to <branch>` on a waiting pull request backports it to that branch on its own and removes its
+  `target/<branch>` label, so the batch does not backport it there again.
+- A pull request leaves the batch for good once its `target/*` labels are consumed (swapped for `in-flight/*` or
+  `needs-manual-bp/*`); its `batch-backport` label is left in place. If `trop` hits an internal error, the labels stay: the
+  pull requests of that batch are retried on their own a few minutes later (up to three times in a row), and otherwise go out
+  with the next batch, on `/trop run backport` or after a restart. They don't make the pull requests waiting since overdue.
+- A pull request whose commits don't apply and whose squash commit can't be fetched is left out of its batch like one that
+  conflicts.
+
 **Manual Triggering With Labels**:
 1. Open a bugfix or feature pull request to `main`
 2. Your pull request is reviewed and you or a co-contributor merges it into `main`
@@ -58,6 +85,7 @@ must also be run on the top pull request.
 
 * `BOT_USER_NAME` - the username if your bot (e.g `trop[bot]`)
 * `SKIP_CHECK_LABEL` - see [skipping manual backports](./manual-backports.md#skipping-backport-checks)
+* `BATCH_BACKPORT_LABEL` - the label of [batch backports](#using-trop). Defaults to `batch-backport`.
 * `NUM_SUPPORTED_VERSIONS` - automatic backports to stable branches further than this many back will be skipped. Defaults to 3.
 * `NO_EOL_SUPPORT` - if set to `1`, manual backports to stable branches older than `NUM_SUPPORTED_VERSIONS` will also be disallowed.
 * `SUPPORTED_BRANCH_PATTERN` - regex to define what a "stable branch" is. Defaults to `^(\d+)-(?:(\d+)-x|x-y)$`, which matches branches like `8-x-y` or `5-1-x`. Regex groups will be used for sorting, to determine which branch is "older" than another. Numeric groups (matching `/^\d+$/`) will be compared numerically, otherwise groups will be compared lexically. The first group is treated as the major version. There must be at least one group.

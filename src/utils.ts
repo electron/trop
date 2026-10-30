@@ -719,7 +719,94 @@ export const backportStackImpl = async (
   purpose: BackportPurpose,
   labelToRemove?: string,
   labelToAdd?: string,
+) =>
+  backportUnitsImpl(robot, context, [prs], targetBranch, purpose, {
+    labelToRemove,
+    labelToAdd,
+  });
+
+export interface BatchBackportOptions {
+  labelToRemove?: string;
+  labelToAdd?: string;
+  /**
+   * Called once the backport is over, however it ended; `retryable` if an
+   * internal error stopped it and it can be tried again.
+   */
+  onSettled?: (retryable: boolean) => void;
+}
+
+/**
+ * Backports a batch of merged PRs to `targetBranch` as a single pull request.
+ *
+ * `units` are ordered by merge; each is a single PR or a stack (bottom to
+ * top), whose last PR is the one that was queued for the batch. They are
+ * applied in that order, and a unit that does not apply on top of the ones
+ * before it is left out of the backport and flagged for a manual backport,
+ * while the rest still go out together.
+ */
+export const backportBatchImpl = async (
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  units: WebHookPR[][],
+  targetBranch: string,
+  options: BatchBackportOptions = {},
+) =>
+  backportUnitsImpl(
+    robot,
+    context,
+    units,
+    targetBranch,
+    BackportPurpose.ExecuteBackport,
+    { ...options, batch: true },
+  );
+
+/**
+ * Removes `target/<targetBranch>` from `prs` and flags them (or the PRs
+ * they backport) with `needs-manual-bp/<targetBranch>`.
+ */
+const flagForManualBackport = async (
+  context: SimpleWebHookRepoContext,
+  prs: WebHookPR[],
+  targetBranch: string,
 ) => {
+  const labelToRemove = PRStatus.TARGET + targetBranch;
+  const labelToAdd = PRStatus.NEEDS_MANUAL + targetBranch;
+  for (const member of prs) {
+    await labelUtils.removeLabel(context, member.number, labelToRemove);
+
+    const originalBackportNumber = await getOriginalBackportNumber(
+      context,
+      member,
+    );
+    await labelUtils.addLabels(context, originalBackportNumber, [labelToAdd]);
+  }
+};
+
+const MANUAL_BACKPORT_LINK =
+  '[backport manually](https://github.com/electron/trop/blob/main/docs/manual-backports.md#manual-backports)';
+
+/**
+ * Backports `units` to `targetBranch` as a single pull request. Each unit is
+ * a single PR or a stack, ordered bottom to top; its last PR is the one that
+ * carries its labels, check run and comments. Without `batch` there is one
+ * unit and it is backported (or fails) as a whole; with `batch` the units
+ * are applied one after another and those that don't apply are left out.
+ */
+const backportUnitsImpl = async (
+  robot: Probot,
+  context: SimpleWebHookRepoContext,
+  units: WebHookPR[][],
+  targetBranch: string,
+  purpose: BackportPurpose,
+  {
+    labelToRemove,
+    labelToAdd,
+    batch = false,
+    onSettled,
+  }: BatchBackportOptions & { batch?: boolean },
+) => {
+  const prs = units.flat();
+  const tops = units.map((unit) => unit[unit.length - 1]);
   const pr = prs[prs.length - 1];
 
   // Optionally disallow backports to EOL branches
@@ -733,12 +820,21 @@ export const backportStackImpl = async (
         LogLevel.WARN,
         `${targetBranch} is no longer supported - no backport will be initiated.`,
       );
-      await context.octokit.issues.createComment(
-        context.repo({
-          body: `${targetBranch} is no longer supported - no backport will be initiated.`,
-          issue_number: pr.number,
-        }),
-      );
+      for (const top of tops) {
+        await context.octokit.issues.createComment(
+          context.repo({
+            body: `${targetBranch} is no longer supported - no backport will be initiated.`,
+            issue_number: top.number,
+          }),
+        );
+      }
+      // Otherwise the PRs would stay queued for every batch to come.
+      if (batch && labelToRemove) {
+        for (const p of prs) {
+          await labelUtils.removeLabel(context, p.number, labelToRemove);
+        }
+      }
+      onSettled?.(false);
       return;
     }
   }
@@ -751,39 +847,55 @@ export const backportStackImpl = async (
         issue_number: pr.number,
       }),
     );
+    onSettled?.(false);
     return;
   }
 
   const base = pr.base;
   const slug = `${base.repo.owner.login}/${base.repo.name}`;
-  const bp = `backport from PR ${prs
+  const bp = `${batch ? 'batch ' : ''}backport from PR ${prs
     .map((p) => `#${p.number}`)
     .join(', ')} to "${targetBranch}"`;
   log('backportImpl', LogLevel.INFO, `Queuing ${bp} for "${slug}"`);
+
+  // Whether an internal error stopped the backport, to be retried.
+  let retryable = false;
 
   // The conflict diff from the sandbox job, for the check run's annotations:
   // empty once a job ran, undefined if none did.
   let conflictDiff: string | undefined;
 
+  const getCheckRun = (p: WebHookPR) =>
+    getOrCreateCheckRun(context, p, targetBranch, {
+      supersedeCompleted: purpose === BackportPurpose.Check,
+    });
+
   queue.enterQueue(
-    `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
+    batch
+      ? `batch-backport-${prs.map((p) => p.number).join('-')}-${targetBranch}`
+      : `backport-${pr.head.sha}-${targetBranch}-${purpose}`,
     async () => {
       log('backportImpl', LogLevel.INFO, `Executing ${bp} for "${slug}"`);
-      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch, {
-        supersedeCompleted: purpose === BackportPurpose.Check,
-      });
-      log(
-        'backportImpl',
-        LogLevel.INFO,
-        `Updating check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with status 'in_progress'`,
-      );
-      await context.octokit.checks.update(
-        context.repo({
-          check_run_id: checkRun.id,
-          name: checkRun.name,
-          status: 'in_progress' as const,
-        }),
-      );
+      const checkRuns = new Map<
+        number,
+        Awaited<ReturnType<typeof getOrCreateCheckRun>>
+      >();
+      for (const top of tops) {
+        const checkRun = await getCheckRun(top);
+        checkRuns.set(top.number, checkRun);
+        log(
+          'backportImpl',
+          LogLevel.INFO,
+          `Updating check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with status 'in_progress'`,
+        );
+        await context.octokit.checks.update(
+          context.repo({
+            check_run_id: checkRun.id,
+            name: checkRun.name,
+            status: 'in_progress' as const,
+          }),
+        );
+      }
 
       const repoAccessToken = await getRepoToken(robot, context);
       // As before the sandbox, a failure from here on reports an (empty)
@@ -791,14 +903,14 @@ export const backportStackImpl = async (
       conflictDiff = '';
 
       // Create temporary branch name.
-      const sanitizedTitle = pr.title
-        .replace(/\*/g, 'x')
-        .toLowerCase()
-        .replace(/[^a-z0-9_]+/g, '-');
+      const sanitizedTitle = batch
+        ? `batch-${tops.map((top) => top.number).join('-')}`
+        : pr.title
+            .replace(/\*/g, 'x')
+            .toLowerCase()
+            .replace(/[^a-z0-9_]+/g, '-');
       const tempBranch = `trop/${targetBranch}-bp-${sanitizedTitle}-${Date.now()}`;
 
-      // First try to backport all commits in the original PR, and if they
-      // don't apply, the squash commit(s). Both are tried in one sandbox job.
       const tryOpts = {
         context,
         repoAccessToken,
@@ -807,28 +919,59 @@ export const backportStackImpl = async (
         slug,
         targetBranch,
       };
+
+      // First try to backport all commits of the PRs, and if they don't
+      // apply, their squash commit(s). Both are tried in one sandbox job.
+      const getAttempts = async (unitPrs: WebHookPR[]) => {
+        const opts = { ...tryOpts, prs: unitPrs };
+        let squashError: unknown;
+        const attempts = (
+          await Promise.all([
+            getAllCommitsAttempt(opts),
+            // Fetched up front so both run in one sandbox job; trop used to
+            // fetch it only after the first attempt failed, so a failure to
+            // fetch it doesn't fail the backport.
+            getSquashAttempt(opts).catch((error: unknown) => {
+              log(
+                'backportImpl',
+                LogLevel.WARN,
+                'Could not fetch the squash commit(s)',
+                error,
+              );
+              // A patch `git am` could never apply just fails the attempt;
+              // anything else only matters if the squash is needed.
+              if (!(error instanceof PatchError)) squashError = error;
+              return null;
+            }),
+          ])
+        ).filter((attempt): attempt is BackportAttempt => attempt !== null);
+        return { attempts, squashError };
+      };
+
+      // The units handed to the sandbox, by index into `units`: a unit with
+      // nothing to backport can't apply, so it is left out up front.
+      const candidates: { index: number; attempts: BackportAttempt[] }[] = [];
       let squashError: unknown;
-      const attempts = (
-        await Promise.all([
-          getAllCommitsAttempt(tryOpts),
-          // Fetched up front so both run in one sandbox job; trop used to
-          // fetch it only after the first attempt failed, so a failure to
-          // fetch it doesn't fail the backport.
-          getSquashAttempt(tryOpts).catch((error: unknown) => {
-            log(
-              'backportImpl',
-              LogLevel.WARN,
-              'Could not fetch the squash commit(s)',
-              error,
-            );
-            // A patch `git am` could never apply just fails the attempt;
-            // anything else only matters if the squash is needed.
-            if (!(error instanceof PatchError)) squashError = error;
-            return null;
-          }),
-        ])
-      ).filter((attempt): attempt is BackportAttempt => attempt !== null);
-      if (attempts.length === 0) {
+      for (const [index, unit] of units.entries()) {
+        const found = await getAttempts(unit);
+        if (
+          batch &&
+          found.squashError instanceof SandboxInfraError &&
+          found.squashError.retryable &&
+          !found.attempts.some((a) => a.kind === 'all')
+        ) {
+          // Only its squash commit(s) might apply this unit, and GitHub did
+          // not answer for them: retry the batch rather than leave it out.
+          throw found.squashError;
+        }
+        // Otherwise a unit of a batch with nothing that can be applied is
+        // left out below, like one that conflicts.
+        if (!batch) squashError = found.squashError;
+        if (found.attempts.length > 0) {
+          candidates.push({ index, attempts: found.attempts });
+        }
+      }
+      if (candidates.length === 0) {
         if (squashError instanceof SandboxInfraError) throw squashError;
         throw new Error(`Found nothing to backport to ${targetBranch}`);
       }
@@ -836,7 +979,9 @@ export const backportStackImpl = async (
       log(
         'backportImpl',
         LogLevel.INFO,
-        `Applying ${attempts.map((a) => a.kind).join(', then ')} patches to "${targetBranch}" for temp: "${tempBranch}"`,
+        `Applying ${candidates
+          .map((c) => c.attempts.map((a) => a.kind).join(', then '))
+          .join('; ')} patches to "${targetBranch}" for temp: "${tempBranch}"`,
       );
 
       const timer = Date.now();
@@ -844,7 +989,9 @@ export const backportStackImpl = async (
         slug,
         token: repoAccessToken,
         targetBranch,
-        attempts,
+        ...(batch
+          ? { attempts: [], members: candidates.map((c) => c.attempts) }
+          : { attempts: candidates[0].attempts }),
         includeChanges: purpose === BackportPurpose.ExecuteBackport,
         // Push the commits to the target repo.
         onSuccess:
@@ -904,20 +1051,38 @@ export const backportStackImpl = async (
         throw new Error(`Cherry picking commit(s) to branch failed`);
       }
 
+      // The units left out of a batch: those with nothing to backport and
+      // those that did not apply.
+      const kept = new Set(
+        candidates
+          .filter((_, i) => !outcome.dropped?.includes(i))
+          .map((c) => c.index),
+      );
+      const included = units.filter((_, i) => kept.has(i));
+      const dropped = units.filter((_, i) => !kept.has(i));
+      const includedPrs = included.flat();
+      const includedTops = included.map((unit) => unit[unit.length - 1]);
+      const driver = includedPrs[includedPrs.length - 1];
+
       if (purpose === BackportPurpose.ExecuteBackport) {
         log('backportImpl', LogLevel.INFO, 'Creating Pull Request');
 
-        const branchAwarePrTitle = pr.title.replaceAll(
-          `(${getEffectiveBaseRef(pr)})`,
-          `(${targetBranch})`,
-        );
+        const title =
+          included.length > 1
+            ? `chore: batch backport of ${includedTops
+                .map((top) => `#${top.number}`)
+                .join(', ')}`
+            : driver.title.replaceAll(
+                `(${getEffectiveBaseRef(driver)})`,
+                `(${targetBranch})`,
+              );
 
         const { data: newPr } = await context.octokit.pulls.create(
           context.repo({
             head: `${tempBranch}`,
             base: targetBranch,
-            title: branchAwarePrTitle,
-            body: await createBackportComment(context, prs),
+            title,
+            body: await createBackportComment(context, includedPrs),
             maintainer_can_modify: false,
           }),
         );
@@ -925,24 +1090,30 @@ export const backportStackImpl = async (
         await tagBackportReviewers({
           context,
           targetPrNumber: newPr.number,
-          users: [pr.user.login],
+          // A stack's backport is reviewed by the author of its top PR, a
+          // batch's by the authors of all its PRs.
+          users: batch
+            ? includedPrs.map((p) => p.user.login)
+            : [driver.user.login],
         });
 
-        log(
-          'backportImpl',
-          LogLevel.INFO,
-          `Adding breadcrumb comment to ${pr.number}`,
-        );
-        await context.octokit.issues.createComment(
-          context.repo({
-            issue_number: pr.number,
-            body: `I have automatically backported this PR to "${targetBranch}", \
+        for (const top of includedTops) {
+          log(
+            'backportImpl',
+            LogLevel.INFO,
+            `Adding breadcrumb comment to ${top.number}`,
+          );
+          await context.octokit.issues.createComment(
+            context.repo({
+              issue_number: top.number,
+              body: `I have automatically backported this PR to "${targetBranch}"${batch ? ' as part of a batch backport' : ''}, \
     please check out #${newPr.number}`,
-          }),
-        );
+            }),
+          );
+        }
 
         // Every backported PR gets its labels updated, not only the top one.
-        for (const member of prs) {
+        for (const member of includedPrs) {
           // TODO(codebytere): getOriginalBackportNumber doesn't support multi-backports yet,
           // so only try if the backport is a single backport.
           const backportNumbers = getPRNumbersFromPRBody(member);
@@ -961,6 +1132,14 @@ export const backportStackImpl = async (
               originalPRNumber,
               labelToRemove,
             );
+            // A batch member keeps waiting for as long as it has the label.
+            if (batch && originalPRNumber !== member.number) {
+              await labelUtils.removeLabel(
+                context,
+                member.number,
+                labelToRemove,
+              );
+            }
           }
 
           if (labelToAdd?.startsWith(PRStatus.IN_FLIGHT)) {
@@ -974,7 +1153,7 @@ export const backportStackImpl = async (
 
         const labelsToAdd = [BACKPORT_LABEL, `${targetBranch}`];
 
-        for (const member of prs) {
+        for (const member of includedPrs) {
           if (await shouldRequestBackportApproval(context, member)) {
             log(
               'backportImpl',
@@ -986,7 +1165,7 @@ export const backportStackImpl = async (
           }
         }
 
-        const semverLabel = getStackSemverLabel(prs);
+        const semverLabel = getStackSemverLabel(includedPrs);
         if (semverLabel) {
           // If the new PR for some reason has a semver label already, then
           // we need to compare the two semver labels and ensure the higher one
@@ -1013,27 +1192,53 @@ export const backportStackImpl = async (
 
         await labelUtils.addLabels(context, newPr.number, labelsToAdd);
 
+        for (const unit of dropped) {
+          const top = unit[unit.length - 1];
+          log(
+            'backportImpl',
+            LogLevel.INFO,
+            `#${top.number} did not apply to "${targetBranch}" - leaving it out of #${newPr.number}`,
+          );
+          await context.octokit.issues.createComment(
+            context.repo({
+              issue_number: top.number,
+              body: `I was unable to backport this PR to "${targetBranch}" cleanly on top of the other PRs of its batch, so it was left out of #${newPr.number}; \
+you will need to perform this ${MANUAL_BACKPORT_LINK}.`,
+            }),
+          );
+          await flagForManualBackport(context, unit, targetBranch);
+          await markBackportCheckFailed(
+            context,
+            checkRuns.get(top.number)!,
+            targetBranch,
+            {},
+          );
+        }
+
         log('backportImpl', LogLevel.INFO, 'Backport process complete');
       }
 
-      log(
-        'backportImpl',
-        LogLevel.INFO,
-        `Updating check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with conclusion 'success'`,
-      );
+      for (const top of includedTops) {
+        const checkRun = checkRuns.get(top.number)!;
+        log(
+          'backportImpl',
+          LogLevel.INFO,
+          `Updating check run '${CHECK_PREFIX}${targetBranch}' (${checkRun.id}) with conclusion 'success'`,
+        );
 
-      await context.octokit.checks.update(
-        context.repo({
-          check_run_id: checkRun.id,
-          name: checkRun.name,
-          conclusion: 'success' as const,
-          completed_at: new Date().toISOString(),
-          output: {
-            title: 'Clean Backport',
-            summary: `This PR was checked and can be backported to "${targetBranch}" cleanly.`,
-          },
-        }),
-      );
+        await context.octokit.checks.update(
+          context.repo({
+            check_run_id: checkRun.id,
+            name: checkRun.name,
+            conclusion: 'success' as const,
+            completed_at: new Date().toISOString(),
+            output: {
+              title: 'Clean Backport',
+              summary: `This PR was checked and can be backported to "${targetBranch}" cleanly.`,
+            },
+          }),
+        );
+      }
     },
     async (error: unknown) => {
       if (error instanceof SandboxInfraError && error.retryable) {
@@ -1048,20 +1253,27 @@ export const backportStackImpl = async (
           `${bp} for "${slug}" stopped by an internal error`,
           error,
         );
-        if (purpose === BackportPurpose.ExecuteBackport) {
-          await context.octokit.issues.createComment(
-            context.repo({
-              issue_number: pr.number,
-              body: `An internal error stopped me from backporting this PR to "${targetBranch}"; this is not a merge conflict. To try again, comment \`/trop run backport-to ${targetBranch}\`.`,
-            }),
+        retryable = true;
+        for (const top of tops) {
+          if (purpose === BackportPurpose.ExecuteBackport) {
+            // A batch keeps its `target/*` labels, so it is still queued and
+            // `/trop run backport` on any of its PRs runs it again.
+            await context.octokit.issues.createComment(
+              context.repo({
+                issue_number: top.number,
+                body: batch
+                  ? `An internal error stopped me from backporting this PR to "${targetBranch}" as part of a batch backport; this is not a merge conflict. I will try again in a few minutes; to try again now, comment \`/trop run backport\`.`
+                  : `An internal error stopped me from backporting this PR to "${targetBranch}"; this is not a merge conflict. To try again, comment \`/trop run backport-to ${targetBranch}\`.`,
+              }),
+            );
+          }
+          await markBackportCheckFailed(
+            context,
+            await getCheckRun(top),
+            targetBranch,
+            { infraError: true },
           );
         }
-        const checkRun = await getOrCreateCheckRun(context, pr, targetBranch, {
-          supersedeCompleted: purpose === BackportPurpose.Check,
-        });
-        await markBackportCheckFailed(context, checkRun, targetBranch, {
-          infraError: true,
-        });
         return;
       }
 
@@ -1110,36 +1322,30 @@ export const backportStackImpl = async (
       }
 
       if (purpose === BackportPurpose.ExecuteBackport) {
-        await context.octokit.issues.createComment(
-          context.repo({
-            issue_number: pr.number,
-            body: `I was unable to backport this PR to "${targetBranch}" cleanly;
-   you will need to perform this [backport manually](https://github.com/electron/trop/blob/main/docs/manual-backports.md#manual-backports).`,
-          }),
-        );
-
-        const labelToRemove = PRStatus.TARGET + targetBranch;
-        const labelToAdd = PRStatus.NEEDS_MANUAL + targetBranch;
-        for (const member of prs) {
-          await labelUtils.removeLabel(context, member.number, labelToRemove);
-
-          const originalBackportNumber = await getOriginalBackportNumber(
-            context,
-            member,
+        for (const top of tops) {
+          await context.octokit.issues.createComment(
+            context.repo({
+              issue_number: top.number,
+              body: `I was unable to backport this PR to "${targetBranch}" cleanly;
+   you will need to perform this ${MANUAL_BACKPORT_LINK}.`,
+            }),
           );
-          await labelUtils.addLabels(context, originalBackportNumber, [
-            labelToAdd,
-          ]);
         }
+        await flagForManualBackport(context, prs, targetBranch);
       }
 
-      const checkRun = await getOrCreateCheckRun(context, pr, targetBranch, {
-        supersedeCompleted: purpose === BackportPurpose.Check,
-      });
-      await markBackportCheckFailed(context, checkRun, targetBranch, {
-        rawDiff: diff ? rawDiff : undefined,
-        annotations: annotations ? annotations : undefined,
-      });
+      for (const top of tops) {
+        await markBackportCheckFailed(
+          context,
+          await getCheckRun(top),
+          targetBranch,
+          {
+            rawDiff: diff ? rawDiff : undefined,
+            annotations: annotations ? annotations : undefined,
+          },
+        );
+      }
     },
+    () => onSettled?.(retryable),
   );
 };
