@@ -22,7 +22,7 @@ import {
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
 const POLL_INTERVAL_MS = 3000;
 
-/** Labels every sandbox Job (and its pod) carries; the NetworkPolicies key on them. */
+/** Labels every sandbox Job (and its pod) carries; the NetworkPolicies (here and electron/infra's platform-server) key on them. */
 export const SANDBOX_LABELS = {
   'app.kubernetes.io/part-of': 'trop',
   'app.kubernetes.io/component': 'sandbox',
