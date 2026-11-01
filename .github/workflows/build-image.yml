@@ -34,10 +34,10 @@ jobs:
           persist-credentials: false
       # docker/setup-buildx-action v4.0.0
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       # azure/login v3.0.0
       - name: Azure login (OIDC)
-        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906
         with:
           client-id: ${{ secrets.AZURE_ACR_PUSH_CLIENT_ID }}
           tenant-id: ${{ secrets.IONIC_PLATFORM_AZURE_TENANT_ID }}
@@ -46,7 +46,7 @@ jobs:
         run: az acr login --name electronionicplatform
       # docker/build-push-action v7.0.0
       - name: Build and push
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
         with:
           context: .
           file: ./Dockerfile
